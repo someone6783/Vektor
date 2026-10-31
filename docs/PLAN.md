@@ -1,6 +1,6 @@
 # Vektor Product Plan
 
-Status: v0.5 · 2026-10-31
+Status: v0.6 · 2026-10-31
 Approval: Scope and Phase 0 accepted on 2026-10-31. Implementation may begin with Phase 1. OCR remains deferred, and v1 uses a single local access token.
 
 ## Product summary
@@ -16,6 +16,8 @@ Vektor is a single-user, local-first AI workspace. It combines:
 - **Two shells** — Docker for the server, an optional Tauri app for the desktop.
 
 Non-goals for v1 are listed under [Explicitly deferred](#explicitly-deferred).
+
+After the first release, the roadmap adds browser use (Phase 9), computer use (Phase 10), and Codex harness integration (Phase 11). These are planned capabilities with their own exit criteria, not requirements for the first usable release.
 
 ## Approval gate
 
@@ -55,7 +57,7 @@ Accepted: single user, no accounts. The API requires a locally generated access 
 
 V1 uses a Vektor-owned loop. The API calls OpenRouter chat completions with streaming and tool calling, executes tools itself, and persists every event. Permissions, approvals, audit, cancellation, and scheduling all sit inside a loop we control.
 
-After v1, a runner interface adds a CLI adapter for heavy coding tasks. All runners share the same run-event contract, approval model, and audit trail; see [After v1 — Hybrid CLI runner](#after-v1--hybrid-cli-runner).
+After v1, a runner interface adds the Codex harness as an optional execution backend for coding and longer-running agent tasks. All runners share Vektor's run-event contract, approval model, and audit trail; see [Phase 11 — Codex harness and hybrid runners](#phase-11--codex-harness-and-hybrid-runners). Browser and computer tools are separate permissioned capabilities in Phases 9–10, not implicit grants from choosing a runner.
 
 ### D5. Streaming and run events — accepted
 
@@ -91,8 +93,8 @@ Accepted for v1:
 Accepted semantics, enforced by the API rather than by prompt instructions:
 
 - **No-terminal** — no command execution tool is exposed to the model.
-- **Basic** — commands run as the unprivileged container user, `cwd` jailed to `/data/workspace`, environment stripped of secrets, per-command timeout and output cap, no Docker socket. This is a guardrail, not a hardened sandbox; the container boundary is the real isolation. The UI says so.
-- **Full access** — unrestricted paths inside the container, with a warning, an approval prompt for destructive or privileged commands, and full audit logging.
+- **Basic** — commands run as the unprivileged container user with checked paths inside `/data/workspace`, restricted commands/options, no implicit shell, an environment stripped of secrets, per-command timeout and output cap, and no Docker socket. This is a guardrail, not a hardened sandbox; the container boundary is the real isolation. The UI says so.
+- **Full access** — unrestricted paths inside the container, with a warning, approval before every command (including destructive or privileged commands), and full audit logging.
 
 All modes get run timelines, cancellation, and audit entries. The global emergency stop kills active runs, their process groups, and the scheduler's pending work. On desktop, full access also warns that commands run on the host, not in a container.
 
@@ -102,7 +104,7 @@ Accepted: Tauri wraps the built web UI and connects to a backend URL chosen on f
 
 ### D13. Version 1 provider scope — accepted
 
-Accepted: OpenRouter only, using its model list and usage reporting. The provider layer is an internal interface so another provider can be added later without changing the UI.
+Accepted: OpenRouter only for v1, using its model list and usage reporting. The provider layer is an internal interface so another provider can be added later without changing the UI. Phase 11's Codex harness is a separate post-v1 runner integration with its own authentication and capability checks; it is not merely a Codex-named model selected through OpenRouter.
 
 ### D14. Releases and update checks — accepted
 
@@ -116,7 +118,7 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 │  (or Tauri)  │                │  ├─ settings / secrets       │
 └──────────────┘                │  ├─ profiles / channels      │
                                 │  ├─ agent runner ── OpenRouter│
-                                │  │   (CLI adapter post-v1)    │
+                                │  │   (Codex harness post-v1)  │
                                 │  ├─ tool executor ── terminal │
                                 │  ├─ scheduler                │
                                 │  └─ SSE event hub            │
@@ -136,7 +138,7 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 
 1. Client posts a message; the API stores it and creates a run.
 2. The runner assembles context: profile prompt, recent conversation history, selected attachments, tool definitions.
-3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the CLI adapter arrives after v1.
+3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the Codex harness adapter arrives in Phase 11 after v1.
 4. Tool calls pause the run if they need approval; the UI resolves the approval and the run resumes.
 5. On completion the assistant message, usage, and final status are persisted; the event stream closes.
 6. Cancel sets the run to `cancelled`, aborts the provider request, and kills any child process group.
@@ -315,7 +317,7 @@ Exit criteria: configure a key, create a profile, create a channel, receive a st
 
 ## Phase 3 — Files and context
 
-Status (2026-10-31): implemented and ready for sign-off. Local verification passes lint, typecheck, tests (70 passed; the opt-in live OpenRouter test skipped), and production build. Docker build, production API smoke checks, and container restart persistence all pass.
+Status (2026-10-31): implemented and signed off by the user's instruction to start Phase 4. Local verification passes lint, typecheck, tests (70 passed at Phase 3 completion; the opt-in live OpenRouter test skipped), and production build. Docker build, production API smoke checks, and container restart persistence all pass.
 
 - [x] File uploads and local storage: authenticated multipart uploads, private UUID-named originals in `/data/files`, attachment metadata and message links in SQLite, and an additive migration preserving Phase 2 data.
 - [x] Image paste and drag-and-drop, multi-file selection, attachment-only sends, and upload/error feedback.
@@ -334,13 +336,22 @@ Exit criteria: attach a PDF and an image, see previews, include only one of them
 
 ## Phase 4 — Terminal permissions and runtime controls
 
-- Implement no-terminal mode.
-- Implement basic terminal sandbox.
-- Implement full-access mode with warnings and approvals.
-- Add run timeline, tool-call display, cancellation, retry, and audit log.
-- Add global emergency stop.
+Status (2026-10-31): implemented and ready for sign-off. Verification passes lint, formatting, typecheck, production build, 93 automated tests (one opt-in live OpenRouter test skipped), and Docker runtime/restart checks.
 
-Details: mode matrix enforced server-side, workspace jail and scrubbed environment in basic mode, approval prompts and destructive-command denylist in full mode, process-group kill, audit viewer, and an emergency stop that halts all active runs and the scheduler.
+- [x] No-terminal mode: no terminal definition is sent to the provider; unsolicited calls are rejected and audited. Terminal access also requires `terminal` in the profile's enabled tools.
+- [x] Basic terminal guardrail: direct execution of `pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `mkdir`, and `touch` with restricted options, workspace boundary checks, rejection of symlink paths and non-regular files, and no shell/interpreter access.
+- [x] Full-access mode: profile warning and acknowledgement, exact command/argument/cwd approval before every command, durable pending/approved/denied/cancelled decisions, and a server-side permission recheck immediately before execution. Approvals resolve once and cannot be reused after cancellation or restart.
+- [x] Bounded provider/tool loop: OpenRouter tool definitions, correlated assistant tool calls and results, at most eight rounds/eight calls per round, cumulative usage, context/output checks, and a run deadline covering streaming, commands, and approval waits.
+- [x] Per-channel run history, persisted tool input/output/status and event timelines, global active-run cancellation, retry from historical runs with context review, and a paginated durable audit viewer. Profile permission changes, command requests/denials/execution, approvals, run outcomes, recovery, and global stop/resume are audited.
+- [x] Global emergency stop: latch the stop flag, abort/finalize active runs, cancel pending approvals, kill supervised process groups, and reject new sends/retries until explicit resume. The latch survives restart. Phase 5's scheduler must use the same start gate; no scheduler exists yet.
+
+Execution policy: basic mode is a restricted command guardrail rather than an arbitrary shell with a changed working directory. Full mode requires approval for all commands, avoiding reliance on a destructive-command blacklist that shell wrappers could bypass. Both modes use a fresh environment containing only `PATH`, `HOME`, `TMPDIR`, and `LANG`, a private umask, detached process groups, a supervisor that terminates the group if its API pipe disappears, and known-credential redaction before output persistence. Commands default to a 15-second timeout; basic caps at 15 seconds, full permits up to 60 seconds. Output is capped at 64 KiB and overflow terminates the group. Runs default to a two-minute deadline, configurable with `VEKTOR_RUN_TIMEOUT_MS` (one second to ten minutes).
+
+Boundary: Docker execution uses the unprivileged container account. A directly launched backend executes on its host account; the UI identifies the environment. Basic path checks are not kernel filesystem isolation and cannot defend against hostile concurrent filesystem changes or pre-existing hard links. Full-access commands can alter any path the backend account can access; approval is not privilege escalation. Process-group cleanup does not promise containment of deliberately daemonized/new-session processes in full mode. Windows requires a POSIX/Docker backend. Hardened OS sandboxing remains outside this guardrail implementation.
+
+Verification: tests exercise traversal and symlink rejection, restricted options/tool switches, stripped environment, split-output secret redaction, output/time limits, shell-child process-group termination, supervisor pipe loss, approval/denial and revocation, one-time decisions, immediate cancellation of an uncooperative provider with partial output preserved, repeated-call limits, run deadlines, restart recovery without command replay, emergency-stop persistence, and migration from Phase 3. UI tests cover approval/denial, stop/resume, exact command display and host/container warnings, historical tool input/output, retry, audit pagination, and full-access acknowledgement. Live OpenRouter tool calls and manual browser interaction are not part of this verification pass.
+
+Packaged verification: a disposable production container with a local OpenRouter-compatible fixture exercised no-terminal denial, basic `pwd`, rejection of `/data/access-token` outside the workspace, approval-gated deletion of a test marker, tool-result correlation, cumulative usage, and persisted audit records. Emergency stop ended an active shell and its `sleep` child in 7 ms, marked the run/tool cancelled, and blocked new sends. After restart, the stop latch, tool history, and audit records persisted; no command replayed, and explicit resume cleared the latch without starting work. The disposable container and test data were removed afterward.
 
 Exit criteria: a basic-mode command cannot escape the workspace and is audited; a full-mode destructive command blocks on approval; emergency stop ends a long-running command within a few seconds.
 
@@ -401,17 +412,64 @@ Details: the repository is public, so release metadata needs no GitHub token. If
 
 Exit criteria: pushing a `v*` tag publishes a tagged image and GitHub Release with no manual steps; an older running instance reports the newer version within the cache window and links to the upgrade instructions; with no network the instance keeps working and shows "unable to check" instead of an error.
 
-## After v1 — Hybrid CLI runner
+## Phase 9 — Browser use (after v1)
 
-Planned, not part of the first usable release. This is the second half of D4.
+Goal: let an explicitly enabled profile operate a managed browser, with navigation, page understanding, and approved interactions visible in the run timeline.
 
-- Introduce a runner interface with `native` (the OpenRouter loop) and `cli` adapters.
-- CLI runs reuse `run_events`, approvals, audit, and cancellation; stdout/stderr become streamed events, and the process group is killed on cancel.
-- A CLI runner requires basic or full terminal mode; no-terminal profiles reject it.
-- Per-profile runner selection, a compatibility check for the installed CLI, and a clear "commands run on this machine" warning.
-- Normalize CLI tool and file events into the existing run timeline rather than inventing a parallel UI.
+Dependencies: first usable release (Phases 1–8), including Phase 4's approval/stop controls and Phase 7's backup, logging, and recovery work. Implementation starts after the previous phase is demonstrated and signed off.
 
-Exit criteria: a conversation can use either runner with identical timeline, cancel, approval, and audit behavior.
+- [ ] Add a browser-controller interface for navigation, tabs, DOM/accessibility snapshots, screenshots, element selection, click, typing, scrolling, and bounded waits. Select and pin the browser engine/controller during this phase's design review.
+- [ ] Add per-profile browser access: off by default, observation-only, or interactive. Enforce capabilities in the backend; terminal mode does not grant browser access, and no-terminal profiles can only use browser capabilities explicitly enabled for them.
+- [ ] Run a dedicated browser session per run by default. Keep it separate from the user's personal browser; offer explicitly managed persistent sessions only with clear cookie/storage ownership, disconnect, and reset controls.
+- [ ] Define allowed origins and redirect checks. Block private-network, loopback, metadata-service, and local-file access by default; require an explicit scoped grant for local application testing. Apply the same network rules to subrequests and downloads, not just the initial URL.
+- [ ] Distinguish observation from actions: observation mode exposes navigation and extraction but no form submission or mutation controls. Explain that navigating to an external site still makes network requests; it is not a guarantee that the site has no side effects.
+- [ ] Route submissions, posting/sending, purchases, account changes, and other consequential actions through Vektor approvals bound to the current origin, target, and action. Expire or re-confirm approval when the page/target changes; never reuse approval for a different action.
+- [ ] Support uploads and downloads only through approved attachment/workspace paths, with file size/type limits and previews. Do not expose backend keys, arbitrary host files, or personal browser credentials to page content.
+- [ ] Show browser actions, origin, relevant screenshots/snapshots, results, and errors in the existing timeline. Treat page content as untrusted input; it cannot change permissions or approve its own instructions. Apply artifact retention and redaction controls.
+- [ ] Add user takeover, pause, cancellation, bounded action/time limits, and emergency-stop cleanup of the browser session. Scheduled jobs must declare their browser capability and pause for approval rather than assuming unattended interaction is allowed.
+- [ ] Test deterministic local pages for navigation, extraction, interaction, redirects/network boundaries, injection attempts, file boundaries, denied actions, approval expiry, session cleanup, and restart behavior.
+
+Exit criteria: a profile can inspect a test page, fill a form in interactive mode, and pause before submission; denial prevents submission, approval permits only that action, and emergency stop terminates the session. Observation-only mode cannot submit, and unapproved network/file targets remain blocked.
+
+## Phase 10 — Computer use (after v1)
+
+Goal: let an explicitly enabled profile interact with applications through screenshots, pointer actions, and keyboard input in a controlled desktop session.
+
+Dependencies: Phase 9 plus a reviewed desktop-session isolation and permission design. The Phase 6 Tauri shell alone does not grant OS control or turn a remote Docker backend into a host automation agent.
+
+- [ ] Introduce a computer-session interface for screenshots, screen geometry, pointer movement/click/drag/scroll, keyboard input, and application/window selection, with a capability check for the chosen model's image/tool support.
+- [ ] Start with an isolated virtual desktop/container or VM with its own display, files, and credentials. Host-desktop attachment is a separate opt-in milestone requiring a local bridge, explicit OS permissions, a visible connected-session indicator, and a revocable grant.
+- [ ] Add per-profile computer access off by default, separately from browser and terminal permissions. Scope grants to a particular desktop/session and supported applications; never infer permission to control the whole host from full terminal access.
+- [ ] Provide a user-visible session preview, action target, pause/takeover, and an action timeline with before/after screenshots. Validate screen coordinates and discard queued actions when display geometry, session, or foreground target changes.
+- [ ] Require confirmation for consequential actions, including sending/submitting, installing software, changing security/account settings, and deleting files. Handle login, password, payment, and other sensitive fields through user takeover without logging keystrokes or putting secrets into model-visible screenshots.
+- [ ] Keep clipboard, filesystem transfer, and external network access disabled unless separately granted. Reuse approved attachment paths and download limits, and define screenshot access, retention, deletion, and redaction behavior.
+- [ ] Enforce bounded action/time budgets, cancellation, and emergency stop that releases held keys/buttons, clears queued input, revokes control, and terminates the isolated session. Restart must not resume clicks or keystrokes automatically.
+- [ ] For scheduled computer tasks, require an isolated session and explicit unattended policy; pending human approval pauses the job. Do not allow scheduled tasks to seize the user's active desktop implicitly.
+- [ ] Test against controlled desktop applications, including scaling/multiple-display changes, stale targets, permission denial, prompt injection in screenshots, sensitive-field takeover, cancellation during drag/typing, and restart recovery.
+
+Exit criteria: a profile completes a benign task in an isolated test desktop with visible actions; a consequential step pauses for approval, revoked access prevents further input, and emergency stop halts input and releases keys/buttons. The user's real desktop remains untouched unless a separate host-control grant was explicitly made.
+
+## Phase 11 — Codex harness and hybrid runners (late plan, after v1)
+
+Goal: add the Codex agent harness as an optional runner while retaining Vektor's native OpenRouter loop, workspace UI, permissions, and execution history. This makes the existing hybrid-runtime plan in D4 concrete.
+
+Dependencies: Phase 8's release/versioning foundation and Phases 9–10's capability contracts. Integration is scheduled after browser/computer use; the first Codex milestone may expose only capabilities whose enforcement and event mapping have been verified.
+
+Integration proposal: prefer a locally managed Codex app-server connection over stdio for the interactive Vektor experience. Official documentation describes app-server's thread/turn lifecycle, streamed events, interruption, and approval requests, while the Codex SDK and `codex exec` cover other programmatic/job workflows. Re-evaluate the supported interface and authentication requirements when implementation starts. Sources: [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) and [Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform).
+
+- [ ] Introduce a versioned runner interface with explicit `native` and `codex` identities; migrate stored runner values/shared contracts and reserve a generic `cli` adapter for other future integrations. Provide per-profile selection and an explicit per-run override without silently switching runners on failure.
+- [ ] Add Codex installation/version discovery, a compatibility probe, process/session health, and setup diagnostics. Document local and Docker packaging without requiring users to install Codex for the native runner.
+- [ ] Add separate Codex authentication/account configuration using officially supported mechanisms. Keep credentials write-only/protected, surface missing access and usage limits, and distinguish Codex billing/model availability from OpenRouter. Do not assume an OpenRouter key or a particular subscription grants Codex access.
+- [ ] Map Vektor conversations and runs to Codex thread/turn identifiers. Persist the mapping and lifecycle cursor, support deliberate resume/reconnect, and prevent duplicate turns or command replay after interruption/restart.
+- [ ] Normalize streamed messages, tool calls/output, proposed file changes/diffs, approval requests, usage, errors, and completion into Vektor's timeline/audit contracts. Preserve identifiers for traceability and label provider metrics that are unavailable rather than fabricating them.
+- [ ] Translate Vektor's filesystem/network permissions and approval decisions into supported Codex controls. Do not equate similarly named sandbox modes with identical guarantees. Reject unsupported mappings or disable the capability; never widen permissions or approve a harness request automatically to make a run proceed.
+- [ ] Initially reject the Codex runner for no-terminal profiles unless the integration can prove command execution is disabled. Basic mode must preserve Vektor's effective restrictions; expose it only after verifying enforcement. Full-access command/file-change approvals must remain visible and attributable in Vektor.
+- [ ] Supply only explicitly selected conversation/file context and scoped workspace access. Define which layer owns compaction/context limits, distinguish harness estimates from actual usage, and keep excluded attachments and backend credentials out of implicit context sources.
+- [ ] Reuse browser/computer controllers only through capability-checked adapters that preserve Phases 9–10's session boundaries and approvals. A harness runner must not gain browser, computer, network, integration, or file access merely because the underlying tool exists.
+- [ ] Bridge cancellation and emergency stop to turn interruption plus supervised process/session cleanup. Resolve pending approvals as cancelled, preserve the global stop latch, and require explicit action before resuming interrupted work. Scheduled Codex jobs use the same execution gate and history as native jobs.
+- [ ] Add protocol fixtures and compatibility tests for event ordering, reconnect/duplicate delivery, approval/denial, unsupported permissions, missing/expired authentication, cancellation, process death, and version drift. Re-check official interfaces before each supported harness upgrade.
+
+Exit criteria: the same Vektor workspace can run a native conversation and a Codex-backed task with clearly labelled runner/model/auth state, streamed progress, reviewable file/tool actions, durable history, and working cancel/emergency stop. Unsupported permission combinations are rejected before execution; Codex disconnect or unavailability leaves the native runner usable without automatically resubmitting the task.
 
 ## After v1 — External service integrations
 
@@ -427,7 +485,9 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 
 ## Explicitly deferred
 
-- Browser automation.
+- Browser use/automation until Phase 9 (planned after v1).
+- Computer use and desktop automation until Phase 10 (planned after v1).
+- Codex harness and hybrid-runner integration until Phase 11 (late plan, after v1).
 - Multi-user accounts and collaboration.
 - Visual workflow builder.
 - Distributed microservices.
@@ -437,7 +497,7 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 - Marketplace/plugin ecosystem.
 - Complex multi-agent planning graphs.
 
-Also deferred: conversation threads and reactions, OCR for scanned PDFs, providers other than OpenRouter, and a bundled desktop backend.
+Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, and the Codex harness are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
 
 ## Definition of the first usable release
 
@@ -466,20 +526,24 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 - **Secret leakage.** Tool output and error messages can echo environment variables; redact before persisting or logging.
 - **Context drift.** Long conversations and large attachments can silently truncate; the usage meter and inclusion controls must reflect what is actually sent.
 - **Desktop divergence.** Full-access commands on the host are more dangerous than inside Docker; the desktop build needs its own warning and approval defaults.
-- **CLI adapter drift.** External CLIs change flags and event formats; pin versions, detect capabilities, and fail closed to the native runner.
+- **CLI adapter drift.** External CLIs change flags and event formats; pin versions, detect capabilities, and fail closed. Switching to the native runner requires an explicit choice rather than automatic task resubmission.
+- **Browser boundaries.** Pages can redirect, contact private services, expose session cookies, or contain instructions aimed at the agent. Network/action grants, separate sessions, scoped approvals, and artifact controls must be enforced outside the model.
+- **Computer control.** Stale coordinates, focus changes, sensitive screenshots, and held input can affect the wrong application. Begin with isolated sessions; host control requires explicit OS grants, visible takeover, and tested stop behavior.
+- **Harness policy mismatch.** Codex permissions, authentication, event schemas, and compaction may differ from Vektor's. Verify effective restrictions, pin supported interfaces, and reject unsupported configurations instead of widening access or silently changing runners.
 - **Update checks.** GitHub's API is rate-limited and may be unreachable; checks must be cached, optional, and must never block startup or reveal local data.
 
 ## Decision log
 
-| Date       | Decision                                                                                           | Status   |
-| ---------- | -------------------------------------------------------------------------------------------------- | -------- |
-| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks                    | Draft    |
-| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts                | Accepted |
-| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1                                 | Accepted |
-| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred                                        | Accepted |
-| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such                              | Accepted |
-| 2026-10-31 | D14: GitHub Actions publishes releases; Vektor checks GitHub Releases for updates, no auto-install | Accepted |
-| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults                                           | Accepted |
-| 2026-10-31 | OCR for scanned PDFs deferred; PDFs without a text layer are rejected with a clear message         | Accepted |
-| 2026-10-31 | Auth: single local access token, no accounts                                                       | Accepted |
-| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist                  | Accepted |
+| Date       | Decision                                                                                                                                                  | Status   |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks                                                                           | Draft    |
+| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts                                                                       | Accepted |
+| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1                                                                                        | Accepted |
+| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred                                                                                               | Accepted |
+| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such                                                                                     | Accepted |
+| 2026-10-31 | D14: GitHub Actions publishes releases; Vektor checks GitHub Releases for updates, no auto-install                                                        | Accepted |
+| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults                                                                                                  | Accepted |
+| 2026-10-31 | OCR for scanned PDFs deferred; PDFs without a text layer are rejected with a clear message                                                                | Accepted |
+| 2026-10-31 | Auth: single local access token, no accounts                                                                                                              | Accepted |
+| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist                                                                         | Accepted |
+| 2026-10-31 | Plan v0.6: add post-v1 browser use (Phase 9), computer use (Phase 10), and late Codex harness/hybrid runners (Phase 11); preserve the first-release scope | Planned  |
