@@ -11,6 +11,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
 import { RuntimeControls } from "./components/RuntimeControls";
 import { AuditView } from "./components/AuditView";
+import { SchedulesView } from "./components/SchedulesView";
 import { ApiClient, ApiError } from "./lib/api";
 import { applyRunEvent, startLiveRun, type LiveRun } from "./lib/live";
 
@@ -118,7 +119,7 @@ export default function App() {
   const [tokenDraft, setTokenDraft] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"chat" | "settings" | "audit">("chat");
+  const [view, setView] = useState<"chat" | "settings" | "audit" | "schedules">("chat");
   const [settings, setSettings] = useState<SettingsViewData | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -155,6 +156,7 @@ export default function App() {
   const activeChannelIdRef = useRef<string | null>(null);
   const clientRef = useRef<ApiClient | null>(client);
   const streamRef = useRef<{ controller: AbortController; runId: string } | null>(null);
+  const sendingRef = useRef(false);
 
   clientRef.current = client;
 
@@ -442,6 +444,48 @@ export default function App() {
     [stopStream],
   );
 
+  useEffect(() => {
+    if (!client || !activeChannelId || view !== "chat") return;
+    let active = true;
+    const timer = setInterval(() => {
+      if (streamRef.current || sendingRef.current) return;
+      void client
+        .listMessages(activeChannelId)
+        .then((page) => {
+          if (
+            !active ||
+            activeChannelIdRef.current !== activeChannelId ||
+            streamRef.current ||
+            sendingRef.current
+          )
+            return;
+          setMessages((value) => {
+            const ids = new Set(page.messages.map((message) => message.id));
+            const oldest = page.messages[0]?.createdAt;
+            return [
+              ...value.filter(
+                (message) => !ids.has(message.id) && oldest && message.createdAt < oldest,
+              ),
+              ...page.messages,
+            ];
+          });
+          setLastRun(page.lastRun);
+          setNextBefore((value) => value ?? page.nextBefore);
+          if (page.activeRun) {
+            setLive(startLiveRun(page.activeRun.id));
+            subscribe(page.activeRun.id, activeChannelId, 0);
+          }
+        })
+        .catch((error) => {
+          if (active) reportError(error);
+        });
+    }, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [client, activeChannelId, view, subscribe, reportError]);
+
   const sendMessage = useCallback(
     async (content: string, attachmentIds: string[], allowTruncation: boolean) => {
       if (!client || !activeChannelId) {
@@ -449,6 +493,7 @@ export default function App() {
       }
 
       setError(null);
+      sendingRef.current = true;
       const optimisticId = `optimistic-${Date.now()}`;
       const optimistic: Message = {
         id: optimisticId,
@@ -482,6 +527,8 @@ export default function App() {
         setMessages((value) => value.filter((message) => message.id !== optimisticId));
         reportError(nextError);
         throw nextError;
+      } finally {
+        sendingRef.current = false;
       }
     },
     [client, activeChannelId, activeChannel, activeProfile, subscribe, reportError],
@@ -728,6 +775,14 @@ export default function App() {
 
         <button
           type="button"
+          onClick={() => setView("schedules")}
+          className={`rounded-lg px-3 py-1.5 text-xs ${view === "schedules" ? "bg-white/10 text-slate-100" : "text-slate-400"}`}
+        >
+          Schedules
+        </button>
+
+        <button
+          type="button"
           onClick={() => setView("audit")}
           className={`rounded-lg px-3 py-1.5 text-xs ${view === "audit" ? "bg-white/10 text-slate-100" : "text-slate-400"}`}
         >
@@ -803,6 +858,13 @@ export default function App() {
             Loading workspace…
           </div>
         </div>
+      ) : view === "schedules" ? (
+        <SchedulesView
+          client={client}
+          profiles={profiles}
+          channels={channels}
+          onOpenChannel={selectChannel}
+        />
       ) : view === "audit" ? (
         <AuditView client={client} />
       ) : view === "settings" && settings ? (

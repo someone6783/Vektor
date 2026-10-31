@@ -25,20 +25,33 @@ import { join } from "node:path";
 import { TerminalExecutor } from "./runtime/terminal.js";
 import { makeRedactor } from "./runtime/redact.js";
 import { registerRuntimeRoutes } from "./routes/runtime.js";
+import { Scheduler } from "./scheduling/scheduler.js";
+import { registerJobRoutes } from "./routes/jobs.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
   storage: Storage;
   logger?: boolean;
   provider?: ChatProvider;
+  schedulerClock?: () => number;
+  startScheduler?: boolean;
 }
+
+declare module "fastify" {
+  interface FastifyInstance {
+    scheduler: Scheduler;
+  }
+}
+export type VektorApp = FastifyInstance;
 
 export async function buildApp({
   config,
   storage,
   logger = true,
   provider: injectedProvider,
-}: BuildAppOptions): Promise<FastifyInstance> {
+  schedulerClock,
+  startScheduler = true,
+}: BuildAppOptions): Promise<VektorApp> {
   const app = Fastify({
     logger: logger
       ? {
@@ -110,6 +123,7 @@ export async function buildApp({
     redact,
     redactionHoldback: redact.holdback,
     runTimeoutMs: config.runTimeoutMs,
+    now: schedulerClock,
   });
 
   registerSettingsRoutes(app, providerService);
@@ -123,6 +137,22 @@ export async function buildApp({
   );
   await registerAttachmentRoutes(app, attachments);
   const context = new ContextService(storage.db, attachments, providerService);
+  const scheduler = new Scheduler({
+    db: storage.db,
+    manager: runManager,
+    context,
+    redact,
+    enabled: config.schedulerEnabled ?? true,
+    tickMs: config.schedulerTickMs ?? 1000,
+    now: schedulerClock,
+    onError: (error) => app.log.error({ err: error }, "scheduler tick failed"),
+  });
+  app.decorate("scheduler", scheduler);
+  registerJobRoutes(app, scheduler);
+  if (startScheduler)
+    app.addHook("onReady", async () => {
+      scheduler.start();
+    });
   registerMessageRoutes(app, storage.db, runManager, context);
   registerRunEventRoutes(app, storage.db, runManager, streams);
   registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
@@ -143,7 +173,9 @@ export async function buildApp({
   );
 
   app.addHook("preClose", async () => {
+    await scheduler.stop();
     await runManager.shutdown();
+    scheduler.reconcile();
     streams.closeAll();
   });
 

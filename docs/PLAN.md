@@ -336,7 +336,7 @@ Exit criteria: attach a PDF and an image, see previews, include only one of them
 
 ## Phase 4 — Terminal permissions and runtime controls
 
-Status (2026-10-31): implemented and ready for sign-off. Verification passes lint, formatting, typecheck, production build, 93 automated tests (one opt-in live OpenRouter test skipped), and Docker runtime/restart checks.
+Status (2026-10-31): implemented and signed off by the user's instruction to continue onto Phase 5. Verification passes lint, formatting, typecheck, production build, 93 automated tests at Phase 4 completion (one opt-in live OpenRouter test skipped), and Docker runtime/restart checks.
 
 - [x] No-terminal mode: no terminal definition is sent to the provider; unsolicited calls are rejected and audited. Terminal access also requires `terminal` in the profile's enabled tools.
 - [x] Basic terminal guardrail: direct execution of `pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `mkdir`, and `touch` with restricted options, workspace boundary checks, rejection of symlink paths and non-regular files, and no shell/interpreter access.
@@ -357,14 +357,25 @@ Exit criteria: a basic-mode command cannot escape the workspace and is audited; 
 
 ## Phase 5 — Scheduling
 
-- Add cron job CRUD.
-- Add friendly schedule input.
-- Add time zone support.
-- Add run history and failure states.
-- Add delivery into Vektor channels.
-- Add restart-safe scheduler behavior.
+Status (2026-11-01): implemented and signed off by the user's instruction to follow the recommended closeout and proceed to Phase 6 after checks pass. Reverification passes 137 tests (one opt-in live OpenRouter test skipped), lint, formatting, typecheck, production build, and Compose validation. Migration/schema consistency and real-clock Docker timer/restart checks were demonstrated on 2026-10-31 as recorded below.
 
-Details: cron parsing with a natural-language helper ("weekdays at 9am"), IANA time zones, `next_run_at` computed in the job's zone, a lease-based tick, skip-overlap policy, pause/resume, and job results delivered as a message in the target channel.
+- [x] Authenticated recurring-job CRUD, explicit profile/channel/prompt selection, enabled/paused state, soft deletion retaining history, and a maximum of 100 non-deleted jobs.
+- [x] Five-field numeric cron and a deterministic friendly-input helper: hourly, daily, weekdays at 9am, weekly on monday at 9am, and evenly dividing minute/hour intervals. Upcoming occurrences and the normalized cron are previewed before saving.
+- [x] Persist each job's IANA time zone independently of the backend/browser zone; store due times as UTC instants and display them in the job's zone. Tests cover offset changes, spring-forward gaps, and repeated fall-back times.
+- [x] Durable execution history with source (scheduled, catch-up, manual), scheduled instant, run ID, running/completed/failed/cancelled/skipped states, approval-wait indication, error/reason, and stable cursor pagination. Failures and cancellations are delivered into active target channels; invalid/archived targets disable the job until corrected.
+- [x] Normal run-manager execution and channel delivery, including streaming, current profile permissions, terminal approvals, cancellation, audit, and context/output budgets. The chat refresh discovers scheduled runs and subscribes to their streams while the channel is open.
+- [x] Restart-safe scheduling: persisted next-run times, database scheduler/job leases, unique occurrence records, atomic advancement plus run/job-history creation, and no automatic replay of an interrupted committed run.
+- [x] Per-job pause/resume, global scheduler pause/resume, and manual Run now with history. Global emergency stop gates automatic and manual launches, cancels active scheduled runs/approvals, and remains latched after restart.
+
+Timing policy: one-minute cron resolution, with a one-second tick by default. An overdue occurrence at startup, or a live tick delayed by at least a minute, is missed. Default behavior records one skipped summary and advances to the next future occurrence. Opt-in catch-up coalesces missed occurrences into one attempt labelled with the first unserved due time; it does not run every missed occurrence. Overlap with the same job or any active run in the target channel is skipped, not queued. Paused/stopped intervals are not replayed on resume, even for catch-up jobs. Per-job resume recalculates a future due time; manual execution does not change the recurrence. Pausing/deleting a job does not cancel its already active run.
+
+Context policy: scheduled runs include the current profile prompt and saved job prompt, with no attachments or channel history by default. Channel history and automatic omission of older history require separate explicit job settings. Context policy persists on the run so ordinary retries cannot silently add channel history. Scheduled full-access tool requests wait for the same user approval as chat and can fail on the existing run deadline; scheduling never grants unattended approval.
+
+Restart/concurrency boundary: a firing is recorded and the recurrence advanced in the same SQLite transaction as its user message and run record. If the backend dies after commit but before execution, recovery marks the run/history failed rather than replaying commands. Leases and unique `(job, occurrence)` keys prevent duplicate claims; Vektor remains a single-backend application, not a supported multi-server worker deployment. External side effects are not claimed to have exactly-once semantics.
+
+Verification: tests cover friendly/cron validation, UTC and Perth/NY zone behavior, DST gaps/folds, an actual timer tick, CRUD/authentication, pause/resume, catch-up/missed policies, overlap/channel contention, expired leases and competing scheduler claims, stale preparation after edits or pause/resume, manual runs and pagination, archived targets, provider/context failures, scheduled approvals, cancellation/emergency stop, interrupted dispatch recovery, and repeated retries preserving context scope. UI tests cover schedule previews, create/edit, explicit context options, job/global pause, invalid input, manual-run blocking, history/approval display, channel navigation, and retained deleted-job history.
+
+Packaged verification: a disposable production container using the deterministic provider created a future UTC cron job and a paused job, executed one manual run without changing the recurrence, and restarted before the scheduled due time. The persisted job fired exactly once on the real clock, delivered a second assistant message into its channel, and advanced its next due time; the paused job had no executions. A second restart preserved manual/scheduled history, global scheduler pause, and emergency stop. A valid manual request was blocked while stopped; explicit resume cleared the controls without replaying work. The disposable container and data were removed afterward. Live OpenRouter calls and manual browser interaction were not performed for this phase.
 
 Exit criteria: create a job, restart the container, and see it fire on schedule with history and a delivered message; a disabled job does not fire.
 

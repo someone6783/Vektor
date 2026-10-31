@@ -5,9 +5,10 @@ profiles, channels and direct conversations, streamed Markdown chat with stop an
 regenerate, persisted run events, OpenRouter settings, file attachments, and
 context inclusion controls with token estimates, permissioned terminal tools,
 approvals, runtime timelines, an audit log, and emergency stop.
+Recurring jobs add time-zone-aware schedules, durable execution history, and channel delivery.
 
 The product plan lives in [docs/PLAN.md](docs/PLAN.md). Current work is
-[Phase 4 — Terminal permissions and runtime controls](docs/PLAN.md#phase-4--terminal-permissions-and-runtime-controls).
+[Phase 5 — Scheduling](docs/PLAN.md#phase-5--scheduling).
 
 ## Requirements
 
@@ -157,6 +158,63 @@ The scheduler added in Phase 5 must honor this same execution gate.
 with a range of 1,000–600,000 ms. `VEKTOR_RUNTIME_ENV` controls the environment label:
 `host` by default, `container` in the Docker image. It is a label, not a sandbox switch.
 
+## Scheduling
+
+Open **Schedules** to create a recurring job. Choose its profile, delivery channel,
+prompt, schedule and IANA time zone, then review the next five actual run times.
+Examples: `weekdays at 9am`, `daily at 14:30`, `weekly on monday at 9am`, `hourly`,
+`every 15 minutes`, or numeric five-field cron such as `0 9 * * 1-5`.
+Friendly minute intervals must divide 60 and hour intervals must divide 24; use cron
+for other patterns. Seconds, reboot jobs, and arbitrary natural-language dates are
+not supported. There are at most 100 non-deleted jobs.
+
+Schedules are evaluated in the job's time zone, not the backend's. Times are stored
+as UTC instants and the UI displays both the job-zone preview and UTC. Daylight-saving
+behavior follows the pinned [cron-parser](https://github.com/harrisiirak/cron-parser)
+version: for fixed daily times, a missing spring-forward time shifts forward by the
+gap, while a repeated fall-back time uses the first occurrence. The preview shows
+the actual instants so users can check transition dates.
+
+By default a run uses the current profile prompt and the saved job prompt, with
+no attachments or ambient channel history. Opt into recent channel history and,
+separately, permission to omit older history when needed. Without that permission,
+an oversized history fails visibly. These context choices survive ordinary run
+retries. The profile's current model, terminal permissions, approvals, limits, and
+emergency-stop gate still apply. Full-access commands wait for user approval;
+scheduling does not approve them automatically.
+
+The scheduler checks due jobs every second and supports one-minute cron resolution.
+A missed occurrence at startup, or a tick delayed by at least one minute, is skipped
+by default. **Catch up missed runs once** coalesces missed times into one attempt
+labelled with the first unserved scheduled time, then advances to a future time.
+It does not replay every missed job. Overlapping runs of the same job and busy
+delivery channels are skipped. Skips and failures are recorded in history.
+
+**Pause job** stops future firings; **Resume job** schedules the next future occurrence.
+**Run now** records a manual execution, including for a paused job, without changing
+its recurrence. **Delete job** stops future firings and retains history, available
+through **Show deleted jobs and their history**. Pause/delete does not cancel active
+work; use the runtime controls or history's cancel action to stop an active run.
+
+**Pause scheduler** blocks all new job executions while preserving job settings.
+Paused and emergency-stopped intervals are skipped rather than replayed on resume,
+including for catch-up jobs. Emergency stop also cancels active job runs and pending
+approvals and survives restart. Results and failure notices are persisted in the
+target channel; the open chat discovers scheduled work and follows its stream.
+**Inspect history** shows run status/ID, errors, skipped reasons, and approval waits.
+Archived/missing targets disable the job; correct its target and explicitly resume it.
+
+Job definitions, next due times, leases and execution history live in SQLite. A
+scheduled occurrence is claimed and advanced atomically with run creation. An
+interrupted committed run is marked failed on restart, never automatically replayed.
+Leases and unique occurrence keys prevent duplicate claims, but Vektor still supports
+one backend per data directory; this is not distributed worker support or an
+exactly-once guarantee for external side effects.
+
+`VEKTOR_SCHEDULER_ENABLED=0` disables automatic and manual job execution while leaving
+editing/history available. The default is `1`. `VEKTOR_SCHEDULER_TICK_MS` defaults to
+`1000` (range 250–30000); changing it does not add sub-minute cron support.
+
 ## Scripts
 
 | Command             | What it does                                                   |
@@ -221,6 +279,19 @@ logs/             reserved for file logs
 
 The dev endpoints are enabled outside production by default. Compose enables
 them explicitly for demo purposes; set `VEKTOR_ENABLE_DEV_STREAM=0` to disable.
+
+Scheduling endpoints (all bearer-authenticated):
+
+| Endpoint                         | Purpose                                                                          |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| `POST /api/jobs/preview`         | normalize friendly/cron input and preview five UTC instants in an IANA time zone |
+| `GET/POST /api/jobs`             | list/create jobs; `?includeDeleted=true` includes retained deleted definitions   |
+| `GET/PATCH/DELETE /api/jobs/:id` | inspect, edit/pause/resume, or soft-delete a job                                 |
+| `POST /api/jobs/:id/run`         | manually execute a job without changing recurrence                               |
+| `GET /api/jobs/:id/runs`         | execution history (`?before=<execution-id>`)                                     |
+| `GET /api/scheduler`             | configured enabled state, global pause state, emergency latch and tick interval  |
+| `POST /api/scheduler/pause`      | persistently pause new job executions                                            |
+| `POST /api/scheduler/resume`     | resume future scheduling without replaying the paused interval                   |
 
 Messages and context requests accept `attachmentIds` (omit for all included files;
 use `[]` for none), `profileId`, and `model`. Sending also accepts `allowTruncation`.

@@ -19,6 +19,7 @@ export class ContextService {
     input: ContextRequest,
     defaultProfileId: string | null,
     beforeMessageId?: string,
+    includeHistory = true,
   ) {
     const profile = getProfile(this.db, input.profileId ?? defaultProfileId ?? "");
     if (!profile || profile.archivedAt !== null)
@@ -48,7 +49,9 @@ export class ContextService {
     const systemTokens =
       (systemPrompt ? tokens(systemPrompt) + 6 : 0) +
       (toolDefinitions.length ? tokens(JSON.stringify(toolDefinitions)) + 6 : 0);
-    const previous = listContextHistory(this.db, channelId, beforeMessageId);
+    const previous = includeHistory
+      ? listContextHistory(this.db, channelId, beforeMessageId)
+      : { messages: [], total: 0 };
     const history = previous.messages.map(
       (record) => ({ role: record.role, content: record.content }) satisfies ChatMessage,
     );

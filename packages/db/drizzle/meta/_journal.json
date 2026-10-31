@@ -29,6 +29,13 @@
       "when": 1793444981904,
       "tag": "0003_giant_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793446902492,
+      "tag": "0004_fast_groot",
+      "breakpoints": true
     }
   ]
 }

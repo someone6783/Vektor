@@ -32,6 +32,16 @@ import {
   type UpdateChannelInput,
   type UpdateProfileInput,
   type UpdateSettingsInput,
+  scheduledJobSchema,
+  jobRunSchema,
+  schedulePreviewSchema,
+  schedulerStateSchema,
+  type ScheduledJob,
+  type JobRun,
+  type SchedulePreview,
+  type SchedulerState,
+  type CreateJob,
+  type UpdateJob,
 } from "@vektor/shared";
 import { createSseParser } from "./sse";
 
@@ -58,6 +68,66 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+
+  async listJobs(includeDeleted = false): Promise<ScheduledJob[]> {
+    const response = await this.request<{ jobs: unknown }>(
+      `/api/jobs?includeDeleted=${includeDeleted}`,
+    );
+    return scheduledJobSchema.array().parse(response.jobs);
+  }
+  async createJob(input: CreateJob): Promise<ScheduledJob> {
+    const response = await this.request<{ job: unknown }>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return scheduledJobSchema.parse(response.job);
+  }
+  async updateJob(id: string, input: UpdateJob): Promise<ScheduledJob> {
+    const response = await this.request<{ job: unknown }>(`/api/jobs/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    return scheduledJobSchema.parse(response.job);
+  }
+  async deleteJob(id: string): Promise<void> {
+    await this.request(`/api/jobs/${id}`, { method: "DELETE" });
+  }
+  async runJob(id: string): Promise<JobRun> {
+    const response = await this.request<{ execution: unknown }>(`/api/jobs/${id}/run`, {
+      method: "POST",
+    });
+    return jobRunSchema.parse(response.execution);
+  }
+  async jobHistory(
+    id: string,
+    before?: number,
+  ): Promise<{ executions: JobRun[]; nextBefore: number | null }> {
+    const result = await this.request<{ executions: unknown; nextBefore: number | null }>(
+      `/api/jobs/${id}/runs${before ? `?before=${before}` : ""}`,
+    );
+    return { ...result, executions: jobRunSchema.array().parse(result.executions) };
+  }
+  async previewSchedule(schedule: string, timezone: string): Promise<SchedulePreview> {
+    return schedulePreviewSchema.parse(
+      await this.request("/api/jobs/preview", {
+        method: "POST",
+        body: JSON.stringify({ schedule, timezone }),
+      }),
+    );
+  }
+  async schedulerState(): Promise<SchedulerState> {
+    return schedulerStateSchema.parse(await this.request("/api/scheduler"));
+  }
+  async pauseScheduler(): Promise<SchedulerState> {
+    return schedulerStateSchema.parse(
+      await this.request("/api/scheduler/pause", { method: "POST" }),
+    );
+  }
+  async resumeScheduler(): Promise<SchedulerState> {
+    return schedulerStateSchema.parse(
+      await this.request("/api/scheduler/resume", { method: "POST" }),
+    );
+  }
 
   async runtime(): Promise<RuntimeState> {
     return runtimeStateSchema.parse(await this.request("/api/runtime"));

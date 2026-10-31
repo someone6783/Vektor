@@ -68,6 +68,7 @@ export const runs = sqliteTable(
     error: text("error"),
     usageJson: text("usage_json"),
     contextJson: text("context_json"),
+    includeHistory: integer("include_history", { mode: "boolean" }).notNull().default(true),
     terminalMode: text("terminal_mode").notNull().default("no-terminal"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
@@ -165,4 +166,64 @@ export const auditLog = sqliteTable("audit_log", {
   runId: text("run_id"),
   detailsJson: text("details_json").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+export const scheduledJobs = sqliteTable(
+  "scheduled_jobs",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    schedule: text("schedule").notNull(),
+    cron: text("cron").notNull(),
+    timezone: text("timezone").notNull(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id),
+    prompt: text("prompt").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    catchUp: integer("catch_up", { mode: "boolean" }).notNull().default(false),
+    includeHistory: integer("include_history", { mode: "boolean" }).notNull().default(false),
+    allowTruncation: integer("allow_truncation", { mode: "boolean" }).notNull().default(false),
+    nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }),
+    leaseOwner: text("lease_owner"),
+    leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+    version: integer("version").notNull().default(1),
+    lastStatus: text("last_status"),
+    lastError: text("last_error"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("scheduled_jobs_due_idx").on(table.enabled, table.nextRunAt)],
+);
+
+export const jobRuns = sqliteTable(
+  "job_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => scheduledJobs.id),
+    runId: text("run_id").references(() => runs.id),
+    occurrenceKey: text("occurrence_key").notNull(),
+    scheduledFor: integer("scheduled_for", { mode: "timestamp_ms" }).notNull(),
+    source: text("source").notNull(),
+    status: text("status").notNull(),
+    error: text("error"),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("job_runs_occurrence_idx").on(table.jobId, table.occurrenceKey),
+    index("job_runs_run_idx").on(table.runId),
+  ],
+);
+
+export const schedulerLease = sqliteTable("scheduler_lease", {
+  id: text("id").primaryKey(),
+  owner: text("owner").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
 });

@@ -32,6 +32,8 @@ const envSchema = z.object({
     .default(250 * 1024 * 1024),
   VEKTOR_RUN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(120_000),
   VEKTOR_RUNTIME_ENV: z.enum(["host", "container"]).default("host"),
+  VEKTOR_SCHEDULER_ENABLED: z.enum(["0", "1"]).default("1"),
+  VEKTOR_SCHEDULER_TICK_MS: z.coerce.number().int().min(250).max(30_000).default(1000),
 });
 
 export interface AppConfig {
@@ -52,6 +54,8 @@ export interface AppConfig {
   channelFileBytes?: number;
   runTimeoutMs?: number;
   runtimeEnvironment?: "host" | "container";
+  schedulerEnabled?: boolean;
+  schedulerTickMs?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -85,5 +89,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     channelFileBytes: parsed.VEKTOR_CHANNEL_FILE_BYTES,
     runTimeoutMs: parsed.VEKTOR_RUN_TIMEOUT_MS,
     runtimeEnvironment: parsed.VEKTOR_RUNTIME_ENV,
+    schedulerEnabled: parsed.VEKTOR_SCHEDULER_ENABLED === "1",
+    schedulerTickMs: parsed.VEKTOR_SCHEDULER_TICK_MS,
   };
 }

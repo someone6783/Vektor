@@ -16,6 +16,7 @@ export interface RunRecord {
   error: string | null;
   usage: unknown;
   context: unknown;
+  includeHistory: boolean;
   terminalMode: "no-terminal" | "basic" | "full-access";
   startedAt: number;
   endedAt: number | null;
@@ -27,6 +28,7 @@ export interface CreateRunRecordInput {
   userMessageId: string;
   model: string;
   context?: unknown;
+  includeHistory?: boolean;
   terminalMode?: "no-terminal" | "basic" | "full-access";
 }
 
@@ -57,6 +59,7 @@ function toRecord(row: typeof runs.$inferSelect): RunRecord {
     error: row.error,
     usage,
     context: row.contextJson ? (JSON.parse(row.contextJson) as unknown) : null,
+    includeHistory: row.includeHistory,
     terminalMode: row.terminalMode as RunRecord["terminalMode"],
     startedAt: row.startedAt.getTime(),
     endedAt: row.endedAt?.getTime() ?? null,
@@ -75,6 +78,7 @@ export function createRun(db: VektorDatabase, input: CreateRunRecordInput): RunR
     error: null,
     usageJson: null,
     contextJson: input.context ? JSON.stringify(input.context) : null,
+    includeHistory: input.includeHistory ?? true,
     terminalMode: input.terminalMode ?? "no-terminal",
     startedAt: new Date(),
     endedAt: null,

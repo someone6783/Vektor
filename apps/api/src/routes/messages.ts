@@ -218,7 +218,13 @@ export function registerMessageRoutes(
         .filter((file) => file.included)
         .map((file) => file.id),
     };
-    const prepared = context.prepare(channel.id, retryInput, profile.id, userMessage.id);
+    const prepared = context.prepare(
+      channel.id,
+      retryInput,
+      profile.id,
+      userMessage.id,
+      previous.includeHistory,
+    );
     checkContextBudget(prepared.estimate, retryOptions.allowTruncation);
     const chatMessages = await context.messages(prepared);
     runManager.assertCanStart();
@@ -234,6 +240,7 @@ export function registerMessageRoutes(
       profileId: profile.id,
       userMessageId: userMessage.id,
       model: previous.model,
+      includeHistory: previous.includeHistory,
       context: prepared.estimate,
       terminalMode: profile.terminalMode,
     });
@@ -269,6 +276,7 @@ export function registerMessageRoutes(
       },
       run.profileId,
       message.id,
+      run.includeHistory,
     ).estimate;
   });
 

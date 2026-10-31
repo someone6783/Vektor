@@ -63,15 +63,23 @@ export interface RunManagerOptions {
   redact: (text: string, partial?: boolean) => string;
   redactionHoldback?: () => number;
   runTimeoutMs?: number;
+  now?: () => number;
 }
 
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
+  private readonly completionListeners = new Set<() => void>();
   private readonly pending = new Map<
     string,
     { runId: string; resolve: (approved: boolean) => void }
   >();
   constructor(private readonly options: RunManagerOptions) {}
+  onFinished(listener: () => void): () => void {
+    this.completionListeners.add(listener);
+    return () => {
+      this.completionListeners.delete(listener);
+    };
+  }
   get stopped(): boolean {
     return getSetting(this.options.db, "runtime.emergencyStopped") === true;
   }
@@ -142,12 +150,19 @@ export class RunManager {
     for (const runId of [...this.active.keys()]) this.cancel(runId, reason);
   }
   async emergencyStop(): Promise<void> {
+    setSetting(
+      this.options.db,
+      "runtime.stopVersion",
+      Number(getSetting(this.options.db, "runtime.stopVersion") ?? 0) + 1,
+    );
     setSetting(this.options.db, "runtime.emergencyStopped", true);
     appendAudit(this.options.db, "runtime.emergency_stop", null);
     this.cancelAll("emergency_stop");
     await this.options.terminal.stopAll();
   }
   resume(): void {
+    if (this.stopped)
+      setSetting(this.options.db, "runtime.resumedAt", this.options.now?.() ?? Date.now());
     setSetting(this.options.db, "runtime.emergencyStopped", false);
     appendAudit(this.options.db, "runtime.resumed", null);
   }
@@ -248,6 +263,13 @@ export class RunManager {
     active.finished = true;
     active.listeners.clear();
     this.active.delete(active.run.id);
+    for (const listener of this.completionListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.options.logger.error({ err: error }, "run completion listener failed");
+      }
+    }
   }
 
   private hasPermission(active: ActiveRun): boolean {
