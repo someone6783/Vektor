@@ -139,21 +139,21 @@ Accepted: OpenRouter only, using its model list and usage reporting. The provide
 
 ### Data model (draft)
 
-| Table | Purpose | Key fields |
-| --- | --- | --- |
-| `settings` | Global config | `key`, `value_json`, `updated_at` |
-| `profiles` | Agent configurations | `name`, `system_prompt`, `model`, `params_json`, `terminal_mode`, `tools_json` |
-| `channels` | Slack-like containers | `name`, `topic`, `kind`, `archived_at` |
-| `conversations` | A message timeline | `channel_id?`, `profile_id`, `title` |
-| `messages` | User and assistant turns | `conversation_id`, `role`, `content`, `run_id?` |
-| `runs` | One agent execution | `conversation_id`, `runner`, `status`, `started_at`, `ended_at`, `usage_json`, `error` |
-| `run_events` | Ordered append-only log | `run_id`, `seq`, `type`, `payload_json` |
-| `tool_calls` | Queryable tool history | `run_id`, `name`, `input_json`, `output`, `status` |
-| `attachments` | Stored files | `message_id?`, `filename`, `mime`, `size`, `path`, `extracted_text` |
-| `scheduled_jobs` | Recurring jobs | `schedule`, `timezone`, `profile_id`, `channel_id`, `prompt`, `next_run_at` |
-| `job_runs` | Scheduled execution history | `job_id`, `scheduled_for`, `status`, `run_id?`, `error` |
-| `approvals` | Pending decisions | `run_id`, `tool_call_id`, `command`, `status` |
-| `audit_log` | Security-relevant actions | `actor`, `action`, `target`, `detail_json`, `created_at` |
+| Table            | Purpose                     | Key fields                                                                             |
+| ---------------- | --------------------------- | -------------------------------------------------------------------------------------- |
+| `settings`       | Global config               | `key`, `value_json`, `updated_at`                                                      |
+| `profiles`       | Agent configurations        | `name`, `system_prompt`, `model`, `params_json`, `terminal_mode`, `tools_json`         |
+| `channels`       | Slack-like containers       | `name`, `topic`, `kind`, `archived_at`                                                 |
+| `conversations`  | A message timeline          | `channel_id?`, `profile_id`, `title`                                                   |
+| `messages`       | User and assistant turns    | `conversation_id`, `role`, `content`, `run_id?`                                        |
+| `runs`           | One agent execution         | `conversation_id`, `runner`, `status`, `started_at`, `ended_at`, `usage_json`, `error` |
+| `run_events`     | Ordered append-only log     | `run_id`, `seq`, `type`, `payload_json`                                                |
+| `tool_calls`     | Queryable tool history      | `run_id`, `name`, `input_json`, `output`, `status`                                     |
+| `attachments`    | Stored files                | `message_id?`, `filename`, `mime`, `size`, `path`, `extracted_text`                    |
+| `scheduled_jobs` | Recurring jobs              | `schedule`, `timezone`, `profile_id`, `channel_id`, `prompt`, `next_run_at`            |
+| `job_runs`       | Scheduled execution history | `job_id`, `scheduled_for`, `status`, `run_id?`, `error`                                |
+| `approvals`      | Pending decisions           | `run_id`, `tool_call_id`, `command`, `status`                                          |
+| `audit_log`      | Security-relevant actions   | `actor`, `action`, `target`, `detail_json`, `created_at`                               |
 
 ## Phase 1 — Foundation
 
@@ -168,88 +168,92 @@ packages/db       Drizzle schema, migrations, queries
 packages/shared   Zod contracts and inferred types
 ```
 
+Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. The only open item is the live OpenRouter check, which needs `VEKTOR_OPENROUTER_KEY` and is skipped without it.
+
 ### 1.1 Workspace and tooling
 
-- [ ] Root `package.json`, `pnpm-workspace.yaml`, `.nvmrc` (current Node LTS), `.editorconfig`, `.gitignore` (`node_modules`, `dist`, `.env`, `data/`).
-- [ ] Strict `tsconfig.base.json` plus per-package configs and workspace path aliases.
-- [ ] ESLint flat config and Prettier; scripts for `lint`, `format:check`, `typecheck`, `test`, and `build`.
-- [ ] Vitest at the root; React Testing Library added with the first UI test.
-- [ ] GitHub Actions: install with a frozen lockfile, then lint, typecheck, test, and build.
+- [x] Root `package.json`, `pnpm-workspace.yaml`, `.nvmrc` (current Node LTS), `.editorconfig`, `.gitignore` (`node_modules`, `dist`, `.env`, `data/`).
+- [x] Strict `tsconfig.base.json` plus per-package configs; workspace packages resolve by name through their built exports.
+- [x] ESLint flat config and Prettier; scripts for `lint`, `format:check`, `typecheck`, `test`, and `build`.
+- [x] Vitest across workspaces for contracts, database, API, and web logic.
+- [ ] React Testing Library with the first component test; deferred to Phase 2 when the first interactive component lands.
+- [x] GitHub Actions: install with a frozen lockfile, then lint, typecheck, test, and build.
 
 Done when a clean clone passes `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 
 ### 1.2 Shared contracts
 
-- [ ] `packages/shared`: `HealthResponse`, `ApiError`, and a discriminated `RunEvent` union covering `run.started`, `message.delta`, `tool.requested`, `tool.output`, `approval.requested`, `usage`, `run.completed`, `run.failed`, and `run.cancelled`.
-- [ ] SSE frame helpers (`id`, `event`, `data`) and cursor types.
-- [ ] Unit tests for every event variant and for rejecting unknown event types without crashing a stream.
+- [x] `packages/shared`: `HealthResponse`, `ApiError`, and a discriminated `RunEvent` union covering `run.started`, `message.delta`, `tool.requested`, `tool.output`, `approval.requested`, `usage`, `run.completed`, `run.failed`, and `run.cancelled`.
+- [x] SSE frame helpers (`id`, `event`, `data`) and cursor types.
+- [x] Unit tests for every event variant and for rejecting unknown event types without crashing a stream.
 
 Done when web and API import the same schemas and the union is exhaustively tested.
 
 ### 1.3 Database and data directory
 
-- [ ] `packages/db`: better-sqlite3 plus Drizzle; initial schema limited to `settings` and the migration journal.
-- [ ] Boot migration runner over generated SQL; transactional and idempotent.
-- [ ] PRAGMAs: WAL, `foreign_keys=ON`, `busy_timeout=5000`.
-- [ ] Data-directory bootstrap for `VEKTOR_DATA_DIR` (default `/data`): `files/`, `workspace/`, and `logs/`, with directory mode `0700`.
-- [ ] Generate `secrets.key` (32 random bytes, `0600`) on first boot for Phase 2 secret storage; generate and persist `app.instance_id`.
-- [ ] Settings repository with typed JSON get/set, used for the instance id.
-- [ ] Tests: migrate an empty database, re-run as a no-op, verify WAL, verify the instance id survives reopen.
+- [x] `packages/db`: better-sqlite3 plus Drizzle; initial schema limited to `settings` and the migration journal.
+- [x] Boot migration runner over generated SQL; transactional and idempotent.
+- [x] PRAGMAs: WAL, `foreign_keys=ON`, `busy_timeout=5000`.
+- [x] Data-directory bootstrap for `VEKTOR_DATA_DIR` (default `/data`): `files/`, `workspace/`, and `logs/`, with directory mode `0700`.
+- [x] Generate `secrets.key` (32 random bytes, `0600`) on first boot for Phase 2 secret storage; generate and persist `app.instance_id`.
+- [x] Settings repository with typed JSON get/set, used for the instance id.
+- [x] Tests: migrate an empty database, re-run as a no-op, verify WAL, verify the instance id survives reopen.
 
 Done when a restart reuses the same instance id and migrations are safe to re-run.
 
 ### 1.4 API skeleton
 
-- [ ] Fastify with env-validated config (`PORT`, `VEKTOR_DATA_DIR`, optional `VEKTOR_ACCESS_TOKEN`, `VEKTOR_ENABLE_DEV_STREAM`).
-- [ ] Pino JSON logs with request ids and redaction for authorization headers, cookies, and keys.
-- [ ] `GET /healthz` returns status, version, instance id, DB check, and uptime; `503` when the DB check fails.
-- [ ] Consistent error envelope, not-found handler, and validation-error mapping.
-- [ ] Access token: generate `/data/access-token` (`0600`) on first boot; require `Authorization: Bearer` on `/api/*`; keep `/healthz` public. The browser setup flow lands in Phase 2.
-- [ ] Dev-only SSE endpoint `GET /api/dev/stream` (enabled by `VEKTOR_ENABLE_DEV_STREAM=1`): 20 ordered stub deltas, heartbeats, and resume from `Last-Event-ID` or `?after=`.
-- [ ] Graceful shutdown: stop accepting requests, close streams, close the database.
-- [ ] Tests with Fastify `inject`: health, 401/200 auth, error shape, SSE ordering, and resume.
+- [x] Fastify with env-validated config (`PORT`, `VEKTOR_DATA_DIR`, optional `VEKTOR_ACCESS_TOKEN`, `VEKTOR_ENABLE_DEV_STREAM`).
+- [x] Pino JSON logs with request ids and redaction for authorization headers and cookies; request bodies (which may carry provider keys) are never logged.
+- [x] `GET /healthz` returns status, version, instance id, DB check, and uptime; `503` when the DB check fails.
+- [x] Consistent error envelope, not-found handler, and validation-error mapping.
+- [x] Access token: generate `/data/access-token` (`0600`) on first boot; require `Authorization: Bearer` on `/api/*`; keep `/healthz` public. The browser setup flow lands in Phase 2.
+- [x] Dev-only SSE endpoint `GET /api/dev/stream` (enabled by `VEKTOR_ENABLE_DEV_STREAM=1`): 20 ordered stub deltas, heartbeats, and resume from `Last-Event-ID` or `?after=`.
+- [x] Graceful shutdown: preClose ends open SSE responses, the database closes, and a 10-second watchdog prevents a hung exit.
+- [x] Tests with Fastify `inject`: health, 401/200 auth, error shape, SSE ordering, and resume.
 
 Done when `/healthz` is 200, unauthenticated `/api/*` is 401, and logs are JSON with request ids.
 
 ### 1.5 Web shell
 
-- [ ] Vite + React + Tailwind; shell with a header and disabled placeholders for Chat, Profiles, and Settings.
-- [ ] Health card polling `/healthz` with version, DB status, instance id, and a clear disconnected state.
-- [ ] SSE demo panel: connect to the dev stream, render deltas in order, show sequence numbers, and offer reconnect.
-- [ ] Dev token handling via `VITE_ACCESS_TOKEN`; Phase 2 replaces it with the setup flow.
-- [ ] Loading, empty, and error states; no chat features yet.
+- [x] Vite + React + Tailwind; shell with a header and disabled placeholders for Chat, Profiles, and Settings.
+- [x] Health card polling `/healthz` with version, DB status, instance id, and a clear disconnected state.
+- [x] SSE demo panel: connect to the dev stream, render deltas in order, show sequence numbers, and offer reconnect.
+- [x] Dev token handling via `VITE_ACCESS_TOKEN` or a browser-local token field; Phase 2 replaces it with the setup flow.
+- [x] Loading, empty, and error states; no chat features yet.
 
 Done when the health card and SSE demo work in dev and from the built container.
 
 ### 1.6 Provider spike
 
-- [ ] `ChatProvider` interface: `streamChat(request, signal)` yields normalized text, tool-call, usage, and finish events.
-- [ ] Stub provider with deterministic deltas and one fake tool call.
-- [ ] OpenRouter provider: streaming chat completions, SSE parsing, tool-call argument assembly across chunks, and abort on signal.
-- [ ] Fixtures: text-only stream, split tool call, usage frame, provider error, and mid-stream disconnect.
-- [ ] Contract tests replay every fixture through the normalizer; a live OpenRouter test is opt-in and skipped in CI.
-- [ ] Not wired into chat, runs, or persistence yet.
+- [x] `ChatProvider` interface: `streamChat(request)` yields normalized text, tool-call, usage, and finish events, and aborts through `request.signal`.
+- [x] Stub provider with deterministic deltas and one fake tool call.
+- [x] OpenRouter provider: streaming chat completions, SSE parsing, tool-call argument assembly across chunks, and abort on signal.
+- [x] Fixtures: text-only stream, split tool call, usage frame, provider error, and mid-stream disconnect.
+- [x] Contract tests replay every fixture through the normalizer; a live OpenRouter test is opt-in and skipped in CI.
+- [x] Not wired into chat, runs, or persistence yet.
 
 Done when fixture replays produce the shared event types and a live key produces a short streamed reply.
 
 ### 1.7 Docker and Compose
 
-- [ ] Multi-stage Dockerfile: build web and API, runtime with production dependencies only, non-root user, writable `/data`.
-- [ ] Compose: `127.0.0.1:8787:8787`, named volume `vektor-data:/data`, health check on `/healthz`, restart policy.
-- [ ] API serves the built web app with SPA fallback, excluding `/healthz` and `/api/*`.
-- [ ] `.dockerignore` and a reproducible image build.
-- [ ] README quickstart: `docker compose up --build`, data location, and where the access token lives.
+- [x] Multi-stage Dockerfile: build web and API, deploy the API with production dependencies only (`pnpm deploy`), non-root user, writable `/data`, 85 MB image.
+- [x] Compose: `127.0.0.1:8787:8787`, named volume `vektor-data:/data`, health check on `/healthz`, restart policy.
+- [x] API serves the built web app with SPA fallback, excluding `/healthz` and `/api/*`.
+- [x] `.dockerignore` and a reproducible image build.
+- [x] README quickstart: `docker compose up --build`, data location, and where the access token lives.
 
 Done when `docker compose up --build` reaches healthy and serves the web shell.
 
 ### 1.8 Phase 1 verification
 
-- [ ] Clean clone: install, lint, typecheck, test, and build pass.
-- [ ] Container: health page loads; `/healthz` returns 200; `/api/*` requires the token.
-- [ ] Persistence: recreate the container and confirm the instance id is unchanged.
-- [ ] Streaming: dev stream renders in order; disconnect and reconnect resumes from the last sequence.
-- [ ] Provider: with `VEKTOR_OPENROUTER_KEY` set, the dev provider check streams a short reply; without it, the stub still works.
-- [ ] Logs: JSON, request ids present, secrets redacted.
+- [x] Clean clone: install, lint, typecheck, test, and build pass.
+- [x] Container: health page loads; `/healthz` returns 200; `/api/*` requires the token.
+- [x] Persistence: recreate the container and confirm the instance id is unchanged.
+- [x] Streaming: dev stream renders in order; disconnect and reconnect resumes from the last sequence.
+- [x] Provider: the stub streams text, a tool call, usage, and finish; the live OpenRouter test is skipped without `VEKTOR_OPENROUTER_KEY`.
+- [ ] Provider live check: run `pnpm --filter @vektor/api test` with `VEKTOR_OPENROUTER_KEY` set to confirm a real short reply.
+- [x] Logs: JSON, request ids present, secrets redacted.
 
 Exit criteria: all verification items pass, and health, persistence, auth, and the streaming demo are demonstrated before Phase 2 begins.
 
@@ -404,14 +408,14 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 
 ## Decision log
 
-| Date | Decision | Status |
-| --- | --- | --- |
-| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks | Draft |
-| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts | Accepted |
-| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1 | Accepted |
-| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred | Accepted |
-| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such | Accepted |
-| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults | Accepted |
+| Date       | Decision                                                                                   | Status   |
+| ---------- | ------------------------------------------------------------------------------------------ | -------- |
+| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks            | Draft    |
+| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts        | Accepted |
+| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1                         | Accepted |
+| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred                                | Accepted |
+| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such                      | Accepted |
+| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults                                   | Accepted |
 | 2026-10-31 | OCR for scanned PDFs deferred; PDFs without a text layer are rejected with a clear message | Accepted |
-| 2026-10-31 | Auth: single local access token, no accounts | Accepted |
-| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist | Accepted |
+| 2026-10-31 | Auth: single local access token, no accounts                                               | Accepted |
+| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist          | Accepted |
