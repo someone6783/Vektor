@@ -1,6 +1,6 @@
 # Vektor Product Plan
 
-Status: v0.4 · 2026-10-31
+Status: v0.5 · 2026-10-31
 Approval: Scope and Phase 0 accepted on 2026-10-31. Implementation may begin with Phase 1. OCR remains deferred, and v1 uses a single local access token.
 
 ## Product summary
@@ -103,6 +103,10 @@ Accepted: Tauri wraps the built web UI and connects to a backend URL chosen on f
 ### D13. Version 1 provider scope — accepted
 
 Accepted: OpenRouter only, using its model list and usage reporting. The provider layer is an internal interface so another provider can be added later without changing the UI.
+
+### D14. Releases and update checks — accepted
+
+Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases and GitHub Container Registry. The API checks GitHub Releases for a newer version, caches the result, and notifies in the UI. The check is optional and sends no local data; v1 does not self-update.
 
 ## Architecture
 
@@ -340,6 +344,26 @@ Details: a consistent backup command (SQLite snapshot plus files), restore into 
 
 Exit criteria: restore a backup into a clean volume and resume work; an interrupted run is marked failed and retryable; the cost report reconciles with provider usage.
 
+## Phase 8 — Release builds and update checks
+
+Goal: GitHub Actions produces the release, and a running Vektor can tell the user when a newer release exists without leaking local data or interrupting work.
+
+- [ ] Version has one source of truth: the root package metadata, injected into the API and web build. `/healthz`, the About panel, the Docker image label, and the release tag all report the same value.
+- [ ] CI keeps running lint, typecheck, test, and build on every push and pull request; tag builds run the same checks before publishing.
+- [ ] Release workflow on `v*` tags (with manual dispatch): run the full verification, build the API and web artifacts, and publish a multi-arch image to GitHub Container Registry with `x.y.z`, `x.y`, and `latest` tags.
+- [ ] Image carries OCI labels for version, revision, source, and build date, plus a build-provenance attestation. The GitHub Release links to the image, release notes, and upgrade instructions.
+- [ ] `GET /api/update-check` (bearer auth) queries the GitHub Releases API for the repository, compares versions with strict semver, caches the result for 24 hours, and returns current version, latest version, availability, release URL, and publish date.
+- [ ] Failure handling: 5-second timeout, at most one retry, and quiet degradation for offline, rate-limited (HTTP 403/429), missing, or malformed responses. A failed check never blocks startup, chat, or runs.
+- [ ] Privacy: the check sends only a `User-Agent` and reads public release metadata. No instance id, access token, provider key, usage data, or data-directory contents leave the machine, and the only outbound host is `api.github.com`.
+- [ ] Update checking is optional: `VEKTOR_UPDATE_CHECK` and an About-panel switch. Default is one check per 24 hours; "Check now" forces a fresh request.
+- [ ] UI: current version in the About panel and footer, an "update available" badge with the release link, and upgrade steps (`docker compose pull && docker compose up -d`; the `vektor-data` volume is preserved).
+- [ ] No automatic download or install in v1. Docker and desktop both notify and link to the release; silent self-update is deferred.
+- [ ] Tests: semver comparison table (equal, newer, older, prerelease, malformed), fixture GitHub responses (latest, prerelease-only, rate-limited, offline), cache expiry, and opt-out behavior.
+
+Details: the repository is public, so release metadata needs no GitHub token. If it ever becomes private, the check requires an optional read-only token stored in the data directory and remains off by default. Version comparison uses the `semver` package rather than string comparison. Cached results live in `settings` so a restart does not immediately re-query GitHub, and the timestamp is visible as "last checked". The check is server-side to keep the token out of the browser and to avoid CORS and per-browser rate limits.
+
+Exit criteria: pushing a `v*` tag publishes a tagged image and GitHub Release with no manual steps; an older running instance reports the newer version within the cache window and links to the upgrade instructions; with no network the instance keeps working and shows "unable to check" instead of an error.
+
 ## After v1 — Hybrid CLI runner
 
 Planned, not part of the first usable release. This is the second half of D4.
@@ -392,8 +416,9 @@ The first usable release is complete when a user can:
 8. Cancel a running agent.
 9. Create, pause, and inspect a recurring scheduled job.
 10. Restart the container without losing data.
+11. See the installed version and whether a newer release exists.
 
-Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3; item 7 → Phases 3–4; items 4, 8 → Phase 4; item 9 → Phase 5; item 10 → Phases 1 and 7.
+Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3; item 7 → Phases 3–4; items 4, 8 → Phase 4; item 9 → Phase 5; item 10 → Phases 1 and 7; item 11 → Phase 8.
 
 ## Risks
 
@@ -405,17 +430,19 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 - **Context drift.** Long conversations and large attachments can silently truncate; the usage meter and inclusion controls must reflect what is actually sent.
 - **Desktop divergence.** Full-access commands on the host are more dangerous than inside Docker; the desktop build needs its own warning and approval defaults.
 - **CLI adapter drift.** External CLIs change flags and event formats; pin versions, detect capabilities, and fail closed to the native runner.
+- **Update checks.** GitHub's API is rate-limited and may be unreachable; checks must be cached, optional, and must never block startup or reveal local data.
 
 ## Decision log
 
-| Date       | Decision                                                                                   | Status   |
-| ---------- | ------------------------------------------------------------------------------------------ | -------- |
-| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks            | Draft    |
-| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts        | Accepted |
-| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1                         | Accepted |
-| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred                                | Accepted |
-| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such                      | Accepted |
-| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults                                   | Accepted |
-| 2026-10-31 | OCR for scanned PDFs deferred; PDFs without a text layer are rejected with a clear message | Accepted |
-| 2026-10-31 | Auth: single local access token, no accounts                                               | Accepted |
-| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist          | Accepted |
+| Date       | Decision                                                                                           | Status   |
+| ---------- | -------------------------------------------------------------------------------------------------- | -------- |
+| 2026-10-31 | Plan v0.2: added Phase 0 proposals, Phases 1–2, architecture, data model, risks                    | Draft    |
+| 2026-10-31 | D1: TypeScript monorepo — React/Vite, Fastify, SQLite/Drizzle, shared Zod contracts                | Accepted |
+| 2026-10-31 | D4: hybrid runtime — Vektor-owned loop in v1, CLI adapter after v1                                 | Accepted |
+| 2026-10-31 | D6: channels plus DMs with flat timelines; threads deferred                                        | Accepted |
+| 2026-10-31 | D11: basic mode is a container-boundary guardrail, documented as such                              | Accepted |
+| 2026-10-31 | D14: GitHub Actions publishes releases; Vektor checks GitHub Releases for updates, no auto-install | Accepted |
+| 2026-10-31 | D2, D3, D5, D7–D10, D12, D13: remaining Phase 0 defaults                                           | Accepted |
+| 2026-10-31 | OCR for scanned PDFs deferred; PDFs without a text layer are rejected with a clear message         | Accepted |
+| 2026-10-31 | Auth: single local access token, no accounts                                                       | Accepted |
+| 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist                  | Accepted |
