@@ -348,6 +348,18 @@ Planned, not part of the first usable release. This is the second half of D4.
 
 Exit criteria: a conversation can use either runner with identical timeline, cancel, approval, and audit behavior.
 
+## After v1 — External service integrations
+
+Planned, not part of the first usable release. Vektor should support adding optional integrations with third-party services such as Spotify, Gmail, and Apple Calendar.
+
+- Introduce a provider-neutral integration interface for authentication, capabilities, rate limits, and error handling.
+- Add secure OAuth credential storage and per-integration permission scopes, with the ability to disconnect or revoke access.
+- Expose enabled services as permissioned tools that profiles and scheduled jobs can use, with every request recorded in the audit log.
+- Start with Spotify, Gmail, and Apple Calendar as the initial integration targets, subject to API and platform availability.
+- Keep integrations optional and isolated so the core local-first workspace works without any connected external accounts.
+
+Exit criteria: a user can connect and disconnect an integration, review its granted permissions, use an approved capability from a profile or scheduled job, and see the request in the audit history.
+
 ## Explicitly deferred
 
 - Browser automation.
@@ -356,7 +368,7 @@ Exit criteria: a conversation can use either runner with identical timeline, can
 - Distributed microservices.
 - Large-scale worker autoscaling.
 - Native video understanding.
-- External chat integrations.
+- External service integrations, including Spotify, Gmail, and Apple Calendar.
 - Marketplace/plugin ecosystem.
 - Complex multi-agent planning graphs.
 
