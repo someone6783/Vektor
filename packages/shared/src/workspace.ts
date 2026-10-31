@@ -99,6 +99,7 @@ export const runSchema = z.object({
   startedAt: isoDateSchema,
   endedAt: isoDateSchema.nullable(),
   context: contextEstimateSchema.nullable().default(null),
+  terminalMode: terminalModeSchema.default("no-terminal"),
 });
 
 export type Run = z.infer<typeof runSchema>;

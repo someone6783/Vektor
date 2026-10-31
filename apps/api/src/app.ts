@@ -21,6 +21,10 @@ import { createStreamRegistry } from "./stream-registry.js";
 import { AttachmentService } from "./attachments/service.js";
 import { registerAttachmentRoutes } from "./routes/attachments.js";
 import { ContextService } from "./context.js";
+import { join } from "node:path";
+import { TerminalExecutor } from "./runtime/terminal.js";
+import { makeRedactor } from "./runtime/redact.js";
+import { registerRuntimeRoutes } from "./routes/runtime.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -90,10 +94,22 @@ export async function buildApp({
     ...(injectedProvider ? { providerOverride: injectedProvider } : {}),
   });
 
+  const redact = makeRedactor(() => [
+    storage.accessToken,
+    storage.secretsKey.toString("hex"),
+    storage.secretsKey.toString("base64"),
+    storage.secretsKey.toString("utf8"),
+    providerService.getKey().key ?? "",
+  ]);
+  const terminal = new TerminalExecutor(join(storage.dataDir, "workspace"), redact);
   const runManager = new RunManager({
     db: storage.db,
     getChatProvider: () => providerService.getChatProvider(),
     logger: app.log,
+    terminal,
+    redact,
+    redactionHoldback: redact.holdback,
+    runTimeoutMs: config.runTimeoutMs,
   });
 
   registerSettingsRoutes(app, providerService);
@@ -109,6 +125,7 @@ export async function buildApp({
   const context = new ContextService(storage.db, attachments, providerService);
   registerMessageRoutes(app, storage.db, runManager, context);
   registerRunEventRoutes(app, storage.db, runManager, streams);
+  registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
 
   if (config.enableDevStream) {
     registerDevStreamRoutes(app, config.devStreamDelayMs, streams);
@@ -126,8 +143,8 @@ export async function buildApp({
   );
 
   app.addHook("preClose", async () => {
+    await runManager.shutdown();
     streams.closeAll();
-    runManager.cancelAll();
   });
 
   app.addHook("onClose", async () => {

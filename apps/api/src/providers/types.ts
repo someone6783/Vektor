@@ -1,6 +1,12 @@
 import type { ModelInfo } from "@vektor/shared";
 
 export interface ChatMessage {
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+  tool_call_id?: string;
   role: "system" | "user" | "assistant" | "tool";
   content:
     | string
@@ -16,6 +22,10 @@ export interface ChatRequest {
   signal?: AbortSignal;
   maxTokens?: number;
   temperature?: number;
+  tools?: Array<{
+    type: "function";
+    function: { name: string; description: string; parameters: Record<string, unknown> };
+  }>;
 }
 
 export type ProviderEvent =

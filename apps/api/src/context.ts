@@ -1,21 +1,11 @@
-import { getEncoding } from "js-tiktoken";
 import { getProfile, listAttachments, listContextHistory, type VektorDatabase } from "@vektor/db";
 import type { ContextEstimate, ContextRequest } from "@vektor/shared";
 import type { ProviderService } from "./providers/service.js";
 import type { ChatMessage } from "./providers/types.js";
 import { AttachmentError } from "./attachments/extract.js";
 import type { AttachmentService } from "./attachments/service.js";
-
-const tokenizer = getEncoding("cl100k_base");
-const tokens = (text: string) => tokenizer.encode(text, [], []).length;
-const messageTokens = (message: ChatMessage) =>
-  typeof message.content === "string"
-    ? tokens(message.content) + 6
-    : 6 +
-      message.content.reduce(
-        (sum, part) => sum + (part.type === "text" ? tokens(part.text) : 4096),
-        0,
-      );
+import { countTokens as tokens, countMessageTokens as messageTokens } from "./runtime/tokens.js";
+import { runtimeSystemPrompt, toolsForProfile } from "./runtime/policy.js";
 
 export class ContextService {
   constructor(
@@ -53,7 +43,11 @@ export class ContextService {
     const images = attachments.filter((file) => file.kind === "image");
     const currentText = input.content + documentText;
     const currentTokens = tokens(currentText) + 6 + images.length * 4096;
-    const systemTokens = profile.systemPrompt.trim() ? tokens(profile.systemPrompt.trim()) + 6 : 0;
+    const systemPrompt = runtimeSystemPrompt(profile);
+    const toolDefinitions = toolsForProfile(profile);
+    const systemTokens =
+      (systemPrompt ? tokens(systemPrompt) + 6 : 0) +
+      (toolDefinitions.length ? tokens(JSON.stringify(toolDefinitions)) + 6 : 0);
     const previous = listContextHistory(this.db, channelId, beforeMessageId);
     const history = previous.messages.map(
       (record) => ({ role: record.role, content: record.content }) satisfies ChatMessage,

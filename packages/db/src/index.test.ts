@@ -9,6 +9,11 @@ import {
   createMessage,
   getMessage,
   listAttachments,
+  createAttachment,
+  linkMessageAttachments,
+  listMessageAttachments,
+  getRun,
+  listToolCalls,
   defaultMigrationsFolder,
   getSetting,
   openDatabase,
@@ -38,6 +43,55 @@ afterEach(() => {
 });
 
 describe("database bootstrap", () => {
+  it("upgrades Phase 3 data while preserving attachment inclusion, links, and completed runs", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "vektor-runtime-migration-"));
+    const legacy = join(tempDir, "legacy");
+    mkdirSync(join(legacy, "meta"), { recursive: true });
+    const journal = JSON.parse(
+      readFileSync(join(defaultMigrationsFolder, "meta/_journal.json"), "utf8"),
+    ) as { entries: Array<{ tag: string; idx: number }> };
+    journal.entries = journal.entries.filter((entry) => entry.idx < 3);
+    writeFileSync(join(legacy, "meta/_journal.json"), JSON.stringify(journal));
+    for (const entry of journal.entries)
+      cpSync(join(defaultMigrationsFolder, `${entry.tag}.sql`), join(legacy, `${entry.tag}.sql`));
+    const { db, sqlite } = openDatabase(join(tempDir, "vektor.db"));
+    connection = sqlite;
+    runMigrations(db, legacy);
+    const profile = createProfile(db, { name: "Phase 3", model: "test" });
+    const channel = createChannel(db, { name: "Files", profileId: profile.id });
+    const message = createMessage(db, {
+      channelId: channel.id,
+      role: "user",
+      content: "Saved files",
+    });
+    const attachment = createAttachment(db, {
+      id: "legacy-file",
+      channelId: channel.id,
+      filename: "notes.txt",
+      mime: "text/plain",
+      size: 4,
+      kind: "text",
+      included: false,
+      extractedText: "kept",
+      createdAt: new Date(),
+    });
+    linkMessageAttachments(db, message.id, [attachment.id]);
+    sqlite
+      .prepare(
+        "insert into runs (id, channel_id, profile_id, user_message_id, model, status, started_at) values (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run("old-run", channel.id, profile.id, message.id, "test", "completed", Date.now());
+    runMigrations(db);
+    expect(getRun(db, "old-run")).toMatchObject({
+      status: "completed",
+      terminalMode: "no-terminal",
+    });
+    expect(listMessageAttachments(db, message.id)[0]).toMatchObject({
+      included: false,
+      extractedText: "kept",
+    });
+    expect(listToolCalls(db, "old-run")).toEqual([]);
+  });
   it("upgrades a Phase 2 database without losing messages or settings", () => {
     tempDir = mkdtempSync(join(tmpdir(), "vektor-migration-"));
     const legacy = join(tempDir, "legacy");

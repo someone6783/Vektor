@@ -26,13 +26,15 @@ export class StubChatProvider implements ChatProvider {
       return;
     }
 
-    yield {
-      type: "tool_call",
-      id: "stub-tool-1",
-      name: "read_file",
-      argumentsJson: JSON.stringify({ path: "README.md" }),
-    };
+    const demoTool = request.tools?.some((tool) => tool.function.name === "read_file");
+    if (demoTool)
+      yield {
+        type: "tool_call",
+        id: "stub-tool-1",
+        name: "read_file",
+        argumentsJson: JSON.stringify({ path: "README.md" }),
+      };
     yield { type: "usage", promptTokens: 8, completionTokens: 5, totalTokens: 13 };
-    yield { type: "finish", reason: "tool_calls" };
+    yield { type: "finish", reason: demoTool ? "tool_calls" : "stop" };
   }
 }

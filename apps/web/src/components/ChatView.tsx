@@ -3,10 +3,12 @@ import type { Channel, Message, Profile, Run } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { ContextComposer } from "./ContextComposer";
 import { MessageAttachments } from "./Attachments";
+import { RunTimeline } from "./RunTimeline";
 import { Markdown } from "./Markdown";
 import type { LiveRun } from "../lib/live";
 
 interface ChatViewProps {
+  emergencyStopped?: boolean;
   client: ApiClient;
   lastRun: Run | null;
   channel: Channel | null;
@@ -65,6 +67,7 @@ function MessageRow({ message, client }: { message: Message; client: ApiClient }
 }
 
 export function ChatView({
+  emergencyStopped = false,
   client,
   lastRun,
   channel,
@@ -126,10 +129,19 @@ export function ChatView({
             style={{ backgroundColor: `var(--profile-${profile.color})` }}
           />
           {profile.name}
+          <span className="text-slate-500">· {profile.terminalMode}</span>
           <span className="text-slate-600">·</span>
           <span className="font-mono text-[10px]">{profile.model}</span>
         </div>
       </header>
+
+      <RunTimeline
+        key={channel.id}
+        client={client}
+        channelId={channel.id}
+        version={messages.length}
+        onRetry={onRetry}
+      />
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         {hasMore ? (
@@ -224,6 +236,7 @@ export function ChatView({
           channel={channel}
           profile={profile}
           busy={busy}
+          executionStopped={emergencyStopped}
           historyVersion={messages.length}
           lastRun={lastRun}
           onSend={onSend}

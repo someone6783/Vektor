@@ -48,6 +48,20 @@ export function registerDevProviderRoutes(
     void (async () => {
       try {
         for await (const event of providerService.getChatProvider().streamChat({
+          ...(!providerService.isConfigured()
+            ? {
+                tools: [
+                  {
+                    type: "function" as const,
+                    function: {
+                      name: "read_file",
+                      description: "Synthetic development fixture; never executed.",
+                      parameters: {},
+                    },
+                  },
+                ],
+              }
+            : {}),
           model: providerService.getDefaultModel(),
           messages: [{ role: "user", content: prompt }],
           signal: controller.signal,

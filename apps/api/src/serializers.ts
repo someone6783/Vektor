@@ -89,5 +89,6 @@ export function toRun(record: RunRecord): Run {
     startedAt: iso(record.startedAt),
     endedAt: isoOrNull(record.endedAt),
     context: contextEstimateSchema.nullable().parse(record.context),
+    terminalMode: record.terminalMode,
   };
 }

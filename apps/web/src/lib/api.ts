@@ -2,6 +2,12 @@ import {
   apiErrorSchema,
   attachmentSchema,
   contextEstimateSchema,
+  runtimeStateSchema,
+  runDetailsSchema,
+  auditEntrySchema,
+  type RuntimeState,
+  type RunDetails,
+  type AuditEntry,
   type Attachment,
   type ContextEstimate,
   type ContextRequest,
@@ -52,6 +58,45 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+
+  async runtime(): Promise<RuntimeState> {
+    return runtimeStateSchema.parse(await this.request("/api/runtime"));
+  }
+  async emergencyStop(): Promise<void> {
+    await this.request("/api/runtime/emergency-stop", { method: "POST" });
+  }
+  async resumeRuntime(): Promise<void> {
+    await this.request("/api/runtime/resume", { method: "POST" });
+  }
+  async decideApproval(id: string, approved: boolean): Promise<void> {
+    await this.request(`/api/approvals/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ approved }),
+    });
+  }
+  async listRuns(
+    channelId: string,
+    before?: number,
+  ): Promise<{ runs: Run[]; nextBefore: number | null }> {
+    const query = new URLSearchParams({ channelId });
+    if (before) query.set("before", String(before));
+    const result = await this.request<{ runs: unknown; nextBefore: number | null }>(
+      `/api/runs?${query}`,
+    );
+    return { runs: runSchema.array().parse(result.runs), nextBefore: result.nextBefore };
+  }
+  async runDetails(id: string): Promise<RunDetails> {
+    return runDetailsSchema.parse(await this.request(`/api/runs/${id}/details`));
+  }
+  async audit(before?: number): Promise<{ entries: AuditEntry[]; nextBefore: number | null }> {
+    const result = await this.request<{ entries: unknown; nextBefore: number | null }>(
+      `/api/audit${before ? `?before=${before}` : ""}`,
+    );
+    return {
+      entries: auditEntrySchema.array().parse(result.entries),
+      nextBefore: result.nextBefore,
+    };
+  }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, {
@@ -177,11 +222,16 @@ export class ApiClient {
     );
   }
 
-  async retryRun(runId: string): Promise<Run> {
+  async retryRun(runId: string, allowTruncation = false): Promise<Run> {
     const body = await this.request<{ run: unknown }>(`/api/runs/${runId}/retry`, {
       method: "POST",
+      body: JSON.stringify({ allowTruncation }),
     });
     return runSchema.parse(body.run);
+  }
+
+  async retryContext(runId: string): Promise<ContextEstimate> {
+    return contextEstimateSchema.parse(await this.request(`/api/runs/${runId}/context`));
   }
 
   async listAttachments(channelId: string): Promise<{

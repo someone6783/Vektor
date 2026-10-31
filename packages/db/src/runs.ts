@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gt, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, max, sql } from "drizzle-orm";
 import type { VektorDatabase } from "./client.js";
 import { runEvents, runs } from "./schema.js";
 
@@ -16,6 +16,7 @@ export interface RunRecord {
   error: string | null;
   usage: unknown;
   context: unknown;
+  terminalMode: "no-terminal" | "basic" | "full-access";
   startedAt: number;
   endedAt: number | null;
 }
@@ -26,6 +27,7 @@ export interface CreateRunRecordInput {
   userMessageId: string;
   model: string;
   context?: unknown;
+  terminalMode?: "no-terminal" | "basic" | "full-access";
 }
 
 export interface RunEventRecord {
@@ -55,6 +57,7 @@ function toRecord(row: typeof runs.$inferSelect): RunRecord {
     error: row.error,
     usage,
     context: row.contextJson ? (JSON.parse(row.contextJson) as unknown) : null,
+    terminalMode: row.terminalMode as RunRecord["terminalMode"],
     startedAt: row.startedAt.getTime(),
     endedAt: row.endedAt?.getTime() ?? null,
   };
@@ -72,6 +75,7 @@ export function createRun(db: VektorDatabase, input: CreateRunRecordInput): RunR
     error: null,
     usageJson: null,
     contextJson: input.context ? JSON.stringify(input.context) : null,
+    terminalMode: input.terminalMode ?? "no-terminal",
     startedAt: new Date(),
     endedAt: null,
   };
@@ -112,6 +116,22 @@ export function listRunningRuns(db: VektorDatabase): RunRecord[] {
     .from(runs)
     .where(eq(runs.status, "running"))
     .orderBy(asc(runs.startedAt))
+    .all()
+    .map(toRecord);
+}
+
+export function listRuns(db: VektorDatabase, channelId?: string, before?: number) {
+  return db
+    .select()
+    .from(runs)
+    .where(
+      and(
+        channelId ? eq(runs.channelId, channelId) : undefined,
+        before ? lt(runs.startedAt, new Date(before)) : undefined,
+      ),
+    )
+    .orderBy(desc(runs.startedAt), sql`rowid desc`)
+    .limit(30)
     .all()
     .map(toRecord);
 }

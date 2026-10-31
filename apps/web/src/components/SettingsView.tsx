@@ -14,8 +14,8 @@ interface SettingsViewProps {
 
 const terminalModes: Array<{ value: TerminalMode; label: string }> = [
   { value: "no-terminal", label: "No terminal" },
-  { value: "basic", label: "Basic (Phase 4)" },
-  { value: "full-access", label: "Full access (Phase 4)" },
+  { value: "basic", label: "Basic · workspace commands" },
+  { value: "full-access", label: "Full access · approval required" },
 ];
 
 const colors = ["emerald", "sky", "violet", "amber", "rose"] as const;
@@ -39,10 +39,18 @@ function ProfileEditor({
   const [temperature, setTemperature] = useState(String(profile.temperature));
   const [maxTokens, setMaxTokens] = useState(String(profile.maxTokens));
   const [terminalMode, setTerminalMode] = useState<TerminalMode>(profile.terminalMode);
+  const [terminalTool, setTerminalTool] = useState(profile.tools.includes("terminal"));
+  const [fullAccessAcknowledged, setFullAccessAcknowledged] = useState(
+    profile.terminalMode === "full-access",
+  );
   const [color, setColor] = useState(profile.color);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
+    if (terminalMode === "full-access" && !fullAccessAcknowledged) {
+      onError("Acknowledge the full-access warning before saving this profile.");
+      return;
+    }
     setBusy(true);
     try {
       await client.updateProfile(profile.id, {
@@ -52,6 +60,10 @@ function ProfileEditor({
         temperature: Math.min(2, Math.max(0, Number(temperature) || 0)),
         maxTokens: Math.max(1, Math.round(Number(maxTokens) || 2048)),
         terminalMode,
+        tools: [
+          ...profile.tools.filter((tool) => tool !== "terminal"),
+          ...(terminalTool && terminalMode !== "no-terminal" ? ["terminal"] : []),
+        ],
         color,
       });
       await onSaved();
@@ -131,7 +143,12 @@ function ProfileEditor({
           </label>
           <select
             value={terminalMode}
-            onChange={(event) => setTerminalMode(event.target.value as TerminalMode)}
+            onChange={(event) => {
+              setTerminalMode(event.target.value as TerminalMode);
+              setTerminalTool(event.target.value !== "no-terminal");
+              setFullAccessAcknowledged(false);
+            }}
+            aria-label={`Terminal mode for ${profile.name}`}
             className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
           >
             {terminalModes.map((mode) => (
@@ -179,10 +196,40 @@ function ProfileEditor({
       </div>
 
       <div className="mt-3 flex items-center gap-2">
+        <p className="text-[11px] leading-5 text-slate-400">
+          {terminalMode === "no-terminal"
+            ? "Command execution is disabled, including unsolicited tool requests."
+            : terminalMode === "basic"
+              ? "Basic mode allows pwd, ls, cat, head, tail, wc, mkdir, and touch with restricted options and checked workspace paths. No shell, scripts, interpreters, or symlinks. This is a guardrail, not a hardened sandbox; the container boundary provides isolation."
+              : "Full access can read or modify files outside the workspace with the backend account's permissions. Docker commands run inside the container; a local backend runs commands on your host. Every command requires approval."}
+        </p>
+      </div>
+      {terminalMode !== "no-terminal" ? (
+        <label className="mt-2 flex gap-2 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={terminalTool}
+            onChange={(event) => setTerminalTool(event.target.checked)}
+          />
+          Enable terminal tool for this profile
+        </label>
+      ) : null}
+      {terminalMode === "full-access" ? (
+        <label className="mt-2 flex gap-2 text-xs text-amber-200">
+          <input
+            type="checkbox"
+            checked={fullAccessAcknowledged}
+            onChange={(event) => setFullAccessAcknowledged(event.target.checked)}
+          />
+          I understand full access can affect files outside the workspace.
+        </label>
+      ) : null}
+
+      <div className="mt-3 flex items-center gap-2">
         <button
           type="button"
           onClick={() => void save()}
-          disabled={busy}
+          disabled={busy || (terminalMode === "full-access" && !fullAccessAcknowledged)}
           className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
         >
           Save profile
@@ -196,7 +243,7 @@ function ProfileEditor({
           Archive
         </button>
         <p className="ml-auto text-[10px] text-slate-600">
-          Terminal modes are stored now and enforced in Phase 4.
+          Changes apply to new runs; revoked terminal permissions stop further tool execution.
         </p>
       </div>
     </div>

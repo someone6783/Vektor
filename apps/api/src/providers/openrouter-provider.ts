@@ -105,6 +105,7 @@ export class OpenRouterProvider implements ChatProvider {
           ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
           ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
           usage: { include: true },
+          ...(request.tools?.length ? { tools: request.tools, tool_choice: "auto" } : {}),
         }),
         signal: request.signal,
       });

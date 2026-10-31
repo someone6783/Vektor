@@ -22,6 +22,7 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
     VEKTOR_DATA_DIR=/data \
+    VEKTOR_RUNTIME_ENV=container \
     VEKTOR_WEB_DIST=/app/web-dist
 
 WORKDIR /app

@@ -4,6 +4,8 @@ import {
   listRunningRuns,
   updateRun,
   type VektorDatabase,
+  closeRunTools,
+  appendAudit,
 } from "@vektor/db";
 import type { RunEvent } from "@vektor/shared";
 
@@ -14,6 +16,8 @@ export function recoverInterruptedRuns(db: VektorDatabase): string[] {
   const now = Date.now();
 
   for (const run of interrupted) {
+    closeRunTools(db, run.id, INTERRUPTED_ERROR);
+    appendAudit(db, "run.interrupted", run.id, { error: INTERRUPTED_ERROR });
     const seq = getMaxRunSeq(db, run.id) + 1;
     const event: RunEvent = {
       seq,

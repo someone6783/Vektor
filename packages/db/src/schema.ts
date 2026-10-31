@@ -68,6 +68,7 @@ export const runs = sqliteTable(
     error: text("error"),
     usageJson: text("usage_json"),
     contextJson: text("context_json"),
+    terminalMode: text("terminal_mode").notNull().default("no-terminal"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   },
@@ -121,3 +122,47 @@ export const messageAttachments = sqliteTable(
   },
   (table) => [uniqueIndex("message_attachments_pair_idx").on(table.messageId, table.attachmentId)],
 );
+
+export const toolCalls = sqliteTable(
+  "tool_calls",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    providerCallId: text("provider_call_id").notNull(),
+    name: text("name").notNull(),
+    inputJson: text("input_json").notNull(),
+    output: text("output").notNull().default(""),
+    status: text("status").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("tool_calls_run_idx").on(table.runId)],
+);
+
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    toolCallId: text("tool_call_id")
+      .notNull()
+      .references(() => toolCalls.id, { onDelete: "cascade" }),
+    command: text("command").notNull(),
+    status: text("status").notNull().default("pending"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [index("approvals_status_idx").on(table.status)],
+);
+
+export const auditLog = sqliteTable("audit_log", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  action: text("action").notNull(),
+  runId: text("run_id"),
+  detailsJson: text("details_json").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});

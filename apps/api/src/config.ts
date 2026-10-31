@@ -30,6 +30,8 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(250 * 1024 * 1024),
+  VEKTOR_RUN_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(120_000),
+  VEKTOR_RUNTIME_ENV: z.enum(["host", "container"]).default("host"),
 });
 
 export interface AppConfig {
@@ -48,6 +50,8 @@ export interface AppConfig {
   openRouterModel: string;
   maxFileBytes?: number;
   channelFileBytes?: number;
+  runTimeoutMs?: number;
+  runtimeEnvironment?: "host" | "container";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -79,5 +83,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     openRouterModel: parsed.VEKTOR_OPENROUTER_MODEL,
     maxFileBytes: parsed.VEKTOR_MAX_FILE_BYTES,
     channelFileBytes: parsed.VEKTOR_CHANNEL_FILE_BYTES,
+    runTimeoutMs: parsed.VEKTOR_RUN_TIMEOUT_MS,
+    runtimeEnvironment: parsed.VEKTOR_RUNTIME_ENV,
   };
 }

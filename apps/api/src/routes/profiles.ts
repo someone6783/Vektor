@@ -6,6 +6,7 @@ import {
   listProfiles,
   updateProfile,
   type VektorDatabase,
+  appendAudit,
 } from "@vektor/db";
 import { createProfileSchema, makeApiError, updateProfileSchema } from "@vektor/shared";
 import { toProfile } from "../serializers.js";
@@ -18,6 +19,11 @@ export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase):
   app.post("/api/profiles", async (request, reply) => {
     const input = createProfileSchema.parse(request.body);
     const profile = createProfile(db, input);
+    appendAudit(db, "profile.created", null, {
+      profileId: profile.id,
+      terminalMode: profile.terminalMode,
+      tools: profile.tools,
+    });
     return reply.code(201).send({ profile: toProfile(profile) });
   });
 
@@ -47,6 +53,13 @@ export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase):
         .send(makeApiError("not_found", "Profile not found.", { requestId: request.id }));
     }
 
+    if (input.terminalMode !== undefined || input.tools !== undefined)
+      appendAudit(db, "profile.permissions_changed", null, {
+        profileId,
+        previousMode: existing.terminalMode,
+        terminalMode: profile.terminalMode,
+        tools: profile.tools,
+      });
     return { profile: toProfile(profile) };
   });
 
@@ -68,6 +81,7 @@ export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase):
     }
 
     archiveProfile(db, profileId);
+    appendAudit(db, "profile.archived", null, { profileId });
     return reply.code(204).send();
   });
 }

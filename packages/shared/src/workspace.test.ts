@@ -109,7 +109,7 @@ describe("workspace contracts", () => {
     expect(messagesResponseSchema.parse(page)).toEqual({
       ...page,
       messages: page.messages.map((message) => ({ ...message, attachments: [] })),
-      activeRun: { ...page.activeRun, context: null },
+      activeRun: { ...page.activeRun, context: null, terminalMode: "no-terminal" },
       lastRun: null,
     });
     expect(() => runSchema.parse({ ...page.activeRun, status: "queued" })).toThrow();

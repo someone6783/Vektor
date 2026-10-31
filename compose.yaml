@@ -14,9 +14,11 @@ services:
       VEKTOR_LOG_LEVEL: info
       VEKTOR_MAX_FILE_BYTES: ${VEKTOR_MAX_FILE_BYTES:-26214400}
       VEKTOR_CHANNEL_FILE_BYTES: ${VEKTOR_CHANNEL_FILE_BYTES:-262144000}
+      VEKTOR_RUN_TIMEOUT_MS: ${VEKTOR_RUN_TIMEOUT_MS:-120000}
     volumes:
       - vektor-data:/data
     restart: unless-stopped
+    init: true
     healthcheck:
       test:
         [

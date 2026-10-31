@@ -9,6 +9,8 @@ import type {
 import { ChatView } from "./components/ChatView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
+import { RuntimeControls } from "./components/RuntimeControls";
+import { AuditView } from "./components/AuditView";
 import { ApiClient, ApiError } from "./lib/api";
 import { applyRunEvent, startLiveRun, type LiveRun } from "./lib/live";
 
@@ -111,11 +113,12 @@ function TokenGate({
 
 export default function App() {
   const [lastRun, setLastRun] = useState<Run | null>(null);
+  const [emergencyStopped, setEmergencyStopped] = useState(false);
   const [token, setToken] = useState(readStoredToken);
   const [tokenDraft, setTokenDraft] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"chat" | "settings">("chat");
+  const [view, setView] = useState<"chat" | "settings" | "audit">("chat");
   const [settings, setSettings] = useState<SettingsViewData | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -500,7 +503,20 @@ export default function App() {
 
       void (async () => {
         try {
-          const run = await client.retryRun(runId);
+          const estimate = await client.retryContext(runId);
+          if (estimate.exceedsBudget)
+            throw new Error(
+              "This retry exceeds the context budget. Exclude files or lower the profile's max output tokens before retrying.",
+            );
+          if (
+            estimate.requiresTruncation &&
+            !window.confirm(
+              `Retry with ${estimate.inputTokens} estimated input tokens? ${estimate.droppedMessages} oldest messages will be omitted. Saved history is preserved.`,
+            )
+          )
+            return;
+          const run = await client.retryRun(runId, estimate.requiresTruncation);
+          setLastRun(run);
           setMessages((value) =>
             value.filter((message) => !(message.role === "assistant" && message.runId === runId)),
           );
@@ -710,6 +726,14 @@ export default function App() {
           </button>
         </nav>
 
+        <button
+          type="button"
+          onClick={() => setView("audit")}
+          className={`rounded-lg px-3 py-1.5 text-xs ${view === "audit" ? "bg-white/10 text-slate-100" : "text-slate-400"}`}
+        >
+          Audit
+        </button>
+
         <div className="ml-auto flex items-center gap-3">
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${
@@ -766,6 +790,12 @@ export default function App() {
         </div>
       </header>
 
+      <RuntimeControls
+        client={client}
+        onStoppedChange={setEmergencyStopped}
+        onError={reportError}
+      />
+
       {booting ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -773,6 +803,8 @@ export default function App() {
             Loading workspace…
           </div>
         </div>
+      ) : view === "audit" ? (
+        <AuditView client={client} />
       ) : view === "settings" && settings ? (
         <SettingsView
           client={client}
@@ -797,6 +829,7 @@ export default function App() {
             onArchive={archiveChannel}
           />
           <ChatView
+            emergencyStopped={emergencyStopped}
             client={client}
             lastRun={lastRun?.channelId === activeChannel?.id ? lastRun : null}
             channel={activeChannel}

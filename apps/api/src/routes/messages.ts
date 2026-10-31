@@ -89,6 +89,7 @@ export function registerMessageRoutes(
   });
 
   app.post("/api/channels/:channelId/messages", async (request, reply) => {
+    runManager.assertCanStart();
     const { channelId } = request.params as { channelId: string };
     const input = sendMessageSchema.parse(request.body);
 
@@ -131,6 +132,7 @@ export function registerMessageRoutes(
       throw new AttachmentError("Write a message or include an attachment before sending.");
     checkContextBudget(prepared.estimate, input.allowTruncation);
     const chatMessages = await context.messages(prepared);
+    runManager.assertCanStart();
     if (getActiveRun(db, channelId))
       return reply
         .code(409)
@@ -153,6 +155,7 @@ export function registerMessageRoutes(
       userMessageId: message.id,
       model,
       context: prepared.estimate,
+      terminalMode: profile.terminalMode,
     });
 
     runManager.start({
@@ -170,6 +173,7 @@ export function registerMessageRoutes(
   });
 
   app.post("/api/runs/:runId/retry", async (request, reply) => {
+    runManager.assertCanStart();
     const { runId } = request.params as { runId: string };
     const previous = getRun(db, runId);
 
@@ -217,6 +221,7 @@ export function registerMessageRoutes(
     const prepared = context.prepare(channel.id, retryInput, profile.id, userMessage.id);
     checkContextBudget(prepared.estimate, retryOptions.allowTruncation);
     const chatMessages = await context.messages(prepared);
+    runManager.assertCanStart();
     if (getActiveRun(db, channel.id))
       return reply
         .code(409)
@@ -230,6 +235,7 @@ export function registerMessageRoutes(
       userMessageId: userMessage.id,
       model: previous.model,
       context: prepared.estimate,
+      terminalMode: profile.terminalMode,
     });
 
     runManager.start({
@@ -239,6 +245,31 @@ export function registerMessageRoutes(
     });
 
     return reply.code(201).send({ run: toRun(run) });
+  });
+
+  app.get("/api/runs/:runId/context", async (request, reply) => {
+    const { runId } = request.params as { runId: string };
+    const run = getRun(db, runId);
+    if (!run) return reply.code(404).send(makeApiError("not_found", "Run not found."));
+    const channel = getChannel(db, run.channelId);
+    const message = getMessage(db, run.userMessageId);
+    if (!channel || !message)
+      return reply
+        .code(409)
+        .send(makeApiError("run_retry_unavailable", "This run can no longer be retried."));
+    return context.prepare(
+      channel.id,
+      {
+        content: message.content,
+        profileId: run.profileId,
+        model: run.model,
+        attachmentIds: listMessageAttachments(db, message.id)
+          .filter((file) => file.included)
+          .map((file) => file.id),
+      },
+      run.profileId,
+      message.id,
+    ).estimate;
   });
 
   app.post("/api/runs/:runId/cancel", async (request, reply) => {

@@ -4,6 +4,7 @@ import type { ApiClient } from "../lib/api";
 import { AttachmentPreview } from "./Attachments";
 
 interface Props {
+  executionStopped?: boolean;
   client: ApiClient;
   channel: Channel;
   profile: Profile;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function ContextComposer({
+  executionStopped = false,
   client,
   channel,
   profile,
@@ -136,6 +138,7 @@ export function ContextComposer({
   };
 
   const canSend =
+    !executionStopped &&
     !busy &&
     !sending &&
     !working &&
@@ -331,6 +334,11 @@ export function ContextComposer({
             : " · Provider usage unavailable"}
         </p>
       ) : null}
+      {executionStopped ? (
+        <p className="mb-2 text-xs text-rose-300">
+          Execution is stopped. Resume from the runtime controls to send a message.
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="mb-2 text-xs text-rose-300">
           {error}
@@ -350,6 +358,7 @@ export function ContextComposer({
           ) : canRetry ? (
             <button
               type="button"
+              disabled={executionStopped}
               onClick={onRetry}
               className="rounded-lg border border-white/10 px-3 py-1.5 text-xs"
             >
