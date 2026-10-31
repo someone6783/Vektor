@@ -1,9 +1,29 @@
 import type { ChatProvider, ChatRequest, ProviderEvent } from "./types.js";
 
+const STUB_TEXT =
+  "Here is a **streamed** response from the stub provider.\n\n" +
+  "- The API persisted these events.\n" +
+  "- Markdown renders in the workspace.\n\n" +
+  '```ts\nconst status = "ok";\n```\n\n' +
+  "Add an OpenRouter key in Settings for real answers. ";
+
+function tokenize(text: string): string[] {
+  return text.match(/\S+\s*/g) ?? [text];
+}
+
 export class StubChatProvider implements ChatProvider {
-  async *streamChat(_request: ChatRequest): AsyncIterable<ProviderEvent> {
-    for (const token of ["Hello", "from", "the", "stub", "provider."]) {
-      yield { type: "text.delta", text: `${token} ` };
+  async *streamChat(request: ChatRequest): AsyncIterable<ProviderEvent> {
+    for (const token of tokenize(STUB_TEXT)) {
+      if (request.signal?.aborted) {
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      yield { type: "text.delta", text: token };
+    }
+
+    if (request.signal?.aborted) {
+      return;
     }
 
     yield {

@@ -1,3 +1,5 @@
+import type { ModelInfo } from "@vektor/shared";
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
@@ -24,4 +26,5 @@ export type ProviderEvent =
 
 export interface ChatProvider {
   streamChat(request: ChatRequest): AsyncIterable<ProviderEvent>;
+  listModels?(): Promise<ModelInfo[]>;
 }

@@ -25,6 +25,10 @@ export function setSetting(db: VektorDatabase, key: string, value: unknown): voi
     .run();
 }
 
+export function deleteSetting(db: VektorDatabase, key: string): void {
+  db.delete(settings).where(eq(settings.key, key)).run();
+}
+
 export function getOrCreateInstanceId(db: VektorDatabase): string {
   const existing = getSetting(db, "app.instance_id");
   if (typeof existing === "string" && existing.length > 0) {

@@ -1,0 +1,481 @@
+import { useState } from "react";
+import type { ModelInfo, Profile, SettingsView, TerminalMode } from "@vektor/shared";
+import type { ApiClient } from "../lib/api";
+import { HealthCard } from "./HealthCard";
+
+interface SettingsViewProps {
+  client: ApiClient;
+  settings: SettingsView;
+  profiles: Profile[];
+  onSettingsChange: (settings: SettingsView) => void;
+  onProfilesChange: () => Promise<void>;
+  onError: (message: string) => void;
+}
+
+const terminalModes: Array<{ value: TerminalMode; label: string }> = [
+  { value: "no-terminal", label: "No terminal" },
+  { value: "basic", label: "Basic (Phase 4)" },
+  { value: "full-access", label: "Full access (Phase 4)" },
+];
+
+const colors = ["emerald", "sky", "violet", "amber", "rose"] as const;
+
+function ProfileEditor({
+  client,
+  profile,
+  models,
+  onSaved,
+  onError,
+}: {
+  client: ApiClient;
+  profile: Profile;
+  models: ModelInfo[];
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [name, setName] = useState(profile.name);
+  const [model, setModel] = useState(profile.model);
+  const [systemPrompt, setSystemPrompt] = useState(profile.systemPrompt);
+  const [temperature, setTemperature] = useState(String(profile.temperature));
+  const [maxTokens, setMaxTokens] = useState(String(profile.maxTokens));
+  const [terminalMode, setTerminalMode] = useState<TerminalMode>(profile.terminalMode);
+  const [color, setColor] = useState(profile.color);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await client.updateProfile(profile.id, {
+        name: name.trim() || profile.name,
+        model: model.trim() || profile.model,
+        systemPrompt,
+        temperature: Math.min(2, Math.max(0, Number(temperature) || 0)),
+        maxTokens: Math.max(1, Math.round(Number(maxTokens) || 2048)),
+        terminalMode,
+        color,
+      });
+      await onSaved();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save the profile.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const archive = async () => {
+    if (!window.confirm(`Archive profile "${profile.name}"? This cannot be undone in the UI.`)) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await client.archiveProfile(profile.id);
+      await onSaved();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not archive the profile.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">Name</label>
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-400/50"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">Color</label>
+          <div className="mt-2 flex gap-1.5">
+            {colors.map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setColor(value)}
+                aria-label={value}
+                className={`h-5 w-5 rounded-full border-2 ${
+                  color === value ? "border-white" : "border-transparent"
+                }`}
+                style={{ backgroundColor: `var(--profile-${value})` }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">Model</label>
+          <input
+            list={`models-${profile.id}`}
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+          />
+          <datalist id={`models-${profile.id}`}>
+            {models.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </datalist>
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">
+            Terminal mode
+          </label>
+          <select
+            value={terminalMode}
+            onChange={(event) => setTerminalMode(event.target.value as TerminalMode)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+          >
+            {terminalModes.map((mode) => (
+              <option key={mode.value} value={mode.value}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">Temperature</label>
+          <input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={temperature}
+            onChange={(event) => setTemperature(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wide text-slate-500">
+            Max output tokens
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={200000}
+            value={maxTokens}
+            onChange={(event) => setMaxTokens(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+          />
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <label className="text-[10px] uppercase tracking-wide text-slate-500">System prompt</label>
+        <textarea
+          value={systemPrompt}
+          onChange={(event) => setSystemPrompt(event.target.value)}
+          rows={4}
+          className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-xs leading-5 text-slate-100 outline-none focus:border-emerald-400/50"
+        />
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy}
+          className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
+        >
+          Save profile
+        </button>
+        <button
+          type="button"
+          onClick={() => void archive()}
+          disabled={busy}
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:text-rose-300 disabled:opacity-40"
+        >
+          Archive
+        </button>
+        <p className="ml-auto text-[10px] text-slate-600">
+          Terminal modes are stored now and enforced in Phase 4.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function SettingsView({
+  client,
+  settings,
+  profiles,
+  onSettingsChange,
+  onProfilesChange,
+  onError,
+}: SettingsViewProps) {
+  const [keyDraft, setKeyDraft] = useState("");
+  const [defaultModel, setDefaultModel] = useState(settings.defaultModel);
+  const [newName, setNewName] = useState("");
+  const [newModel, setNewModel] = useState(settings.defaultModel);
+  const [busy, setBusy] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const fail = (message: string) => {
+    setFormError(message);
+    onError(message);
+  };
+
+  const saveKey = async () => {
+    const key = keyDraft.trim();
+    if (!key) {
+      return;
+    }
+
+    setBusy(true);
+    setFormError(null);
+    try {
+      const next = await client.updateSettings({ openRouterKey: key });
+      onSettingsChange(next);
+      setKeyDraft("");
+      setTestResult("Key saved. Test the connection to refresh models.");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Could not save the key.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearKey = async () => {
+    setBusy(true);
+    setFormError(null);
+    try {
+      const next = await client.updateSettings({ openRouterKey: null });
+      onSettingsChange(next);
+      setTestResult("Stored key cleared.");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Could not clear the key.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveDefaultModel = async () => {
+    setBusy(true);
+    setFormError(null);
+    try {
+      const next = await client.updateSettings({ defaultModel: defaultModel.trim() });
+      onSettingsChange(next);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Could not save the default model.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    setTestResult(null);
+    setFormError(null);
+    try {
+      const result = await client.testProvider();
+      const next = await client.getSettings();
+      onSettingsChange(next);
+      setTestResult(`Connected. ${result.models.length} models available.`);
+    } catch (error) {
+      setTestResult(error instanceof Error ? error.message : "Connection test failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createProfile = async () => {
+    const name = newName.trim();
+    const model = newModel.trim();
+    if (!name || !model) {
+      return;
+    }
+
+    setBusy(true);
+    setFormError(null);
+    try {
+      await client.createProfile({ name, model });
+      setNewName("");
+      await onProfilesChange();
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Could not create the profile.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
+            Settings
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold">Providers, models, and profiles</h1>
+        </div>
+
+        {formError ? (
+          <p className="rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
+            {formError}
+          </p>
+        ) : null}
+
+        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-200">OpenRouter</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {settings.openRouterSource === "env"
+                  ? "Configured by VEKTOR_OPENROUTER_KEY. The environment key overrides stored settings."
+                  : settings.openRouterConfigured
+                    ? "A key is stored encrypted with /data/secrets.key."
+                    : "No key configured. Chat uses the deterministic stub provider."}
+              </p>
+            </div>
+            <span
+              className={`rounded-full border px-3 py-1 text-[11px] ${
+                settings.openRouterConfigured
+                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                  : "border-amber-400/30 bg-amber-400/10 text-amber-200"
+              }`}
+            >
+              {settings.openRouterConfigured ? "Configured" : "Stub mode"}
+            </span>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <input
+              type="password"
+              value={keyDraft}
+              onChange={(event) => setKeyDraft(event.target.value)}
+              placeholder="sk-or-v1-… (write-only)"
+              autoComplete="off"
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            />
+            <button
+              type="button"
+              onClick={() => void saveKey()}
+              disabled={busy || keyDraft.trim().length === 0}
+              className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40"
+            >
+              Save key
+            </button>
+            <button
+              type="button"
+              onClick={() => void test()}
+              disabled={busy}
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40"
+            >
+              Test connection
+            </button>
+            <button
+              type="button"
+              onClick={() => void clearKey()}
+              disabled={busy || !settings.openRouterConfigured}
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-400 hover:text-rose-300 disabled:opacity-40"
+            >
+              Clear stored key
+            </button>
+          </div>
+
+          {testResult ? (
+            <p className="mt-3 rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
+              {testResult}
+            </p>
+          ) : null}
+
+          <p className="mt-3 text-[10px] text-slate-600">
+            Keys are encrypted at rest and never returned by the API. A test fetches the OpenRouter
+            model list and caches it for the picker.
+          </p>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <h2 className="text-sm font-medium text-slate-200">Default model</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Used for new profiles and the dev provider. Existing profiles keep their own model.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input
+              list="settings-models"
+              value={defaultModel}
+              onChange={(event) => setDefaultModel(event.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            />
+            <datalist id="settings-models">
+              {settings.models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </datalist>
+            <button
+              type="button"
+              onClick={() => void saveDefaultModel()}
+              disabled={busy || defaultModel.trim().length === 0}
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40"
+            >
+              Save default
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-medium text-slate-200">Profiles</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Prompt, model, parameters, and terminal mode. The header switcher applies a profile
+                to the active channel.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {profiles.map((profile) => (
+              <ProfileEditor
+                key={profile.id}
+                client={client}
+                profile={profile}
+                models={settings.models}
+                onSaved={onProfilesChange}
+                onError={fail}
+              />
+            ))}
+          </div>
+
+          <div className="mt-5 rounded-xl border border-dashed border-white/10 p-4">
+            <h3 className="text-xs font-medium text-slate-300">New profile</h3>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                placeholder="Name"
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+              />
+              <input
+                value={newModel}
+                onChange={(event) => setNewModel(event.target.value)}
+                placeholder="Model"
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+              />
+              <button
+                type="button"
+                onClick={() => void createProfile()}
+                disabled={busy || !newName.trim() || !newModel.trim()}
+                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/5 disabled:opacity-40"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <HealthCard />
+      </div>
+    </div>
+  );
+}

@@ -134,7 +134,7 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 
 ### Run lifecycle
 
-1. Client posts a message; the API stores it and creates a queued run.
+1. Client posts a message; the API stores it and creates a run.
 2. The runner assembles context: profile prompt, recent conversation history, selected attachments, tool definitions.
 3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the CLI adapter arrives after v1.
 4. Tool calls pause the run if they need approval; the UI resolves the approval and the run resumes.
@@ -143,21 +143,20 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 
 ### Data model (draft)
 
-| Table            | Purpose                     | Key fields                                                                             |
-| ---------------- | --------------------------- | -------------------------------------------------------------------------------------- |
-| `settings`       | Global config               | `key`, `value_json`, `updated_at`                                                      |
-| `profiles`       | Agent configurations        | `name`, `system_prompt`, `model`, `params_json`, `terminal_mode`, `tools_json`         |
-| `channels`       | Slack-like containers       | `name`, `topic`, `kind`, `archived_at`                                                 |
-| `conversations`  | A message timeline          | `channel_id?`, `profile_id`, `title`                                                   |
-| `messages`       | User and assistant turns    | `conversation_id`, `role`, `content`, `run_id?`                                        |
-| `runs`           | One agent execution         | `conversation_id`, `runner`, `status`, `started_at`, `ended_at`, `usage_json`, `error` |
-| `run_events`     | Ordered append-only log     | `run_id`, `seq`, `type`, `payload_json`                                                |
-| `tool_calls`     | Queryable tool history      | `run_id`, `name`, `input_json`, `output`, `status`                                     |
-| `attachments`    | Stored files                | `message_id?`, `filename`, `mime`, `size`, `path`, `extracted_text`                    |
-| `scheduled_jobs` | Recurring jobs              | `schedule`, `timezone`, `profile_id`, `channel_id`, `prompt`, `next_run_at`            |
-| `job_runs`       | Scheduled execution history | `job_id`, `scheduled_for`, `status`, `run_id?`, `error`                                |
-| `approvals`      | Pending decisions           | `run_id`, `tool_call_id`, `command`, `status`                                          |
-| `audit_log`      | Security-relevant actions   | `actor`, `action`, `target`, `detail_json`, `created_at`                               |
+| Table            | Purpose                     | Key fields                                                                               |
+| ---------------- | --------------------------- | ---------------------------------------------------------------------------------------- |
+| `settings`       | Global config               | `key`, `value_json`, `updated_at`                                                        |
+| `profiles`       | Agent configurations        | `name`, `system_prompt`, `model`, `params_json`, `terminal_mode`, `tools_json`           |
+| `channels`       | Slack-like containers       | `name`, `topic`, `kind`, `profile_id`, `archived_at`                                     |
+| `messages`       | User and assistant turns    | `channel_id`, `role`, `content`, `status`, `run_id?`                                     |
+| `runs`           | One agent execution         | `channel_id`, `profile_id`, `user_message_id`, `runner`, `status`, `usage_json`, `error` |
+| `run_events`     | Ordered append-only log     | `run_id`, `seq`, `type`, `payload_json`                                                  |
+| `tool_calls`     | Queryable tool history      | `run_id`, `name`, `input_json`, `output`, `status`                                       |
+| `attachments`    | Stored files                | `message_id?`, `filename`, `mime`, `size`, `path`, `extracted_text`                      |
+| `scheduled_jobs` | Recurring jobs              | `schedule`, `timezone`, `profile_id`, `channel_id`, `prompt`, `next_run_at`              |
+| `job_runs`       | Scheduled execution history | `job_id`, `scheduled_for`, `status`, `run_id?`, `error`                                  |
+| `approvals`      | Pending decisions           | `run_id`, `tool_call_id`, `command`, `status`                                            |
+| `audit_log`      | Security-relevant actions   | `actor`, `action`, `target`, `detail_json`, `created_at`                                 |
 
 ## Phase 1 — Foundation
 
@@ -180,7 +179,7 @@ Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10
 - [x] Strict `tsconfig.base.json` plus per-package configs; workspace packages resolve by name through their built exports.
 - [x] ESLint flat config and Prettier; scripts for `lint`, `format:check`, `typecheck`, `test`, and `build`.
 - [x] Vitest across workspaces for contracts, database, API, and web logic.
-- [ ] React Testing Library with the first component test; deferred to Phase 2 when the first interactive component lands.
+- [x] React Testing Library with the first component test; landed in Phase 2 with the Markdown renderer.
 - [x] GitHub Actions: install with a frozen lockfile, then lint, typecheck, test, and build.
 
 Done when a clean clone passes `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
@@ -265,22 +264,52 @@ Exit criteria: all verification items pass, and health, persistence, auth, and t
 
 Goal: the first useful chat loop.
 
-- Add profile selection.
-- Add Slack-like conversations.
-- Add streaming responses.
-- Add Markdown rendering.
-- Add settings for OpenRouter and profiles.
+Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. Live OpenRouter calls still need `VEKTOR_OPENROUTER_KEY`; without it the deterministic stub provider serves chat.
 
-Details:
+### 2.1 Settings and provider
 
-- Settings screen: write-only OpenRouter key, model list, default model, connection test.
-- Profile CRUD and a header switcher; prompt, model, parameters, terminal mode field (enforced in Phase 4).
-- Channel sidebar, create/rename/archive, direct conversations, message history with pagination.
-- Composer with send, stop (basic abort), retry/regenerate; optimistic user message; streamed assistant message.
-- GFM Markdown with code highlighting and copy; safe HTML sanitization.
-- Persist and replay run events so a reload mid-stream recovers the output.
+- [x] `ProviderService` resolves the OpenRouter key from `VEKTOR_OPENROUTER_KEY` first, then from an AES-256-GCM value in `settings` encrypted with `secrets.key`. The environment key wins, and stored keys are never returned by the API.
+- [x] Settings API: `GET /api/settings`, `PUT /api/settings` (write/clear key, default model), and `POST /api/settings/provider/test`, which fetches and caches the model list.
+- [x] Settings screen with key entry, clear stored key, default model, connection test, and profile editors.
+- [x] Stub provider fallback when no key is configured, so the workspace is usable before setup.
 
-Exit criteria: configure a key, create a profile, create a channel, receive a streamed Markdown answer, stop it, reload, and find the conversation intact.
+### 2.2 Profiles
+
+- [x] Profiles table and repository, a default profile on first boot, CRUD routes, archive instead of hard delete, and a `409 last_profile` when archiving the last active profile.
+- [x] Header switcher applies the selected profile to the active channel; editors cover prompt, model, temperature, max tokens, color, and terminal mode (stored now, enforced in Phase 4).
+
+### 2.3 Channels and direct conversations
+
+- [x] Channels table and repository with `kind` (`channel` | `dm`), topic, profile, timestamps, and archive.
+- [x] Sidebar with channel and direct sections, create/rename/archive, and a persisted active channel.
+- [x] Flat timelines keyed by `messages.channel_id`; a separate `conversations` table was not needed.
+
+### 2.4 Messages, runs, and replay
+
+- [x] `messages`, `runs`, and `run_events` tables; `POST /api/channels/:channelId/messages` stores the user turn and starts a run.
+- [x] `RunManager` streams provider events into the ordered log and creates the assistant message on completion, failure, or cancellation; interrupted runs are marked failed on boot.
+- [x] Paginated history (`before`, `limit`) with the channel's `activeRun` in the response.
+- [x] `GET /api/runs/:runId/events` replays persisted events and follows live events from `Last-Event-ID` or `?after=`, deduping by sequence.
+- [x] `POST /api/runs/:runId/cancel` and `POST /api/runs/:runId/retry`; retry removes the previous assistant message and reuses the user turn.
+- [x] Reload mid-stream: the client subscribes from sequence 0 when `activeRun` is present and replays the same output.
+
+### 2.5 Web workspace
+
+- [x] Token gate with browser-local storage and 401 handling; bootstrap loads settings, profiles, and channels and creates "General" on first run.
+- [x] Composer with optimistic user message, Enter to send, Shift+Enter for newlines, stop, and regenerate.
+- [x] GFM Markdown through `react-markdown` with `rehype-sanitize`, `rehype-highlight`, and a copy button per code block.
+- [x] Live run panel with tool calls and usage, bounded SSE reconnect, and clear error states.
+
+### 2.6 Verification
+
+- [x] `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` pass.
+- [x] API tests cover settings key handling, profile/channel CRUD, send/stream/persist/replay, pagination, retry, and cancellation.
+- [x] Web tests cover SSE parsing and Markdown rendering/sanitization with React Testing Library and jsdom.
+- [x] Local production-build smoke test with the stub provider.
+- [x] Docker image built and verified: settings, channel creation, streamed reply, and conversation intact after a container restart.
+- [ ] Live OpenRouter check with a real key (`VEKTOR_OPENROUTER_KEY`), including model listing on the settings screen.
+
+Exit criteria: configure a key, create a profile, create a channel, receive a streamed Markdown answer, stop it, reload, and find the conversation intact. Stub-provider runs satisfy every step except the real-key check above.
 
 ## Phase 3 — Files and context
 

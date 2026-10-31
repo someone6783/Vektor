@@ -1,15 +1,14 @@
 import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import { SSE_HEARTBEAT } from "@vektor/shared";
-import type { ChatProvider } from "../providers/index.js";
+import type { ProviderService } from "../providers/service.js";
 import type { StreamRegistry } from "../stream-registry.js";
 
 const HEARTBEAT_MS = 15_000;
 
 export function registerDevProviderRoutes(
   app: FastifyInstance,
-  provider: ChatProvider,
-  model: string,
+  providerService: ProviderService,
   streams: StreamRegistry,
 ): void {
   app.get("/api/dev/provider", async (request, reply) => {
@@ -48,8 +47,8 @@ export function registerDevProviderRoutes(
 
     void (async () => {
       try {
-        for await (const event of provider.streamChat({
-          model,
+        for await (const event of providerService.getChatProvider().streamChat({
+          model: providerService.getDefaultModel(),
           messages: [{ role: "user", content: prompt }],
           signal: controller.signal,
         })) {

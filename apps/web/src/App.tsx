@@ -1,77 +1,803 @@
-import { HealthCard } from "./components/HealthCard";
-import { StreamDemo } from "./components/StreamDemo";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Channel, Message, Profile, SettingsView as SettingsViewData } from "@vektor/shared";
+import { ChatView } from "./components/ChatView";
+import { SettingsView } from "./components/SettingsView";
+import { Sidebar } from "./components/Sidebar";
+import { ApiClient, ApiError } from "./lib/api";
+import { applyRunEvent, startLiveRun, type LiveRun } from "./lib/live";
 
-const plannedNavigation = [
-  { label: "Chat", phase: "Phase 2" },
-  { label: "Profiles", phase: "Phase 2" },
-  { label: "Settings", phase: "Phase 2" },
-];
+const TOKEN_STORAGE_KEY = "vektor.accessToken";
+const CHANNEL_STORAGE_KEY = "vektor.activeChannel";
+const TERMINAL_EVENTS = new Set(["run.completed", "run.failed", "run.cancelled"]);
+
+function readStoredToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY) ?? import.meta.env.VITE_ACCESS_TOKEN ?? "";
+  } catch {
+    return import.meta.env.VITE_ACCESS_TOKEN ?? "";
+  }
+}
+
+function readStoredChannel(): string | null {
+  try {
+    return localStorage.getItem(CHANNEL_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredChannel(channelId: string | null): void {
+  try {
+    if (channelId) {
+      localStorage.setItem(CHANNEL_STORAGE_KEY, channelId);
+    } else {
+      localStorage.removeItem(CHANNEL_STORAGE_KEY);
+    }
+  } catch {
+    // Storage can be unavailable in private windows.
+  }
+}
+
+function TokenGate({
+  draft,
+  error,
+  onChange,
+  onSubmit,
+}: {
+  draft: string;
+  error: string | null;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-slate-950 px-6 text-slate-100">
+      <div className="w-full max-w-md">
+        <div className="flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-400 text-lg font-bold text-slate-950">
+            V
+          </div>
+          <div>
+            <div className="text-sm font-semibold tracking-wide">Vektor</div>
+            <div className="text-xs text-slate-500">Connect to your local workspace</div>
+          </div>
+        </div>
+
+        <form
+          className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Access token
+          </label>
+          <input
+            autoFocus
+            type="password"
+            value={draft}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="Paste the token from /data/access-token"
+            autoComplete="off"
+            className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+          />
+          {error ? (
+            <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
+              {error}
+            </p>
+          ) : null}
+          <button
+            type="submit"
+            disabled={draft.trim().length === 0}
+            className="mt-4 w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+          >
+            Unlock workspace
+          </button>
+          <p className="mt-3 text-[10px] leading-4 text-slate-600">
+            The token is stored in this browser only. Docker keeps it at{" "}
+            <code className="font-mono text-slate-500">/data/access-token</code>.
+          </p>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-10 border-b border-white/10 bg-slate-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-400 font-bold text-slate-950">
-              V
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-wide">Vektor</div>
-              <div className="text-xs text-slate-400">Local AI workspace</div>
-            </div>
-          </div>
+  const [token, setToken] = useState(readStoredToken);
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
 
-          <nav className="ml-auto hidden items-center gap-1 md:flex" aria-label="Planned sections">
-            {plannedNavigation.map((item) => (
+  const [view, setView] = useState<"chat" | "settings">("chat");
+  const [settings, setSettings] = useState<SettingsViewData | null>(null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [nextBefore, setNextBefore] = useState<string | null>(null);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [live, setLive] = useState<LiveRun | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [booting, setBooting] = useState(false);
+  const [online, setOnline] = useState(true);
+
+  const client = useMemo(() => (token ? new ApiClient(token) : null), [token]);
+
+  const activeChannel = useMemo(
+    () => channels.find((channel) => channel.id === activeChannelId) ?? null,
+    [channels, activeChannelId],
+  );
+
+  const activeProfile = useMemo(() => {
+    if (activeChannel?.profileId) {
+      const match = profiles.find((profile) => profile.id === activeChannel.profileId);
+      if (match) {
+        return match;
+      }
+    }
+
+    return profiles[0] ?? null;
+  }, [activeChannel, profiles]);
+
+  const bootedRef = useRef<string | null>(null);
+  const activeChannelIdRef = useRef<string | null>(null);
+  const clientRef = useRef<ApiClient | null>(client);
+  const streamRef = useRef<{ controller: AbortController; runId: string } | null>(null);
+
+  clientRef.current = client;
+
+  useEffect(() => {
+    activeChannelIdRef.current = activeChannelId;
+  }, [activeChannelId]);
+
+  const reportError = useCallback((nextError: unknown) => {
+    if (nextError instanceof ApiError && nextError.status === 401) {
+      try {
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+      } catch {
+        // Ignore storage failures.
+      }
+      bootedRef.current = null;
+      setAuthError("Access token rejected. Paste the token from /data/access-token.");
+      setToken("");
+      setTokenDraft("");
+      return;
+    }
+
+    setError(nextError instanceof Error ? nextError.message : "Something went wrong.");
+  }, []);
+
+  const stopStream = useCallback(() => {
+    streamRef.current?.controller.abort();
+    streamRef.current = null;
+  }, []);
+
+  const finalizeRef = useRef<(runId: string, channelId: string) => void>(() => {});
+
+  finalizeRef.current = (runId, channelId) => {
+    const current = clientRef.current;
+    if (!current || activeChannelIdRef.current !== channelId) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const page = await current.listMessages(channelId);
+        if (activeChannelIdRef.current !== channelId) {
+          return;
+        }
+
+        setMessages((value) => {
+          const known = new Set(page.messages.map((message) => message.id));
+          const oldest = page.messages[0]?.createdAt;
+          const older = value.filter(
+            (message) => !known.has(message.id) && (!oldest || message.createdAt < oldest),
+          );
+          return [...older, ...page.messages];
+        });
+        setNextBefore((value) => value ?? page.nextBefore);
+        setLive((value) => (value && value.runId === runId ? null : value));
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    })();
+  };
+
+  const subscribe = useCallback(
+    (runId: string, channelId: string, after: number) => {
+      const current = clientRef.current;
+      if (!current) {
+        return;
+      }
+
+      stopStream();
+      const controller = new AbortController();
+      streamRef.current = { controller, runId };
+      setLive((value) =>
+        value && value.runId === runId ? value : { ...startLiveRun(runId), lastSeq: after },
+      );
+
+      void (async () => {
+        let cursor = after;
+        let attempt = 0;
+
+        while (!controller.signal.aborted) {
+          let terminal = false;
+
+          try {
+            await current.streamRun(
+              runId,
+              cursor,
+              (event) => {
+                cursor = Math.max(cursor, event.seq);
+                attempt = 0;
+                if (TERMINAL_EVENTS.has(event.type)) {
+                  terminal = true;
+                }
+                setLive((value) =>
+                  applyRunEvent(
+                    value && value.runId === runId ? value : startLiveRun(runId),
+                    event,
+                  ),
+                );
+              },
+              controller.signal,
+            );
+          } catch (nextError) {
+            if (controller.signal.aborted) {
+              return;
+            }
+            attempt += 1;
+            if (attempt > 5) {
+              reportError(nextError);
+              return;
+            }
+          }
+
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          if (terminal) {
+            if (streamRef.current?.controller === controller) {
+              streamRef.current = null;
+            }
+            finalizeRef.current(runId, channelId);
+            return;
+          }
+
+          attempt += 1;
+          if (attempt > 5) {
+            setLive((value) => (value && value.runId === runId ? null : value));
+            setError("The live stream disconnected. Reload the channel to catch up.");
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, Math.min(4000, 400 * attempt)));
+        }
+      })();
+    },
+    [reportError, stopStream],
+  );
+
+  useEffect(() => {
+    if (!client || !token) {
+      return;
+    }
+    if (bootedRef.current === token) {
+      return;
+    }
+    bootedRef.current = token;
+
+    setBooting(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const [nextSettings, nextProfiles, loadedChannels] = await Promise.all([
+          client.getSettings(),
+          client.listProfiles(),
+          client.listChannels(),
+        ]);
+
+        if (bootedRef.current !== token) {
+          return;
+        }
+
+        setSettings(nextSettings);
+        setProfiles(nextProfiles);
+
+        let nextChannels = loadedChannels;
+        if (nextChannels.length === 0 && nextProfiles.length > 0) {
+          const general = await client.createChannel({
+            name: "General",
+            topic: "Your first Vektor channel",
+          });
+          nextChannels = [general];
+        }
+
+        if (bootedRef.current !== token) {
+          return;
+        }
+
+        setChannels(nextChannels);
+        const stored = readStoredChannel();
+        const nextActive =
+          nextChannels.find((channel) => channel.id === stored)?.id ?? nextChannels[0]?.id ?? null;
+        setActiveChannelId(nextActive);
+        writeStoredChannel(nextActive);
+        setAuthError(null);
+      } catch (nextError) {
+        if (bootedRef.current === token) {
+          reportError(nextError);
+        }
+      } finally {
+        if (bootedRef.current === token) {
+          setBooting(false);
+        }
+      }
+    })();
+  }, [client, token, reportError]);
+
+  useEffect(() => {
+    if (!token) {
+      bootedRef.current = null;
+    }
+  }, [token]);
+
+  useEffect(() => {
+    let active = true;
+
+    const ping = async () => {
+      try {
+        const response = await fetch("/healthz", { headers: { Accept: "application/json" } });
+        if (active) {
+          setOnline(response.ok);
+        }
+      } catch {
+        if (active) {
+          setOnline(false);
+        }
+      }
+    };
+
+    void ping();
+    const timer = setInterval(() => void ping(), 15_000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!client || !activeChannelId) {
+      setMessages([]);
+      setNextBefore(null);
+      setLive(null);
+      setLoadingMessages(false);
+      return;
+    }
+
+    let cancelled = false;
+    stopStream();
+    setLive(null);
+    setMessages([]);
+    setNextBefore(null);
+    setLoadingMessages(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const page = await client.listMessages(activeChannelId);
+        if (cancelled) {
+          return;
+        }
+
+        setMessages(page.messages);
+        setNextBefore(page.nextBefore);
+
+        if (page.activeRun && page.activeRun.status === "running") {
+          subscribe(page.activeRun.id, activeChannelId, 0);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          reportError(nextError);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingMessages(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
+  }, [client, activeChannelId, subscribe, stopStream, reportError]);
+
+  const selectChannel = useCallback(
+    (channelId: string) => {
+      stopStream();
+      setLive(null);
+      setActiveChannelId(channelId);
+      writeStoredChannel(channelId);
+      setView("chat");
+    },
+    [stopStream],
+  );
+
+  const sendMessage = useCallback(
+    async (content: string) => {
+      if (!client || !activeChannelId) {
+        return;
+      }
+
+      setError(null);
+      const optimisticId = `optimistic-${Date.now()}`;
+      const optimistic: Message = {
+        id: optimisticId,
+        channelId: activeChannelId,
+        role: "user",
+        content,
+        status: "complete",
+        runId: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      setMessages((value) => [...value, optimistic]);
+
+      try {
+        const response = await client.sendMessage(
+          activeChannelId,
+          content,
+          activeChannel?.profileId ?? activeProfile?.id,
+        );
+
+        setMessages((value) =>
+          value.map((message) => (message.id === optimisticId ? response.message : message)),
+        );
+        setLive(startLiveRun(response.run.id));
+        subscribe(response.run.id, activeChannelId, 0);
+      } catch (nextError) {
+        setMessages((value) => value.filter((message) => message.id !== optimisticId));
+        reportError(nextError);
+      }
+    },
+    [client, activeChannelId, activeChannel, activeProfile, subscribe, reportError],
+  );
+
+  const stopRun = useCallback(() => {
+    if (!client || !live || live.status !== "running") {
+      return;
+    }
+
+    void client.cancelRun(live.runId).catch(reportError);
+  }, [client, live, reportError]);
+
+  const retryRun = useCallback(
+    (runId: string) => {
+      if (!client || !activeChannelId) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          const run = await client.retryRun(runId);
+          setMessages((value) =>
+            value.filter((message) => !(message.role === "assistant" && message.runId === runId)),
+          );
+          setLive(startLiveRun(run.id));
+          subscribe(run.id, activeChannelId, 0);
+        } catch (nextError) {
+          reportError(nextError);
+        }
+      })();
+    },
+    [client, activeChannelId, subscribe, reportError],
+  );
+
+  const loadMore = useCallback(() => {
+    if (!client || !activeChannelId || !nextBefore || loadingMore) {
+      return;
+    }
+
+    const channelId = activeChannelId;
+    setLoadingMore(true);
+
+    void (async () => {
+      try {
+        const page = await client.listMessages(channelId, nextBefore);
+        if (activeChannelIdRef.current !== channelId) {
+          return;
+        }
+
+        setMessages((value) => {
+          const known = new Set(value.map((message) => message.id));
+          return [...page.messages.filter((message) => !known.has(message.id)), ...value];
+        });
+        setNextBefore(page.nextBefore);
+      } catch (nextError) {
+        reportError(nextError);
+      } finally {
+        setLoadingMore(false);
+      }
+    })();
+  }, [client, activeChannelId, nextBefore, loadingMore, reportError]);
+
+  const createChannel = useCallback(
+    async (name: string, kind: "channel" | "dm") => {
+      if (!client) {
+        return;
+      }
+
+      try {
+        const channel = await client.createChannel({
+          name,
+          kind,
+          ...(activeProfile ? { profileId: activeProfile.id } : {}),
+        });
+        setChannels((value) => [...value, channel]);
+        setActiveChannelId(channel.id);
+        writeStoredChannel(channel.id);
+        setView("chat");
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    },
+    [client, activeProfile, reportError],
+  );
+
+  const renameChannel = useCallback(
+    async (channelId: string, name: string) => {
+      if (!client) {
+        return;
+      }
+
+      try {
+        const updated = await client.updateChannel(channelId, { name });
+        setChannels((value) =>
+          value.map((channel) => (channel.id === updated.id ? updated : channel)),
+        );
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    },
+    [client, reportError],
+  );
+
+  const archiveChannel = useCallback(
+    async (channelId: string) => {
+      if (!client) {
+        return;
+      }
+
+      try {
+        await client.archiveChannel(channelId);
+        const remaining = channels.filter((channel) => channel.id !== channelId);
+        setChannels(remaining);
+
+        if (activeChannelId === channelId) {
+          const fallback = remaining[0]?.id ?? null;
+          setActiveChannelId(fallback);
+          writeStoredChannel(fallback);
+          stopStream();
+          setLive(null);
+        }
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    },
+    [client, channels, activeChannelId, stopStream, reportError],
+  );
+
+  const switchProfile = useCallback(
+    async (profileId: string) => {
+      if (!client || !activeChannel) {
+        return;
+      }
+
+      try {
+        const updated = await client.updateChannel(activeChannel.id, { profileId });
+        setChannels((value) =>
+          value.map((channel) => (channel.id === updated.id ? updated : channel)),
+        );
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    },
+    [client, activeChannel, reportError],
+  );
+
+  const refreshProfiles = useCallback(async () => {
+    if (!client) {
+      return;
+    }
+
+    try {
+      const [nextProfiles, nextChannels, nextSettings] = await Promise.all([
+        client.listProfiles(),
+        client.listChannels(),
+        client.getSettings(),
+      ]);
+
+      setProfiles(nextProfiles);
+      setChannels(nextChannels);
+      setSettings(nextSettings);
+
+      if (activeChannelId && !nextChannels.some((channel) => channel.id === activeChannelId)) {
+        const fallback = nextChannels[0]?.id ?? null;
+        setActiveChannelId(fallback);
+        writeStoredChannel(fallback);
+      }
+    } catch (nextError) {
+      reportError(nextError);
+    }
+  }, [client, activeChannelId, reportError]);
+
+  if (!token || !client) {
+    return (
+      <TokenGate
+        draft={tokenDraft}
+        error={authError}
+        onChange={setTokenDraft}
+        onSubmit={() => {
+          const next = tokenDraft.trim();
+          if (!next) {
+            return;
+          }
+          try {
+            localStorage.setItem(TOKEN_STORAGE_KEY, next);
+          } catch {
+            // Storage can be unavailable; the session still works.
+          }
+          setAuthError(null);
+          setToken(next);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
+      <header className="flex shrink-0 items-center gap-4 border-b border-white/10 bg-slate-950/80 px-4 py-2.5">
+        <div className="flex items-center gap-2.5">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-400 text-sm font-bold text-slate-950">
+            V
+          </div>
+          <span className="text-sm font-semibold tracking-wide">Vektor</span>
+        </div>
+
+        <nav className="flex items-center gap-1" aria-label="Sections">
+          <button
+            type="button"
+            onClick={() => setView("chat")}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              view === "chat"
+                ? "bg-white/10 text-slate-100"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("settings")}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+              view === "settings"
+                ? "bg-white/10 text-slate-100"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            Settings
+          </button>
+        </nav>
+
+        <div className="ml-auto flex items-center gap-3">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${
+              online
+                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                : "border-rose-400/30 bg-rose-400/10 text-rose-300"
+            }`}
+            title={online ? "API reachable" : "API unreachable"}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-400" : "bg-rose-400"}`}
+            />
+            {online ? "Local" : "Offline"}
+          </span>
+
+          {view === "chat" && profiles.length > 0 ? (
+            <label className="flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1">
               <span
-                key={item.label}
-                className="cursor-not-allowed rounded-lg px-3 py-2 text-sm text-slate-500"
-                title={`${item.label} arrives in ${item.phase}`}
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: `var(--profile-${activeProfile?.color ?? "emerald"})` }}
+              />
+              <select
+                value={activeProfile?.id ?? ""}
+                onChange={(event) => void switchProfile(event.target.value)}
+                className="max-w-40 truncate bg-transparent text-xs text-slate-200 outline-none"
+                aria-label="Active profile"
               >
-                {item.label}
-                <span className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-500">
-                  {item.phase}
-                </span>
-              </span>
-            ))}
-          </nav>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id} className="bg-slate-900">
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                localStorage.removeItem(TOKEN_STORAGE_KEY);
+              } catch {
+                // Ignore storage failures.
+              }
+              stopStream();
+              bootedRef.current = null;
+              setToken("");
+              setTokenDraft("");
+            }}
+            className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:text-slate-200"
+          >
+            Lock
+          </button>
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-6 px-6 py-10 lg:grid-cols-[1fr_1.15fr]">
-        <section className="space-y-6">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
-              Phase 1 · Foundation
-            </p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-tight">
-              A local workspace for agents that can actually do things.
-            </h1>
-            <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">
-              Profiles, channels, streamed responses, files, a permissioned terminal, and scheduled
-              runs. The foundation is live: API, database, auth, and the event stream are wired up.
-            </p>
+      {booting ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="flex items-center gap-3 text-sm text-slate-500">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+            Loading workspace…
           </div>
-
-          <HealthCard />
-
-          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-400">
-            <h2 className="text-sm font-medium text-slate-200">What lands next</h2>
-            <ul className="mt-3 space-y-2">
-              <li>Phase 2 · Profiles, channels, streamed Markdown chat</li>
-              <li>Phase 3 · Files, attachments, and context controls</li>
-              <li>Phase 4 · Terminal permissions and run controls</li>
-            </ul>
-          </div>
-        </section>
-
-        <StreamDemo />
-      </main>
-
-      <footer className="border-t border-white/10 px-6 py-5 text-center text-xs text-slate-500">
-        Vektor v0.1.0 · data stays on this machine
-      </footer>
+        </div>
+      ) : view === "settings" && settings ? (
+        <SettingsView
+          client={client}
+          settings={settings}
+          profiles={profiles}
+          onSettingsChange={setSettings}
+          onProfilesChange={refreshProfiles}
+          onError={(message) => setError(message)}
+        />
+      ) : view === "settings" ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+          Settings are unavailable. Check the API connection.
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <Sidebar
+            channels={channels}
+            activeChannelId={activeChannelId}
+            onSelect={selectChannel}
+            onCreate={createChannel}
+            onRename={renameChannel}
+            onArchive={archiveChannel}
+          />
+          <ChatView
+            channel={activeChannel}
+            profile={activeProfile}
+            messages={messages}
+            live={live}
+            loading={loadingMessages}
+            loadingMore={loadingMore}
+            hasMore={nextBefore !== null}
+            error={error}
+            onSend={sendMessage}
+            onStop={stopRun}
+            onRetry={retryRun}
+            onLoadMore={loadMore}
+          />
+        </div>
+      )}
     </div>
   );
 }

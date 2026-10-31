@@ -1,5 +1,6 @@
 import { normalizeOpenRouterStream } from "./openrouter.js";
 import type { ChatProvider, ChatRequest, ProviderEvent } from "./types.js";
+import type { ModelInfo } from "@vektor/shared";
 
 export interface OpenRouterProviderOptions {
   apiKey: string;
@@ -34,6 +35,41 @@ export class OpenRouterProvider implements ChatProvider {
     this.apiKey = options.apiKey;
     this.baseUrl = (options.baseUrl ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    const response = await this.fetchImpl(`${this.baseUrl}/models`, {
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+        "HTTP-Referer": "http://localhost:8787",
+        "X-Title": "Vektor",
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `OpenRouter returned ${response.status}${body ? `: ${body.slice(0, 500)}` : ""}`,
+      );
+    }
+
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: string; name?: string; context_length?: number }>;
+    };
+
+    return (payload.data ?? [])
+      .filter(
+        (model): model is { id: string; name?: string; context_length?: number } =>
+          typeof model.id === "string" && model.id.length > 0,
+      )
+      .map((model) => ({
+        id: model.id,
+        name: model.name ?? model.id,
+        ...(typeof model.context_length === "number" && model.context_length > 0
+          ? { contextLength: model.context_length }
+          : {}),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async *streamChat(request: ChatRequest): AsyncIterable<ProviderEvent> {
