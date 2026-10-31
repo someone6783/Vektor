@@ -1,5 +1,7 @@
 import {
   apiErrorSchema,
+  backendInfoSchema,
+  type BackendInfo,
   attachmentSchema,
   contextEstimateSchema,
   runtimeStateSchema,
@@ -44,6 +46,7 @@ import {
   type UpdateJob,
 } from "@vektor/shared";
 import { createSseParser } from "./sse";
+import { apiFetch } from "./transport";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -68,6 +71,10 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+
+  async backendInfo(): Promise<BackendInfo> {
+    return backendInfoSchema.parse(await this.request("/api/backend"));
+  }
 
   async listJobs(includeDeleted = false): Promise<ScheduledJob[]> {
     const response = await this.request<{ jobs: unknown }>(
@@ -169,7 +176,7 @@ export class ApiClient {
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(path, {
+    const response = await apiFetch(path, {
       ...init,
       headers: {
         Accept: "application/json",
@@ -318,7 +325,7 @@ export class ApiClient {
   async uploadAttachment(channelId: string, file: File): Promise<Attachment> {
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch(`/api/channels/${channelId}/attachments`, {
+    const response = await apiFetch(`/api/channels/${channelId}/attachments`, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.token}` },
       body,
@@ -340,7 +347,7 @@ export class ApiClient {
   }
 
   async attachmentContent(id: string): Promise<Blob> {
-    const response = await fetch(`/api/attachments/${id}/content`, {
+    const response = await apiFetch(`/api/attachments/${id}/content`, {
       headers: { Authorization: `Bearer ${this.token}` },
     });
     if (!response.ok) throw await parseError(response);
@@ -369,7 +376,7 @@ export class ApiClient {
     signal: AbortSignal,
   ): Promise<void> {
     const query = after > 0 ? `?after=${after}` : "";
-    const response = await fetch(`/api/runs/${runId}/events${query}`, {
+    const response = await apiFetch(`/api/runs/${runId}/events${query}`, {
       headers: {
         Accept: "text/event-stream",
         Authorization: `Bearer ${this.token}`,

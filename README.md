@@ -217,6 +217,65 @@ editing/history available. The default is `1`. `VEKTOR_SCHEDULER_TICK_MS` defaul
 
 ## Scripts
 
+### Desktop app (Tauri 2)
+
+The desktop app bundles the same web frontend and connects to a separately running
+local backend. Start Docker first with `docker compose up -d --build`. On first
+launch, **Backend connection** checks and saves `http://127.0.0.1:8787` (or another
+loopback port), then **Open workspace** shows the access-token setup. Read the token
+with `docker compose exec vektor cat /data/access-token` and paste it into the app.
+The Compose service is named `vektor`; use the matching service name if you customize it.
+
+**Backend** in the app header, or **Backend connection…** in the tray, opens connection
+setup again. The screen shows backend version/database health and, after unlocking,
+the actual data/workspace directories and whether execution is on the host or in a
+container. A failed connection check preserves the saved URL. **Use saved connection**
+lets you reopen the workspace while the backend is offline. HTTP and HTTPS URLs must
+use `localhost`, `127.0.0.1`, or `[::1]`; paths, URL credentials and query strings are
+rejected. Native HTTP handles uploads and SSE without relaxing the API's CORS policy.
+
+Tokens are stored in the desktop webview's local storage, separately for each backend
+URL. Lock clears the saved token and the native tray's in-memory credential. Desktop
+tokens are separate from browser tokens; neither tokens nor provider keys are bundled
+into desktop assets. The app never runs terminal commands itself: permissions and
+host/container warnings refer to the selected backend.
+
+Closing the window hides it in the system tray when tray initialization succeeds.
+**Open Vektor** restores it. The tray offers **Pause scheduler**, **Resume scheduler**,
+and **Emergency stop**, authenticated with the unlocked session. Pause affects future
+firings; emergency stop cancels active work and blocks new runs. Resuming the scheduler
+does not clear emergency stop; explicitly resume execution in the workspace. Failed
+tray actions restore the window and display an error. **Quit desktop** exits the app;
+Docker and scheduled jobs keep running. On Linux, the desktop environment needs an
+AppIndicator/system-tray host to expose these controls.
+
+Enable **Notify when a run finishes** in connection setup to request OS permission
+and send a test notification. A native monitor checks recent runs in all channels
+every three seconds while the app is unlocked, including while hidden. The first
+successful poll establishes a baseline without replaying historical completions.
+Notifications show completion/failure/cancellation status without prompts or output.
+They require the desktop process to remain running; this is not an OS push service.
+The monitor reads the latest 30 runs per poll, so a long offline interval or a burst
+of more than 30 runs can omit notifications; durable history remains in Vektor.
+
+Building from source requires Node 22+, pnpm 10.34.9, and stable Rust (1.90+).
+Linux additionally needs:
+
+```sh
+sudo apt-get install build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+pnpm install --frozen-lockfile
+pnpm desktop:dev
+```
+
+The dev command starts the Vite frontend; run Docker separately. For an installable
+Linux package use `pnpm desktop:build --bundles deb`. Artifacts are placed under
+`apps/web/src-tauri/target/release/bundle/`. `pnpm desktop:check` runs native tests;
+the normal lint/typecheck/test/build scripts continue to verify the shared web/API
+code. CI also compiles the native Linux app. On macOS/Windows install the platform's
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), then select `--bundles app`
+or `--bundles nsis` respectively. Signing and automated release publication remain
+Phase 8 work. This phase's native validation is performed on Linux.
+
 | Command             | What it does                                                   |
 | ------------------- | -------------------------------------------------------------- |
 | `pnpm dev`          | Build workspace packages, then run API and web with watch mode |
@@ -252,6 +311,7 @@ logs/             reserved for file logs
 | Endpoint                                 | Auth   | Purpose                                                              |
 | ---------------------------------------- | ------ | -------------------------------------------------------------------- |
 | `GET /healthz`                           | public | status, version, instance id, DB check, uptime                       |
+| `GET /api/backend`                       | bearer | backend data/workspace paths and execution environment               |
 | `GET/PUT /api/settings`                  | bearer | provider state, default model, write-only key                        |
 | `POST /api/settings/provider/test`       | bearer | fetch and cache the OpenRouter model list                            |
 | `GET/POST /api/profiles`                 | bearer | list and create profiles                                             |

@@ -1,0 +1,25 @@
+[package]
+name = "vektor-desktop"
+version = "0.1.0"
+description = "Vektor desktop workspace"
+authors = ["Vektor contributors"]
+edition = "2021"
+rust-version = "1.90"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-http = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+urlpattern = "0.6"
+regex = "1"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

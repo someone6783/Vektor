@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { healthResponseSchema, type HealthResponse } from "@vektor/shared";
+import { apiFetch } from "../lib/transport";
 
 type HealthState =
   { kind: "loading" } | { kind: "ok"; data: HealthResponse } | { kind: "error"; message: string };
@@ -26,7 +27,7 @@ export function HealthCard() {
       controller = new AbortController();
 
       try {
-        const response = await fetch("/healthz", {
+        const response = await apiFetch("/healthz", {
           signal: controller.signal,
           headers: { Accept: "application/json" },
         });

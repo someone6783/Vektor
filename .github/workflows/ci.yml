@@ -24,3 +24,24 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages && pnpm --filter @vektor/web build
+      - run: cargo fmt --manifest-path apps/web/src-tauri/Cargo.toml --check
+      - run: pnpm desktop:check
+      - run: pnpm --filter @vektor/web exec tauri build --debug --no-bundle

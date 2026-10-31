@@ -3,3 +3,5 @@ dist
 coverage
 .data
 pnpm-lock.yaml
+apps/web/src-tauri/target
+apps/web/src-tauri/gen

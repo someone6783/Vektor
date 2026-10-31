@@ -76,6 +76,23 @@ afterEach(async () => {
 });
 
 describe("GET /healthz", () => {
+  it("keeps backend filesystem information behind token authentication", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/backend" })).statusCode).toBe(401);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/backend",
+      headers: { authorization: `Bearer ${ACCESS_TOKEN}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      dataDir,
+      workspaceDir: join(dataDir, "workspace"),
+      executionEnvironment: "host",
+    });
+    expect((await app.inject({ method: "GET", url: "/healthz" })).json()).not.toHaveProperty(
+      "dataDir",
+    );
+  });
   it("reports a healthy database and a stable instance id", async () => {
     const response = await app.inject({ method: "GET", url: "/healthz" });
 

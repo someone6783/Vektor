@@ -14,16 +14,20 @@ import { AuditView } from "./components/AuditView";
 import { SchedulesView } from "./components/SchedulesView";
 import { ApiClient, ApiError } from "./lib/api";
 import { applyRunEvent, startLiveRun, type LiveRun } from "./lib/live";
+import { apiFetch, backendUrl, tokenStorageKey } from "./lib/transport";
+import { isTauri, invoke } from "@tauri-apps/api/core";
 
-const TOKEN_STORAGE_KEY = "vektor.accessToken";
 const CHANNEL_STORAGE_KEY = "vektor.activeChannel";
 const TERMINAL_EVENTS = new Set(["run.completed", "run.failed", "run.cancelled"]);
 
 function readStoredToken(): string {
   try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY) ?? import.meta.env.VITE_ACCESS_TOKEN ?? "";
+    return (
+      localStorage.getItem(tokenStorageKey()) ??
+      (isTauri() ? "" : (import.meta.env.VITE_ACCESS_TOKEN ?? ""))
+    );
   } catch {
-    return import.meta.env.VITE_ACCESS_TOKEN ?? "";
+    return isTauri() ? "" : (import.meta.env.VITE_ACCESS_TOKEN ?? "");
   }
 }
 
@@ -52,11 +56,13 @@ function TokenGate({
   error,
   onChange,
   onSubmit,
+  onConnection,
 }: {
   draft: string;
   error: string | null;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onConnection?: () => void;
 }) {
   return (
     <div className="grid min-h-screen place-items-center bg-slate-950 px-6 text-slate-100">
@@ -106,13 +112,18 @@ function TokenGate({
             The token is stored in this browser only. Docker keeps it at{" "}
             <code className="font-mono text-slate-500">/data/access-token</code>.
           </p>
+          {onConnection ? (
+            <button type="button" onClick={onConnection} className="mt-4 text-xs text-emerald-300">
+              Backend connection
+            </button>
+          ) : null}
         </form>
       </div>
     </div>
   );
 }
 
-export default function App() {
+export default function App({ onConnection }: { onConnection?: () => void } = {}) {
   const [lastRun, setLastRun] = useState<Run | null>(null);
   const [emergencyStopped, setEmergencyStopped] = useState(false);
   const [token, setToken] = useState(readStoredToken);
@@ -135,6 +146,18 @@ export default function App() {
   const [online, setOnline] = useState(true);
 
   const client = useMemo(() => (token ? new ApiClient(token) : null), [token]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void invoke("configure_connection", {
+      baseUrl: backendUrl(),
+      token,
+      notifications: localStorage.getItem("vektor.desktop.notifications") === "true",
+    }).catch((error: unknown) => setError(String(error)));
+    return () => {
+      void invoke("clear_connection");
+    };
+  }, [token]);
 
   const activeChannel = useMemo(
     () => channels.find((channel) => channel.id === activeChannelId) ?? null,
@@ -167,7 +190,7 @@ export default function App() {
   const reportError = useCallback((nextError: unknown) => {
     if (nextError instanceof ApiError && nextError.status === 401) {
       try {
-        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        localStorage.removeItem(tokenStorageKey());
       } catch {
         // Ignore storage failures.
       }
@@ -365,7 +388,7 @@ export default function App() {
 
     const ping = async () => {
       try {
-        const response = await fetch("/healthz", { headers: { Accept: "application/json" } });
+        const response = await apiFetch("/healthz", { headers: { Accept: "application/json" } });
         if (active) {
           setOnline(response.ok);
         }
@@ -718,6 +741,7 @@ export default function App() {
   if (!token || !client) {
     return (
       <TokenGate
+        onConnection={onConnection}
         draft={tokenDraft}
         error={authError}
         onChange={setTokenDraft}
@@ -727,7 +751,7 @@ export default function App() {
             return;
           }
           try {
-            localStorage.setItem(TOKEN_STORAGE_KEY, next);
+            localStorage.setItem(tokenStorageKey(), next);
           } catch {
             // Storage can be unavailable; the session still works.
           }
@@ -790,6 +814,11 @@ export default function App() {
         </button>
 
         <div className="ml-auto flex items-center gap-3">
+          {onConnection ? (
+            <button type="button" onClick={onConnection} className="text-xs text-slate-400">
+              Backend
+            </button>
+          ) : null}
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${
               online
@@ -829,7 +858,7 @@ export default function App() {
             type="button"
             onClick={() => {
               try {
-                localStorage.removeItem(TOKEN_STORAGE_KEY);
+                localStorage.removeItem(tokenStorageKey());
               } catch {
                 // Ignore storage failures.
               }

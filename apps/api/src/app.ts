@@ -92,6 +92,11 @@ export async function buildApp({
 
   registerAuth(app, storage.accessToken);
   registerHealthRoutes(app, storage);
+  app.get("/api/backend", async () => ({
+    dataDir: storage.dataDir,
+    workspaceDir: join(storage.dataDir, "workspace"),
+    executionEnvironment: config.runtimeEnvironment ?? "host",
+  }));
 
   const interrupted = recoverInterruptedRuns(storage.db);
   if (interrupted.length > 0) {

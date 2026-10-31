@@ -51,6 +51,12 @@ export const runtimeStateSchema = z.object({
   approvals: z.array(approvalSchema),
 });
 export type RuntimeState = z.infer<typeof runtimeStateSchema>;
+export const backendInfoSchema = z.object({
+  dataDir: z.string(),
+  workspaceDir: z.string(),
+  executionEnvironment: z.enum(["container", "host"]),
+});
+export type BackendInfo = z.infer<typeof backendInfoSchema>;
 export const runDetailsSchema = z.object({
   run: runSchema,
   tools: z.array(toolCallSchema),

@@ -10,3 +10,5 @@ data/
 .DS_Store
 .vite/
 *.tsbuildinfo
+apps/web/src-tauri/target/
+apps/web/src-tauri/gen/

@@ -381,12 +381,18 @@ Exit criteria: create a job, restart the container, and see it fire on schedule 
 
 ## Phase 6 — Desktop packaging
 
-- Wrap the frontend with Tauri.
-- Add local backend connection setup.
-- Add native notifications.
-- Add system tray behavior.
-- Add data-directory and backend health screens.
-- Document Docker-based local installation.
+Status (2026-11-01): implemented and ready for sign-off. Linux native packaging and end-to-end verification are complete; macOS/Windows packaging and desktop-environment-specific tray/notification behavior have not been manually verified.
+
+- [x] Tauri 2 wraps the existing bundled React frontend, without a backend sidecar. Root desktop dev/build/check commands and Linux native CI compile/test checks are included.
+- [x] First-launch local backend URL setup, five-second health check, explicit save/open, saved-connection fallback while offline, URL validation, and credentials stored separately by backend origin. Native HTTP handles authenticated requests, multipart uploads, streaming SSE and cancellation without broadening API CORS. Redirects are disabled, and native HTTP capabilities allow only loopback hosts.
+- [x] Opt-in native notifications with OS permission and a test notification. A native three-second monitor covers terminal statuses across all channels while unlocked, including when the window is hidden; the initial successful poll establishes a baseline without replaying old history. Notifications contain status only. The latest-30-run polling window can omit notifications during a long outage or a large burst; durable history remains authoritative.
+- [x] Native tray actions open the app/connection setup, pause/resume the scheduler, activate emergency stop, and quit the desktop process independently of Docker. Tray requests use the unlocked credential in memory; locking clears it. Errors restore the window and display a notice. Window close hides to tray after successful tray initialization; Linux requires an AppIndicator host. Scheduler resume never clears emergency stop.
+- [x] Backend connection screen shows database/version/instance health and authenticated data/workspace directory paths plus the backend execution environment. Existing host/container terminal permission warnings remain in the shared runtime UI.
+- [x] README covers Docker setup/token retrieval, desktop prerequisites, local development, native package commands, tray/notification behavior, data ownership, and platform validation limits. Generated native build artifacts are excluded from Git, formatting/lint scans, and Docker build context.
+
+Verification: 144 TypeScript tests plus four native tests pass (one optional live OpenRouter test is skipped), with lint, formatting, typecheck, web/API production build, native formatting, locked native tests, and Linux `.deb` packaging. Native tests parse the shipped HTTP permission patterns and verify loopback matching, URL validation, tray action paths, and completion-notification transitions/deduplication. Frontend/API tests cover connection success/failure, token separation, native transport bodies/signals, notification permission denial/grant, and authentication for backend filesystem metadata.
+
+Packaged verification: the actual bundled Linux app was automated through Tauri/WebKit WebDriver against a disposable production Docker backend using the deterministic provider. It checked/saved the backend, unlocked, created a channel, rendered streamed output, uploaded a text attachment through native multipart HTTP, and displayed `/data` and `/data/workspace` as container paths. The exported native D-Bus tray menu paused/resumed the actual scheduler and emergency-stopped an active run, which persisted as cancelled. Restart preserved emergency stop and history; scheduler resume did not clear the stop latch. A native window-close event hid the app, a completed run delivered a notification to a controlled D-Bus notification sink while hidden, and the tray restored the window. The final optimized release binary also passed health/data display, failed-connection recovery, lock, blocked tray actions while locked, and native Quit leaving Docker healthy. Test credentials/connection storage and disposable processes/container were cleared afterward. These are automated native integration checks, not a manual assessment of OS notification appearance. No live OpenRouter call was made.
 
 Exit criteria: the desktop app connects to a Docker backend, shows health, delivers a notification on run completion, and exposes scheduler pause and emergency stop from the tray.
 
