@@ -15,6 +15,13 @@
       "when": 1793441688834,
       "tag": "0001_loud_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793443880385,
+      "tag": "0002_aspiring_umar",
+      "breakpoints": true
     }
   ]
 }

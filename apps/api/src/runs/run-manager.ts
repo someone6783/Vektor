@@ -180,6 +180,8 @@ export class RunManager {
         model: run.model,
         messages: chatMessages,
         signal: active.controller.signal,
+        maxTokens: profile.maxTokens,
+        temperature: profile.temperature,
       })) {
         if (active.cancelled) {
           break;

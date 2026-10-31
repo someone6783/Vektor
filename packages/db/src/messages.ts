@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, count, desc, eq, lt, sql } from "drizzle-orm";
 import type { VektorDatabase } from "./client.js";
 import { messages } from "./schema.js";
 
@@ -90,6 +90,28 @@ export function listRecentMessages(
 export function getMessage(db: VektorDatabase, id: string): MessageRecord | undefined {
   const row = db.select().from(messages).where(eq(messages.id, id)).get();
   return row ? toRecord(row) : undefined;
+}
+
+export function listContextHistory(
+  db: VektorDatabase,
+  channelId: string,
+  beforeMessageId?: string,
+): { messages: MessageRecord[]; total: number } {
+  const conditions = [eq(messages.channelId, channelId), eq(messages.status, "complete")];
+  if (beforeMessageId)
+    conditions.push(
+      sql`${messages}.rowid < (select rowid from messages where id = ${beforeMessageId})`,
+    );
+  const where = and(...conditions);
+  const rows = db
+    .select()
+    .from(messages)
+    .where(where)
+    .orderBy(sql`${messages}.rowid desc`)
+    .limit(100)
+    .all();
+  const total = db.select({ value: count() }).from(messages).where(where).get()?.value ?? 0;
+  return { messages: rows.reverse().map(toRecord), total };
 }
 
 export function createMessage(db: VektorDatabase, input: CreateMessageRecordInput): MessageRecord {

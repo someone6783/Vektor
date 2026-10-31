@@ -18,6 +18,9 @@ import { recoverInterruptedRuns } from "./runs/recovery.js";
 import { RunManager } from "./runs/run-manager.js";
 import { registerWebApp } from "./static.js";
 import { createStreamRegistry } from "./stream-registry.js";
+import { AttachmentService } from "./attachments/service.js";
+import { registerAttachmentRoutes } from "./routes/attachments.js";
+import { ContextService } from "./context.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -43,6 +46,31 @@ export async function buildApp({
         }
       : false,
     trustProxy: false,
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send(
+        makeApiError("validation_error", "Invalid request.", {
+          requestId: request.id,
+          details: error.issues,
+        }),
+      );
+    }
+    const normalized = error as { statusCode?: number; message?: string };
+    const status = normalized.statusCode ?? 500;
+    const isServerError = status >= 500;
+    if (isServerError) request.log.error({ err: error }, "request failed");
+    else request.log.warn({ err: error }, "request rejected");
+    return reply
+      .code(status)
+      .send(
+        makeApiError(
+          isServerError ? "internal_error" : "request_error",
+          isServerError ? "Internal server error." : (normalized.message ?? "Request failed."),
+          { requestId: request.id },
+        ),
+      );
   });
 
   registerAuth(app, storage.accessToken);
@@ -71,7 +99,15 @@ export async function buildApp({
   registerSettingsRoutes(app, providerService);
   registerProfileRoutes(app, storage.db);
   registerChannelRoutes(app, storage.db);
-  registerMessageRoutes(app, storage.db, runManager);
+  const attachments = new AttachmentService(
+    storage.db,
+    storage.dataDir,
+    config.maxFileBytes,
+    config.channelFileBytes,
+  );
+  await registerAttachmentRoutes(app, attachments);
+  const context = new ContextService(storage.db, attachments, providerService);
+  registerMessageRoutes(app, storage.db, runManager, context);
   registerRunEventRoutes(app, storage.db, runManager, streams);
 
   if (config.enableDevStream) {
@@ -80,37 +116,6 @@ export async function buildApp({
   }
 
   await registerWebApp(app, config.webDistDir);
-
-  app.setErrorHandler((error, request, reply) => {
-    if (error instanceof ZodError) {
-      return reply.code(400).send(
-        makeApiError("validation_error", "Invalid request.", {
-          requestId: request.id,
-          details: error.issues,
-        }),
-      );
-    }
-
-    const normalized = error as { statusCode?: number; message?: string };
-    const status = normalized.statusCode ?? 500;
-    const isServerError = status >= 500;
-
-    if (isServerError) {
-      request.log.error({ err: error }, "request failed");
-    } else {
-      request.log.warn({ err: error }, "request rejected");
-    }
-
-    return reply
-      .code(status)
-      .send(
-        makeApiError(
-          isServerError ? "internal_error" : "request_error",
-          isServerError ? "Internal server error." : (normalized.message ?? "Request failed."),
-          { requestId: request.id },
-        ),
-      );
-  });
 
   app.setNotFoundHandler((request, reply) =>
     reply.code(404).send(

@@ -67,6 +67,7 @@ export const runs = sqliteTable(
     status: text("status").notNull().default("running"),
     error: text("error"),
     usageJson: text("usage_json"),
+    contextJson: text("context_json"),
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   },
@@ -86,4 +87,37 @@ export const runEvents = sqliteTable(
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [uniqueIndex("run_events_run_seq_idx").on(table.runId, table.seq)],
+);
+
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    kind: text("kind").notNull(),
+    included: integer("included", { mode: "boolean" }).notNull().default(true),
+    extractedText: text("extracted_text").notNull().default(""),
+    width: integer("width"),
+    height: integer("height"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("attachments_channel_idx").on(table.channelId)],
+);
+
+export const messageAttachments = sqliteTable(
+  "message_attachments",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    attachmentId: text("attachment_id")
+      .notNull()
+      .references(() => attachments.id, { onDelete: "cascade" }),
+  },
+  (table) => [uniqueIndex("message_attachments_pair_idx").on(table.messageId, table.attachmentId)],
 );

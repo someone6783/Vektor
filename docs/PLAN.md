@@ -171,7 +171,7 @@ packages/db       Drizzle schema, migrations, queries
 packages/shared   Zod contracts and inferred types
 ```
 
-Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. The only open item is the live OpenRouter check, which needs `VEKTOR_OPENROUTER_KEY` and is skipped without it.
+Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. The opt-in live OpenRouter test passed with a real key, producing a short streamed reply.
 
 ### 1.1 Workspace and tooling
 
@@ -255,7 +255,7 @@ Done when `docker compose up --build` reaches healthy and serves the web shell.
 - [x] Persistence: recreate the container and confirm the instance id is unchanged.
 - [x] Streaming: dev stream renders in order; disconnect and reconnect resumes from the last sequence.
 - [x] Provider: the stub streams text, a tool call, usage, and finish; the live OpenRouter test is skipped without `VEKTOR_OPENROUTER_KEY`.
-- [ ] Provider live check: run `pnpm --filter @vektor/api test` with `VEKTOR_OPENROUTER_KEY` set to confirm a real short reply.
+- [x] Provider live check: the opt-in `src/providers/openrouter-provider.test.ts` passed with `VEKTOR_OPENROUTER_KEY` set, confirming a real short streamed reply.
 - [x] Logs: JSON, request ids present, secrets redacted.
 
 Exit criteria: all verification items pass, and health, persistence, auth, and the streaming demo are demonstrated before Phase 2 begins.
@@ -264,7 +264,7 @@ Exit criteria: all verification items pass, and health, persistence, auth, and t
 
 Goal: the first useful chat loop.
 
-Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. Live OpenRouter calls still need `VEKTOR_OPENROUTER_KEY`; without it the deterministic stub provider serves chat.
+Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10.34.9, and Docker Compose. Live OpenRouter API verification passed with a real environment key: model listing, streamed reply, message persistence, event replay, and cancellation. Phase 2 signed off by the user's instruction to continue onto Phase 3.
 
 ### 2.1 Settings and provider
 
@@ -307,20 +307,28 @@ Status (2026-10-31): implemented and verified locally with Node 22.23.4, pnpm 10
 - [x] Web tests cover SSE parsing and Markdown rendering/sanitization with React Testing Library and jsdom.
 - [x] Local production-build smoke test with the stub provider.
 - [x] Docker image built and verified: settings, channel creation, streamed reply, and conversation intact after a container restart.
-- [ ] Live OpenRouter check with a real key (`VEKTOR_OPENROUTER_KEY`), including model listing on the settings screen.
+- [x] Live OpenRouter check with a real key (`VEKTOR_OPENROUTER_KEY`): the settings screen's provider-test API returned 424 models; a new profile and channel produced the streamed reply `**Live check passed**`; persisted history matched the reply, and cursor-based event replay matched the original events. A second in-flight provider request was cancelled successfully and its cancelled state persisted.
 
-Exit criteria: configure a key, create a profile, create a channel, receive a streamed Markdown answer, stop it, reload, and find the conversation intact. Stub-provider runs satisfy every step except the real-key check above.
+Verification note (2026-10-31): these live checks used the production API on loopback with an isolated temporary data directory. Cancellation was exercised while waiting for provider output; live cancellation after text deltas was not verified. The API suite passed 29 tests; its opt-in live test was skipped in that separate run because no key was supplied to the test process. The live provider test passed separately earlier in this session. No browser interaction with the settings screen was performed during this live check.
+
+Exit criteria: configure a key, create a profile, create a channel, receive a streamed Markdown answer, stop it, reload, and find the conversation intact. Earlier stub-provider and Docker checks cover the workspace and restart behavior; the real-key API checks above complete the live-provider verification.
 
 ## Phase 3 — Files and context
 
-- Add file uploads and local storage.
-- Add image paste and drag-and-drop.
-- Add document text extraction.
-- Add attachment previews.
-- Add context inclusion controls.
-- Add context/token usage display.
+Status (2026-10-31): implemented and ready for sign-off. Local verification passes lint, typecheck, tests (70 passed; the opt-in live OpenRouter test skipped), and production build. Docker build, production API smoke checks, and container restart persistence all pass.
 
-Details: attachment rows and on-disk files, extraction pipeline, per-attachment include/exclude toggles, context budget meter with truncation policy, and a pre-send warning when the selected context exceeds the model window.
+- [x] File uploads and local storage: authenticated multipart uploads, private UUID-named originals in `/data/files`, attachment metadata and message links in SQLite, and an additive migration preserving Phase 2 data.
+- [x] Image paste and drag-and-drop, multi-file selection, attachment-only sends, and upload/error feedback.
+- [x] UTF-8 text and source-code input, PDF/DOCX text extraction in workers with a 128 MB JavaScript heap limit and 15-second deadline, explicit rejection of scanned PDFs without text, corrupt/unsupported files, and oversized extraction results.
+- [x] Authenticated image previews, extracted document/text previews, original downloads, and historical attachment links.
+- [x] Per-channel include/exclude controls persisted across reloads and restarts. Excluded attachments do not enter future context; earlier conversation text may still quote them. Removal deletes the original, extracted text, and links; active runs must stop before removal.
+- [x] Server-side pre-send context estimates, model context window and output reservation, explicit confirmation before omitting old history, and persisted run estimates displayed beside actual provider usage when available.
+
+Context policy: assemble the profile prompt, up to 100 recent completed messages, current message, and selected attachments. Use cached model metadata for context windows and image capability; otherwise label an 8,192-token fallback. Estimate text with `cl100k_base` plus message overhead and reserve 4,096 tokens per image. These are estimates, not provider-exact counts, especially for images and non-OpenAI models. Reserve the profile's max output tokens and pass that setting to OpenRouter. Propose dropping oldest history with explicit consent; reject inputs if the prompt and files alone do not fit. Never silently truncate the current prompt or attachments. Retry assembles only history preceding the original user turn, reuses that turn's files that remain included, and excludes later turns.
+
+Limits: 25 MB per file and 250 MB per channel by default, configurable through `VEKTOR_MAX_FILE_BYTES` and `VEKTOR_CHANNEL_FILE_BYTES`; 50 files per channel, 40 megapixels per image, 200,000 extracted characters per file, and 500 PDF pages. At most two uploads process concurrently, with one per channel. The PDF dependency raises the minimum supported Node version to 22.13.
+
+Verification: tests cover real PDF/DOCX fixtures, no-text PDFs, invalid images and UTF-8, upload/storage limits, authenticated content access, inclusion/exclusion, inline image provider payloads, estimate/run agreement, truncation consent, retry boundaries, upgrade from Phase 2, and restart persistence. Web component tests cover selection, paste/drop, previews, file inclusion, budget confirmation, stale estimates, and preserving drafts on errors. Docker smoke checks exercise the built web asset, PDF worker extraction, image preview authentication, exclusion changing the estimate, and a streamed run with a matching saved estimate. Restarting that container preserves both original files, extracted text, inclusion choices, message links, saved estimates, and chat history. Live OpenRouter image/document requests and manual browser interaction were not performed for this phase.
 
 Exit criteria: attach a PDF and an image, see previews, include only one of them, and see an accurate token estimate before and after sending.
 

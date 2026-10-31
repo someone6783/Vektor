@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { attachmentSchema, contextEstimateSchema } from "./attachments.js";
 
 const isoDateSchema = z.string().min(1);
 
@@ -26,6 +27,7 @@ export const modelInfoSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   contextLength: z.number().int().positive().optional(),
+  supportsImages: z.boolean().optional(),
 });
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>;
@@ -70,6 +72,7 @@ export const messageSchema = z.object({
   status: messageStatusSchema,
   runId: z.string().min(1).nullable(),
   createdAt: isoDateSchema,
+  attachments: z.array(attachmentSchema).default([]),
 });
 
 export type Message = z.infer<typeof messageSchema>;
@@ -95,6 +98,7 @@ export const runSchema = z.object({
   usage: runUsageSchema.nullable(),
   startedAt: isoDateSchema,
   endedAt: isoDateSchema.nullable(),
+  context: contextEstimateSchema.nullable().default(null),
 });
 
 export type Run = z.infer<typeof runSchema>;
@@ -173,9 +177,11 @@ export type UpdateChannelInput = z.infer<typeof updateChannelSchema>;
 
 export const sendMessageSchema = z
   .object({
-    content: z.string().min(1).max(100_000),
+    content: z.string().max(100_000),
     profileId: z.string().min(1).optional(),
     model: z.string().min(1).max(200).optional(),
+    attachmentIds: z.array(z.string().uuid()).max(50).optional(),
+    allowTruncation: z.boolean().optional(),
   })
   .strict();
 
@@ -185,6 +191,7 @@ export const messagesResponseSchema = z.object({
   messages: z.array(messageSchema),
   nextBefore: isoDateSchema.nullable(),
   activeRun: runSchema.nullable(),
+  lastRun: runSchema.nullable().default(null),
 });
 
 export type MessagesResponse = z.infer<typeof messagesResponseSchema>;

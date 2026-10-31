@@ -6,3 +6,4 @@ export * from "./profiles.js";
 export * from "./runs.js";
 export * from "./schema.js";
 export * from "./settings.js";
+export * from "./attachments.js";

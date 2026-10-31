@@ -2,13 +2,20 @@ import type { ModelInfo } from "@vektor/shared";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string;
+  content:
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string; detail: "auto" } }
+      >;
 }
 
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   signal?: AbortSignal;
+  maxTokens?: number;
+  temperature?: number;
 }
 
 export type ProviderEvent =

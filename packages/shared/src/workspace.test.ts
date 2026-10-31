@@ -106,7 +106,12 @@ describe("workspace contracts", () => {
       },
     };
 
-    expect(messagesResponseSchema.parse(page)).toEqual(page);
+    expect(messagesResponseSchema.parse(page)).toEqual({
+      ...page,
+      messages: page.messages.map((message) => ({ ...message, attachments: [] })),
+      activeRun: { ...page.activeRun, context: null },
+      lastRun: null,
+    });
     expect(() => runSchema.parse({ ...page.activeRun, status: "queued" })).toThrow();
   });
 });

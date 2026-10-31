@@ -54,17 +54,31 @@ export class OpenRouterProvider implements ChatProvider {
     }
 
     const payload = (await response.json()) as {
-      data?: Array<{ id?: string; name?: string; context_length?: number }>;
+      data?: Array<{
+        id?: string;
+        name?: string;
+        context_length?: number;
+        architecture?: { input_modalities?: string[] };
+      }>;
     };
 
     return (payload.data ?? [])
       .filter(
-        (model): model is { id: string; name?: string; context_length?: number } =>
-          typeof model.id === "string" && model.id.length > 0,
+        (
+          model,
+        ): model is {
+          id: string;
+          name?: string;
+          context_length?: number;
+          architecture?: { input_modalities?: string[] };
+        } => typeof model.id === "string" && model.id.length > 0,
       )
       .map((model) => ({
         id: model.id,
         name: model.name ?? model.id,
+        ...(model.architecture?.input_modalities
+          ? { supportsImages: model.architecture.input_modalities.includes("image") }
+          : {}),
         ...(typeof model.context_length === "number" && model.context_length > 0
           ? { contextLength: model.context_length }
           : {}),
@@ -88,6 +102,8 @@ export class OpenRouterProvider implements ChatProvider {
           model: request.model,
           messages: request.messages,
           stream: true,
+          ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
+          ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
           usage: { include: true },
         }),
         signal: request.signal,

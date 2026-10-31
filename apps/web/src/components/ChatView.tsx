@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import type { Channel, Message, Profile } from "@vektor/shared";
+import { useEffect, useRef } from "react";
+import type { Channel, Message, Profile, Run } from "@vektor/shared";
+import type { ApiClient } from "../lib/api";
+import { ContextComposer } from "./ContextComposer";
+import { MessageAttachments } from "./Attachments";
 import { Markdown } from "./Markdown";
 import type { LiveRun } from "../lib/live";
 
 interface ChatViewProps {
+  client: ApiClient;
+  lastRun: Run | null;
   channel: Channel | null;
   profile: Profile | null;
   messages: Message[];
@@ -12,7 +17,7 @@ interface ChatViewProps {
   loadingMore: boolean;
   hasMore: boolean;
   error: string | null;
-  onSend: (content: string) => Promise<void>;
+  onSend: (content: string, attachmentIds: string[], allowTruncation: boolean) => Promise<void>;
   onStop: () => void;
   onRetry: (runId: string) => void;
   onLoadMore: () => void;
@@ -23,7 +28,7 @@ const statusLabel: Record<string, string> = {
   failed: "failed",
 };
 
-function MessageRow({ message }: { message: Message }) {
+function MessageRow({ message, client }: { message: Message; client: ApiClient }) {
   const isUser = message.role === "user";
 
   return (
@@ -51,12 +56,17 @@ function MessageRow({ message }: { message: Message }) {
             ) : null}
           </>
         )}
+        {message.attachments.length ? (
+          <MessageAttachments files={message.attachments} client={client} />
+        ) : null}
       </div>
     </div>
   );
 }
 
 export function ChatView({
+  client,
+  lastRun,
   channel,
   profile,
   messages,
@@ -70,8 +80,6 @@ export function ChatView({
   onRetry,
   onLoadMore,
 }: ChatViewProps) {
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const liveText = live?.text ?? "";
   const liveLength = live?.tools.length ?? 0;
@@ -97,21 +105,6 @@ export function ChatView({
   }
 
   const busy = live !== null && live.status === "running";
-
-  const submit = async () => {
-    const content = draft.trim();
-    if (!content || busy) {
-      return;
-    }
-
-    setDraft("");
-    setSending(true);
-    try {
-      await onSend(content);
-    } finally {
-      setSending(false);
-    }
-  };
 
   const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
 
@@ -168,7 +161,7 @@ export function ChatView({
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-4">
             {messages.map((message) => (
-              <MessageRow key={message.id} message={message} />
+              <MessageRow key={message.id} message={message} client={client} />
             ))}
 
             {live ? (
@@ -225,53 +218,21 @@ export function ChatView({
       ) : null}
 
       <div className="border-t border-white/10 px-6 py-4">
-        <div className="mx-auto max-w-3xl">
-          <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-2 focus-within:border-emerald-400/40">
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void submit();
-                }
-              }}
-              rows={3}
-              placeholder={`Message ${channel.kind === "dm" ? "@" : "#"}${channel.name}`}
-              className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-600"
-            />
-            <div className="flex items-center gap-2 px-1">
-              <p className="text-[10px] text-slate-600">Enter sends · Shift+Enter adds a line</p>
-              <div className="ml-auto flex items-center gap-2">
-                {live?.status === "running" ? (
-                  <button
-                    type="button"
-                    onClick={onStop}
-                    className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-medium text-rose-200 hover:bg-rose-400/20"
-                  >
-                    Stop
-                  </button>
-                ) : lastAssistant && lastAssistant.runId ? (
-                  <button
-                    type="button"
-                    onClick={() => onRetry(lastAssistant.runId!)}
-                    className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300 hover:bg-white/5"
-                  >
-                    Regenerate
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void submit()}
-                  disabled={busy || sending || draft.trim().length === 0}
-                  className="rounded-lg bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {sending ? "Sending…" : "Send"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ContextComposer
+          key={channel.id}
+          client={client}
+          channel={channel}
+          profile={profile}
+          busy={busy}
+          historyVersion={messages.length}
+          lastRun={lastRun}
+          onSend={onSend}
+          onStop={onStop}
+          canRetry={!!lastAssistant?.runId}
+          onRetry={() => {
+            if (lastAssistant?.runId) onRetry(lastAssistant.runId);
+          }}
+        />
       </div>
     </section>
   );

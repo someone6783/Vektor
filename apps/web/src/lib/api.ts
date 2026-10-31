@@ -1,5 +1,10 @@
 import {
   apiErrorSchema,
+  attachmentSchema,
+  contextEstimateSchema,
+  type Attachment,
+  type ContextEstimate,
+  type ContextRequest,
   channelSchema,
   messagesResponseSchema,
   profileSchema,
@@ -156,11 +161,18 @@ export class ApiClient {
     channelId: string,
     content: string,
     profileId?: string,
+    attachmentIds?: string[],
+    allowTruncation?: boolean,
   ): Promise<SendMessageResponse> {
     return sendMessageResponseSchema.parse(
       await this.request<unknown>(`/api/channels/${channelId}/messages`, {
         method: "POST",
-        body: JSON.stringify({ content, ...(profileId ? { profileId } : {}) }),
+        body: JSON.stringify({
+          content,
+          ...(profileId ? { profileId } : {}),
+          attachmentIds,
+          allowTruncation,
+        }),
       }),
     );
   }
@@ -170,6 +182,58 @@ export class ApiClient {
       method: "POST",
     });
     return runSchema.parse(body.run);
+  }
+
+  async listAttachments(channelId: string): Promise<{
+    attachments: Attachment[];
+    limits: { maxFileBytes: number; channelFileBytes: number; maxFiles: number };
+  }> {
+    const result = await this.request<{
+      attachments: unknown;
+      limits: { maxFileBytes: number; channelFileBytes: number; maxFiles: number };
+    }>(`/api/channels/${channelId}/attachments`);
+    return { ...result, attachments: attachmentSchema.array().parse(result.attachments) };
+  }
+
+  async uploadAttachment(channelId: string, file: File): Promise<Attachment> {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch(`/api/channels/${channelId}/attachments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.token}` },
+      body,
+    });
+    if (!response.ok) throw await parseError(response);
+    return attachmentSchema.parse((await response.json()).attachment);
+  }
+
+  async updateAttachment(id: string, included: boolean): Promise<Attachment> {
+    const response = await this.request<{ attachment: unknown }>(`/api/attachments/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ included }),
+    });
+    return attachmentSchema.parse(response.attachment);
+  }
+
+  async deleteAttachment(id: string): Promise<void> {
+    await this.request<void>(`/api/attachments/${id}`, { method: "DELETE" });
+  }
+
+  async attachmentContent(id: string): Promise<Blob> {
+    const response = await fetch(`/api/attachments/${id}/content`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!response.ok) throw await parseError(response);
+    return response.blob();
+  }
+
+  async estimateContext(channelId: string, input: ContextRequest): Promise<ContextEstimate> {
+    return contextEstimateSchema.parse(
+      await this.request<unknown>(`/api/channels/${channelId}/context`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    );
   }
 
   async cancelRun(runId: string): Promise<void> {

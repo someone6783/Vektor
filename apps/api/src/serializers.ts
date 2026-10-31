@@ -1,5 +1,6 @@
 import type { ChannelRecord, MessageRecord, ProfileRecord, RunRecord } from "@vektor/db";
 import type { Channel, Message, Profile, Run, RunUsage } from "@vektor/shared";
+import { contextEstimateSchema } from "@vektor/shared";
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
@@ -48,6 +49,7 @@ export function toMessage(record: MessageRecord): Message {
     status: record.status,
     runId: record.runId,
     createdAt: iso(record.createdAt),
+    attachments: [],
   };
 }
 
@@ -86,5 +88,6 @@ export function toRun(record: RunRecord): Run {
     usage: parseUsage(record.usage),
     startedAt: iso(record.startedAt),
     endedAt: isoOrNull(record.endedAt),
+    context: contextEstimateSchema.nullable().parse(record.context),
   };
 }

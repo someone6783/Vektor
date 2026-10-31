@@ -1,9 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getOrCreateInstanceId,
+  createProfile,
+  createChannel,
+  createMessage,
+  getMessage,
+  listAttachments,
+  defaultMigrationsFolder,
   getSetting,
   openDatabase,
   runMigrations,
@@ -32,6 +38,36 @@ afterEach(() => {
 });
 
 describe("database bootstrap", () => {
+  it("upgrades a Phase 2 database without losing messages or settings", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "vektor-migration-"));
+    const legacy = join(tempDir, "legacy");
+    mkdirSync(join(legacy, "meta"), { recursive: true });
+    const journal = JSON.parse(
+      readFileSync(join(defaultMigrationsFolder, "meta/_journal.json"), "utf8"),
+    ) as { entries: Array<{ tag: string; idx: number }> };
+    journal.entries = journal.entries.filter((entry) => entry.idx < 2);
+    writeFileSync(join(legacy, "meta/_journal.json"), JSON.stringify(journal));
+    for (const entry of journal.entries)
+      cpSync(join(defaultMigrationsFolder, `${entry.tag}.sql`), join(legacy, `${entry.tag}.sql`));
+    const { db, sqlite } = openDatabase(join(tempDir, "vektor.db"));
+    connection = sqlite;
+    runMigrations(db, legacy);
+    setSetting(db, "existing", { kept: true });
+    const profile = createProfile(db, { name: "Legacy profile", model: "test" });
+    const channel = createChannel(db, { name: "Legacy channel", profileId: profile.id });
+    const message = createMessage(db, {
+      channelId: channel.id,
+      role: "user",
+      content: "Keep my history",
+    });
+    runMigrations(db);
+    expect(getMessage(db, message.id)?.content).toBe("Keep my history");
+    expect(getSetting(db, "existing")).toEqual({ kept: true });
+    expect(listAttachments(db, channel.id)).toEqual([]);
+    expect(sqlite.prepare("pragma table_info(runs)").all()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "context_json" })]),
+    );
+  });
   it("enables WAL and foreign keys", () => {
     const { sqlite } = setup();
 

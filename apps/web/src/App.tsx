@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Channel, Message, Profile, SettingsView as SettingsViewData } from "@vektor/shared";
+import type {
+  Channel,
+  Message,
+  Profile,
+  Run,
+  SettingsView as SettingsViewData,
+} from "@vektor/shared";
 import { ChatView } from "./components/ChatView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
@@ -104,6 +110,7 @@ function TokenGate({
 }
 
 export default function App() {
+  const [lastRun, setLastRun] = useState<Run | null>(null);
   const [token, setToken] = useState(readStoredToken);
   const [tokenDraft, setTokenDraft] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -198,6 +205,7 @@ export default function App() {
           return [...older, ...page.messages];
         });
         setNextBefore((value) => value ?? page.nextBefore);
+        setLastRun(page.lastRun);
         setLive((value) => (value && value.runId === runId ? null : value));
       } catch (nextError) {
         reportError(nextError);
@@ -398,6 +406,7 @@ export default function App() {
 
         setMessages(page.messages);
         setNextBefore(page.nextBefore);
+        setLastRun(page.lastRun);
 
         if (page.activeRun && page.activeRun.status === "running") {
           subscribe(page.activeRun.id, activeChannelId, 0);
@@ -431,7 +440,7 @@ export default function App() {
   );
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, attachmentIds: string[], allowTruncation: boolean) => {
       if (!client || !activeChannelId) {
         return;
       }
@@ -446,6 +455,7 @@ export default function App() {
         status: "complete",
         runId: null,
         createdAt: new Date().toISOString(),
+        attachments: [],
       };
 
       setMessages((value) => [...value, optimistic]);
@@ -455,16 +465,20 @@ export default function App() {
           activeChannelId,
           content,
           activeChannel?.profileId ?? activeProfile?.id,
+          attachmentIds,
+          allowTruncation,
         );
 
         setMessages((value) =>
           value.map((message) => (message.id === optimisticId ? response.message : message)),
         );
         setLive(startLiveRun(response.run.id));
+        setLastRun(response.run);
         subscribe(response.run.id, activeChannelId, 0);
       } catch (nextError) {
         setMessages((value) => value.filter((message) => message.id !== optimisticId));
         reportError(nextError);
+        throw nextError;
       }
     },
     [client, activeChannelId, activeChannel, activeProfile, subscribe, reportError],
@@ -783,6 +797,8 @@ export default function App() {
             onArchive={archiveChannel}
           />
           <ChatView
+            client={client}
+            lastRun={lastRun?.channelId === activeChannel?.id ? lastRun : null}
             channel={activeChannel}
             profile={activeProfile}
             messages={messages}

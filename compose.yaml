@@ -12,6 +12,8 @@ services:
       VEKTOR_DATA_DIR: /data
       VEKTOR_ENABLE_DEV_STREAM: "1"
       VEKTOR_LOG_LEVEL: info
+      VEKTOR_MAX_FILE_BYTES: ${VEKTOR_MAX_FILE_BYTES:-26214400}
+      VEKTOR_CHANNEL_FILE_BYTES: ${VEKTOR_CHANNEL_FILE_BYTES:-262144000}
     volumes:
       - vektor-data:/data
     restart: unless-stopped

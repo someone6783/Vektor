@@ -19,6 +19,17 @@ const envSchema = z.object({
   VEKTOR_OPENROUTER_KEY: z.string().min(1).optional(),
   VEKTOR_OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   VEKTOR_OPENROUTER_MODEL: z.string().min(1).default("openrouter/auto"),
+  VEKTOR_MAX_FILE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(100 * 1024 * 1024)
+    .default(25 * 1024 * 1024),
+  VEKTOR_CHANNEL_FILE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(250 * 1024 * 1024),
 });
 
 export interface AppConfig {
@@ -35,6 +46,8 @@ export interface AppConfig {
   openRouterKey?: string;
   openRouterBaseUrl: string;
   openRouterModel: string;
+  maxFileBytes?: number;
+  channelFileBytes?: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -64,5 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     openRouterKey: parsed.VEKTOR_OPENROUTER_KEY,
     openRouterBaseUrl: parsed.VEKTOR_OPENROUTER_BASE_URL,
     openRouterModel: parsed.VEKTOR_OPENROUTER_MODEL,
+    maxFileBytes: parsed.VEKTOR_MAX_FILE_BYTES,
+    channelFileBytes: parsed.VEKTOR_CHANNEL_FILE_BYTES,
   };
 }

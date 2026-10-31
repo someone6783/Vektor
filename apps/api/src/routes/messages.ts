@@ -4,13 +4,15 @@ import {
   createRun,
   deleteAssistantMessageForRun,
   getActiveRun,
+  getLatestRun,
   getChannel,
   getMessage,
   getProfile,
   getRun,
   listMessages,
   listProfiles,
-  listRecentMessages,
+  listMessageAttachments,
+  linkMessageAttachments,
   type MessageRecord,
   type VektorDatabase,
 } from "@vektor/db";
@@ -18,18 +20,14 @@ import {
   makeApiError,
   messagesResponseSchema,
   sendMessageSchema,
+  contextRequestSchema,
   type SendMessageResponse,
 } from "@vektor/shared";
-import type { ChatMessage } from "../providers/index.js";
 import type { RunManager } from "../runs/run-manager.js";
 import { toMessage, toRun } from "../serializers.js";
-
-function toChatMessage(record: MessageRecord): ChatMessage {
-  return {
-    role: record.role === "system" ? "system" : record.role,
-    content: record.content,
-  };
-}
+import { toAttachment } from "../attachments/service.js";
+import { checkContextBudget, type ContextService } from "../context.js";
+import { AttachmentError } from "../attachments/extract.js";
 
 function parseBefore(value: unknown): number | undefined {
   if (typeof value !== "string" || value.trim() === "") {
@@ -49,7 +47,21 @@ export function registerMessageRoutes(
   app: FastifyInstance,
   db: VektorDatabase,
   runManager: RunManager,
+  context: ContextService,
 ): void {
+  const serializeMessage = (record: MessageRecord) => ({
+    ...toMessage(record),
+    attachments: listMessageAttachments(db, record.id).map(toAttachment),
+  });
+
+  app.post("/api/channels/:channelId/context", async (request, reply) => {
+    const { channelId } = request.params as { channelId: string };
+    const channel = getChannel(db, channelId);
+    if (!channel) return reply.code(404).send(makeApiError("not_found", "Channel not found."));
+    const input = contextRequestSchema.parse(request.body);
+    return context.prepare(channelId, input, channel.profileId ?? listProfiles(db)[0]?.id ?? null)
+      .estimate;
+  });
   app.get("/api/channels/:channelId/messages", async (request, reply) => {
     const { channelId } = request.params as { channelId: string };
     const query = request.query as { before?: string; limit?: string };
@@ -66,11 +78,13 @@ export function registerMessageRoutes(
       ...(limit !== undefined && Number.isInteger(limit) ? { limit } : {}),
     });
     const activeRun = getActiveRun(db, channelId);
+    const lastRun = getLatestRun(db, channelId);
 
     return messagesResponseSchema.parse({
-      messages: page.messages.map(toMessage),
+      messages: page.messages.map(serializeMessage),
       nextBefore: page.nextBefore !== null ? new Date(page.nextBefore).toISOString() : null,
       activeRun: activeRun ? toRun(activeRun) : null,
+      lastRun: lastRun ? toRun(lastRun) : null,
     });
   });
 
@@ -112,29 +126,43 @@ export function registerMessageRoutes(
     }
 
     const model = input.model ?? profile.model;
-    const history = listRecentMessages(db, channelId, 19).map(toChatMessage);
+    const prepared = context.prepare(channelId, input, profileId);
+    if (!input.content.trim() && !prepared.attachments.length)
+      throw new AttachmentError("Write a message or include an attachment before sending.");
+    checkContextBudget(prepared.estimate, input.allowTruncation);
+    const chatMessages = await context.messages(prepared);
+    if (getActiveRun(db, channelId))
+      return reply
+        .code(409)
+        .send(makeApiError("run_active", "A run is already active in this channel."));
 
     const message = createMessage(db, {
       channelId,
       role: "user",
       content: input.content,
     });
+    linkMessageAttachments(
+      db,
+      message.id,
+      prepared.attachments.map((file) => file.id),
+    );
 
     const run = createRun(db, {
       channelId,
       profileId,
       userMessageId: message.id,
       model,
+      context: prepared.estimate,
     });
 
     runManager.start({
       run,
       profile,
-      messages: [...history, { role: "user", content: input.content }],
+      messages: chatMessages,
     });
 
     const response: SendMessageResponse = {
-      message: toMessage(message),
+      message: serializeMessage(message),
       run: toRun(run),
     };
 
@@ -171,20 +199,43 @@ export function registerMessageRoutes(
       );
     }
 
+    if (getActiveRun(db, channel.id))
+      return reply
+        .code(409)
+        .send(makeApiError("run_active", "A run is already active in this channel."));
+    const retryOptions = sendMessageSchema
+      .pick({ allowTruncation: true })
+      .parse(request.body ?? {});
+    const retryInput = {
+      content: userMessage.content,
+      profileId: profile.id,
+      model: previous.model,
+      attachmentIds: listMessageAttachments(db, userMessage.id)
+        .filter((file) => file.included)
+        .map((file) => file.id),
+    };
+    const prepared = context.prepare(channel.id, retryInput, profile.id, userMessage.id);
+    checkContextBudget(prepared.estimate, retryOptions.allowTruncation);
+    const chatMessages = await context.messages(prepared);
+    if (getActiveRun(db, channel.id))
+      return reply
+        .code(409)
+        .send(makeApiError("run_active", "A run is already active in this channel."));
+
     deleteAssistantMessageForRun(db, runId);
-    const history = listRecentMessages(db, channel.id, 20).map(toChatMessage);
 
     const run = createRun(db, {
       channelId: channel.id,
       profileId: profile.id,
       userMessageId: userMessage.id,
       model: previous.model,
+      context: prepared.estimate,
     });
 
     runManager.start({
       run,
       profile,
-      messages: history,
+      messages: chatMessages,
     });
 
     return reply.code(201).send({ run: toRun(run) });
