@@ -126,11 +126,11 @@ and run the image, compare `/healthz`, About, desktop package and OCI version la
 to the tag, and download/verify the release assets. Confirm fresh-volume backup and
 restore on the published image.
 
-An older instance with checking enabled and a read-only release token should show
+An older instance with checking enabled should show
 the newer stable version, release link and last-check timestamp after Check now or
 within the 24-hour cache window. Remove network access and confirm startup/chat/runs
 continue with a quiet unable-to-check state. The offline, timeout, cache and older
-instance behavior is locally covered with deterministic fixtures; this final
+instance behavior is locally covered with deterministic fixtures; the
 published checks have passed using an older-version fixture and the real GitHub release.
 An actual GUI-driven desktop update between two published versions is still future work.
 
