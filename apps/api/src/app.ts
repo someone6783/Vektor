@@ -31,6 +31,9 @@ import { createAppLogger } from "./logging.js";
 import { registerUsageRoutes } from "./routes/usage.js";
 import { UpdateService } from "./updates/service.js";
 import { registerUpdateRoutes } from "./routes/updates.js";
+import { BrowserService } from "./browser/service.js";
+import { registerBrowserRoutes } from "./routes/browser.js";
+import type { BrowserController, BrowserSessionOptions } from "./browser/controller.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -40,6 +43,7 @@ export interface BuildAppOptions {
   schedulerClock?: () => number;
   startScheduler?: boolean;
   updateFetch?: typeof fetch;
+  browserFactory?: (options: BrowserSessionOptions) => BrowserController;
 }
 
 declare module "fastify" {
@@ -57,6 +61,7 @@ export async function buildApp({
   schedulerClock,
   startScheduler = true,
   updateFetch,
+  browserFactory,
 }: BuildAppOptions): Promise<VektorApp> {
   const providerService = new ProviderService({
     db: storage.db,
@@ -130,11 +135,28 @@ export async function buildApp({
 
   const streams = createStreamRegistry();
   const terminal = new TerminalExecutor(join(storage.dataDir, "workspace"), redact);
+  const attachments = new AttachmentService(
+    storage.db,
+    storage.dataDir,
+    config.maxFileBytes,
+    config.channelFileBytes,
+  );
+  const browser = new BrowserService({
+    db: storage.db,
+    attachments,
+    dataDir: storage.dataDir,
+    redact,
+    protectedPort: config.port,
+    ttlDays: config.browserArtifactDays,
+    factory: browserFactory,
+  });
+  await browser.initialize();
   const runManager = new RunManager({
     db: storage.db,
     getChatProvider: () => providerService.getChatProvider(),
     logger: app.log,
     terminal,
+    browser,
     redact,
     redactionHoldback: redact.holdback,
     runTimeoutMs: config.runTimeoutMs,
@@ -142,14 +164,8 @@ export async function buildApp({
   });
 
   registerSettingsRoutes(app, providerService, redact);
-  registerProfileRoutes(app, storage.db);
+  registerProfileRoutes(app, storage.db, (profileId) => runManager.revokeBrowser(profileId));
   registerChannelRoutes(app, storage.db);
-  const attachments = new AttachmentService(
-    storage.db,
-    storage.dataDir,
-    config.maxFileBytes,
-    config.channelFileBytes,
-  );
   await registerAttachmentRoutes(app, attachments);
   const context = new ContextService(storage.db, attachments, providerService);
   const scheduler = new Scheduler({
@@ -173,6 +189,7 @@ export async function buildApp({
   registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
   registerUsageRoutes(app, storage.db);
   registerUpdateRoutes(app, updates);
+  registerBrowserRoutes(app, storage.db, runManager);
   if (config.nodeEnv !== "test")
     app.addHook("onReady", async () => {
       updates.start();

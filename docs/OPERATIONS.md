@@ -247,3 +247,11 @@ unset allows the switch and the compiled repository-visibility default. An optio
 `VEKTOR_GITHUB_TOKEN` overrides stored credentials and makes token controls managed
 by the backend. The release compose file forwards these variables only when set.
 Token-only configuration does not opt a private repository into checks.
+
+## Managed browser
+
+See [BROWSER.md](BROWSER.md) for the pinned engine, profile and scheduled-job grants,
+network boundaries, takeover, artifact retention and packaged checks. Browser access
+is off by default and independent of terminal access. Screenshots are stored in the
+SQLite backup; cookies and temporary browser profiles are discarded and never restored.
+After a crash, interrupted runs require a deliberate new run/retry and fresh approvals.

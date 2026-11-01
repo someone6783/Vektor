@@ -387,3 +387,16 @@ The `Release` workflow verifies existing `v*` tags before building API/web archi
 a Linux desktop `.deb`, checksums and an amd64/arm64 GHCR image with BuildKit
 provenance. [RELEASING.md](docs/RELEASING.md) covers publication, private registry
 access, upgrades with the existing data volume, and the pending first-release demonstration.
+
+## Managed browser access
+
+Phase 9 adds a browser tool independent of terminal permissions. It defaults off.
+Choose observation or interactive access in profile Settings and grant exact origins;
+local testing requires a separate exact loopback origin/port. Every run gets a fresh
+managed Chromium session. Interactive clicks, file transfers and network writes pause
+for scoped approvals; emergency stop closes the session. The run timeline offers
+snapshots, masked screenshots, pause/takeover and artifact deletion.
+
+Host backends need `pnpm browser:install`; Docker includes the pinned engine.
+[Browser operations and boundaries](docs/BROWSER.md) documents setup, private input,
+scheduled declarations, network/file guardrails, retention and verification.

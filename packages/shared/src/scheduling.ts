@@ -16,6 +16,7 @@ export const createJobSchema = scheduleInputSchema
     catchUp: z.boolean().default(false),
     includeHistory: z.boolean().default(false),
     allowTruncation: z.boolean().default(false),
+    browserAccess: z.enum(["off", "observe", "interactive"]).optional(),
   })
   .strict();
 export const updateJobSchema = createJobSchema

@@ -15,6 +15,9 @@ export const profiles = sqliteTable("profiles", {
   paramsJson: text("params_json").notNull().default("{}"),
   terminalMode: text("terminal_mode").notNull().default("no-terminal"),
   toolsJson: text("tools_json").notNull().default("[]"),
+  browserJson: text("browser_json")
+    .notNull()
+    .default('{"mode":"off","allowedOrigins":[],"localOrigins":[]}'),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
@@ -190,6 +193,7 @@ export const scheduledJobs = sqliteTable(
     catchUp: integer("catch_up", { mode: "boolean" }).notNull().default(false),
     includeHistory: integer("include_history", { mode: "boolean" }).notNull().default(false),
     allowTruncation: integer("allow_truncation", { mode: "boolean" }).notNull().default(false),
+    browserAccess: text("browser_access").notNull().default("off"),
     nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }),
     leaseOwner: text("lease_owner"),
     leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
@@ -230,3 +234,19 @@ export const schedulerLease = sqliteTable("scheduler_lease", {
   owner: text("owner").notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const browserArtifacts = sqliteTable(
+  "browser_artifacts",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    origin: text("origin").notNull(),
+    jpeg: text("jpeg").notNull(),
+    size: integer("size").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("browser_artifacts_run_idx").on(table.runId)],
+);

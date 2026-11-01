@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { AboutView } from "./AboutView";
-import type { ModelInfo, Profile, SettingsView, TerminalMode } from "@vektor/shared";
+import {
+  browserPermissionsSchema,
+  type BrowserPermissions,
+  type ModelInfo,
+  type Profile,
+  type SettingsView,
+  type TerminalMode,
+} from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { HealthCard } from "./HealthCard";
 import { UsageView } from "./UsageView";
@@ -42,6 +49,13 @@ function ProfileEditor({
   const [maxTokens, setMaxTokens] = useState(String(profile.maxTokens));
   const [terminalMode, setTerminalMode] = useState<TerminalMode>(profile.terminalMode);
   const [terminalTool, setTerminalTool] = useState(profile.tools.includes("terminal"));
+  const initialBrowser = browserPermissionsSchema.parse(profile.browser ?? {});
+  const [browserMode, setBrowserMode] = useState<BrowserPermissions["mode"]>(initialBrowser.mode);
+  const [origins, setOrigins] = useState(initialBrowser.allowedOrigins.join("\n"));
+  const [localOrigins, setLocalOrigins] = useState(initialBrowser.localOrigins.join("\n"));
+  const [localAcknowledged, setLocalAcknowledged] = useState(
+    initialBrowser.localOrigins.length > 0,
+  );
   const [fullAccessAcknowledged, setFullAccessAcknowledged] = useState(
     profile.terminalMode === "full-access",
   );
@@ -55,6 +69,13 @@ function ProfileEditor({
     }
     setBusy(true);
     try {
+      const browser = browserPermissionsSchema.parse({
+        mode: browserMode,
+        allowedOrigins: origins.split(/\s+/).filter(Boolean),
+        localOrigins: localOrigins.split(/\s+/).filter(Boolean),
+      });
+      if (browser.localOrigins.length && !localAcknowledged)
+        throw new Error("Acknowledge the scoped local testing grant before saving.");
       await client.updateProfile(profile.id, {
         name: name.trim() || profile.name,
         model: model.trim() || profile.model,
@@ -62,6 +83,7 @@ function ProfileEditor({
         temperature: Math.min(2, Math.max(0, Number(temperature) || 0)),
         maxTokens: Math.max(1, Math.round(Number(maxTokens) || 2048)),
         terminalMode,
+        browser,
         tools: [
           ...profile.tools.filter((tool) => tool !== "terminal"),
           ...(terminalTool && terminalMode !== "no-terminal" ? ["terminal"] : []),
@@ -195,6 +217,72 @@ function ProfileEditor({
           rows={4}
           className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-xs leading-5 text-slate-100 outline-none focus:border-emerald-400/50"
         />
+      </div>
+
+      <div className="mt-4 space-y-2 rounded-lg border border-white/10 p-3 text-xs text-slate-400">
+        <label className="block">
+          Browser access
+          <select
+            aria-label={`Browser access for ${profile.name}`}
+            value={browserMode}
+            onChange={(event) => setBrowserMode(event.target.value as BrowserPermissions["mode"])}
+            className="ml-3 rounded border border-white/10 bg-slate-950 p-1"
+          >
+            <option value="off">Off</option>
+            <option value="observe">Observation only</option>
+            <option value="interactive">Interactive · approvals required</option>
+          </select>
+        </label>
+        <p>
+          Uses a fresh managed Chromium session for each run, separate from your personal browser
+          and terminal permissions. Page content cannot approve actions. Navigation makes network
+          requests and may have external effects even in observation mode.
+        </p>
+        {browserMode !== "off" ? (
+          <>
+            <label className="block">
+              Allowed origins (one per line)
+              <textarea
+                aria-label={`Browser origins for ${profile.name}`}
+                value={origins}
+                onChange={(event) => setOrigins(event.target.value)}
+                rows={2}
+                placeholder="https://example.com"
+                className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
+              />
+            </label>
+            <label className="block">
+              Local test origins (exact loopback host and port)
+              <textarea
+                aria-label={`Local browser origins for ${profile.name}`}
+                value={localOrigins}
+                onChange={(event) => {
+                  setLocalOrigins(event.target.value);
+                  setLocalAcknowledged(false);
+                }}
+                rows={2}
+                placeholder="http://127.0.0.1:3000"
+                className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
+              />
+            </label>
+            {localOrigins.trim() ? (
+              <label className="flex gap-2 text-amber-200">
+                <input
+                  type="checkbox"
+                  checked={localAcknowledged}
+                  onChange={(event) => setLocalAcknowledged(event.target.checked)}
+                />
+                I grant browser access to only these local test services. In Docker, loopback refers
+                to the container.
+              </label>
+            ) : null}
+            <p>
+              Clicks, uploads/downloads and network writes pause for approval. Private fields
+              require takeover. Screenshot inputs are masked; artifacts expire after the backend
+              retention period and can be deleted from the run timeline.
+            </p>
+          </>
+        ) : null}
       </div>
 
       <div className="mt-3 flex items-center gap-2">

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachmentSchema, contextEstimateSchema } from "./attachments.js";
+import { browserPermissionsSchema } from "./browser.js";
 
 const isoDateSchema = z.string().min(1);
 
@@ -42,6 +43,7 @@ export const profileSchema = z.object({
   maxTokens: z.number().int().positive(),
   terminalMode: terminalModeSchema,
   tools: z.array(z.string()),
+  browser: browserPermissionsSchema.optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,
   archivedAt: isoDateSchema.nullable(),
@@ -134,6 +136,7 @@ export const createProfileSchema = z
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().min(1).max(200_000).optional(),
     terminalMode: terminalModeSchema.optional(),
+    browser: browserPermissionsSchema.optional(),
     tools: z.array(z.string().min(1)).max(50).optional(),
   })
   .strict();
@@ -149,6 +152,7 @@ export const updateProfileSchema = z
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().min(1).max(200_000).optional(),
     terminalMode: terminalModeSchema.optional(),
+    browser: browserPermissionsSchema.optional(),
     tools: z.array(z.string().min(1)).max(50).optional(),
     archived: z.boolean().optional(),
   })

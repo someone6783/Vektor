@@ -1,5 +1,7 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
+import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +11,7 @@ import { acquireDataLock } from "../maintenance/data-lock.js";
 let directory: string;
 let child: ChildProcess | undefined;
 let port: number;
-async function start(mode: string) {
+async function start(mode: string, browserUrl?: string) {
   child = fork(fileURLToPath(new URL("./crash-server.test-utils.ts", import.meta.url)), [], {
     execArgv: ["--import", "tsx"],
     env: {
@@ -19,6 +21,7 @@ async function start(mode: string) {
       VEKTOR_WEB_DIST: join(directory, "no-web"),
       VEKTOR_ACCESS_TOKEN: "crash-test-access-token",
       TEST_CRASH_PROVIDER: mode,
+      TEST_BROWSER_URL: browserUrl,
     },
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
@@ -62,6 +65,81 @@ afterEach(async () => {
 });
 
 describe("actual API process death and restart", () => {
+  it("terminates managed Chromium after SIGKILL, cancels browser approval, and clears abandoned cookies on restart", async () => {
+    directory = await mkdtemp(join(tmpdir(), "vektor-browser-crash-"));
+    let hits = 0;
+    const fixture = createServer((_request, response) => {
+      hits++;
+      response.end(
+        '<html><body><script>document.cookie="private=ephemeral"</script><button>Submit</button></body></html>',
+      );
+    });
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    try {
+      const origin = `http://127.0.0.1:${(fixture.address() as { port: number }).port}`;
+      await start("browser", origin);
+      const profile = (await api("/api/profiles")).profiles[0];
+      await api(
+        `/api/profiles/${profile.id}`,
+        { browser: { mode: "interactive", allowedOrigins: [], localOrigins: [origin] } },
+        "PATCH",
+      );
+      const channel = (await api("/api/channels", { name: "Browser crash", profileId: profile.id }))
+        .channel;
+      const runId = (
+        await api(`/api/channels/${channel.id}/messages`, { content: "Inspect browser fixture" })
+      ).run.id;
+      await vi.waitFor(async () => expect((await api("/api/runtime")).approvals.length).toBe(1), {
+        timeout: 10_000,
+      });
+      const ids = (await readFile(`/proc/${child!.pid}/task/${child!.pid}/children`, "utf8"))
+        .trim()
+        .split(/\s+/);
+      const chromiumIds: string[] = [];
+      for (const id of ids) {
+        try {
+          if ((await readFile(`/proc/${id}/cmdline`, "utf8")).includes("--user-data-dir="))
+            chromiumIds.push(id);
+        } catch {
+          /* Process already exited. */
+        }
+      }
+      expect(chromiumIds.length).toBeGreaterThan(0);
+      const root = join(
+        tmpdir(),
+        `vektor-browser-${createHash("sha256").update(directory).digest("hex").slice(0, 20)}`,
+      );
+      expect((await readdir(root)).length).toBeGreaterThan(0);
+      await stop("SIGKILL");
+      await vi.waitFor(
+        async () => {
+          for (const id of chromiumIds) {
+            try {
+              expect((await readFile(`/proc/${id}/stat`, "utf8")).split(" ")[2]).toBe("Z");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
+          }
+        },
+        { timeout: 10_000 },
+      );
+      const before = hits;
+      await start("fast");
+      const recovered = await api(`/api/runs/${runId}/details`);
+      expect(recovered.run.status).toBe("failed");
+      expect(
+        recovered.approvals.every(
+          (approval: { status: string }) => approval.status === "cancelled",
+        ),
+      ).toBe(true);
+      expect((await api(`/api/runs/${runId}/browser`)).session.active).toBe(false);
+      expect(await readdir(root)).toHaveLength(0);
+      expect(hits).toBe(before);
+    } finally {
+      fixture.closeAllConnections();
+      await new Promise<void>((resolve) => fixture.close(() => resolve()));
+    }
+  }, 30_000);
   it("recovers streams, usage, scheduled history, approval waits and process groups without replaying commands", async () => {
     directory = await mkdtemp(join(tmpdir(), "vektor-crash-"));
     await start("hanging");

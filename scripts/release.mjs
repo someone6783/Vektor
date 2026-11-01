@@ -93,6 +93,7 @@ function pack() {
     cpSync(resolve(projectRoot, "apps/web/dist"), resolve(stage, "web/dist"), { recursive: true });
     cpSync(resolve(projectRoot, "docs/OPERATIONS.md"), resolve(stage, "OPERATIONS.md"));
     cpSync(resolve(projectRoot, "docs/RELEASING.md"), resolve(stage, "RELEASING.md"));
+    cpSync(resolve(projectRoot, "docs/BROWSER.md"), resolve(stage, "BROWSER.md"));
     const epoch = execFileSync("git", ["show", "-s", "--format=%ct", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
@@ -115,6 +116,7 @@ function pack() {
       "web",
       "OPERATIONS.md",
       "RELEASING.md",
+      "BROWSER.md",
     ]);
     archive(`vektor-web-${info.version}.tar.gz`, resolve(projectRoot, "apps/web/dist"), ["."]);
     cpSync(resolve(projectRoot, "compose.release.yaml"), resolve(directory, "compose.yaml"));

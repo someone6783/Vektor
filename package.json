@@ -15,6 +15,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "browser:install": "pnpm --filter @vektor/api exec playwright install chromium",
     "version:sync": "node scripts/version.mjs",
     "version:check": "node scripts/version.mjs --check",
     "release:validate": "node scripts/release.mjs validate",

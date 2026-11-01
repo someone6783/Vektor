@@ -6,6 +6,7 @@ import {
   createMessage,
   createToolCall,
   getApproval,
+  getJob,
   getProfile,
   getSetting,
   listToolCalls,
@@ -17,9 +18,21 @@ import {
   type RunRecord,
   type VektorDatabase,
 } from "@vektor/db";
-import { terminalInputSchema, type RunEvent, type RunUsage } from "@vektor/shared";
+import {
+  terminalInputSchema,
+  browserInputSchema,
+  type BrowserInput,
+  type RunEvent,
+  type RunUsage,
+} from "@vektor/shared";
 import type { ChatMessage, ChatProvider, ProviderEvent } from "../providers/types.js";
-import { runtimeSystemPrompt, terminalEnabled, toolsForProfile } from "../runtime/policy.js";
+import {
+  browserPermissions,
+  runtimeSystemPrompt,
+  terminalEnabled,
+  toolsForProfile,
+} from "../runtime/policy.js";
+import type { BrowserService } from "../browser/service.js";
 import { RuntimeError, type TerminalExecutor } from "../runtime/terminal.js";
 import { countMessageTokens, countTokens } from "../runtime/tokens.js";
 
@@ -45,6 +58,9 @@ interface ActiveRun {
   pendingText: string;
   usage: RunUsage | null;
   timer?: NodeJS.Timeout;
+  browserWait?: Promise<void>;
+  resumeBrowser?: () => void;
+  jobBrowserAccess?: string;
 }
 export interface RunSubscription {
   active: boolean;
@@ -61,6 +77,7 @@ export interface RunManagerOptions {
   getChatProvider: () => ChatProvider;
   logger: Logger;
   terminal: TerminalExecutor;
+  browser?: BrowserService;
   redact: (text: string, partial?: boolean) => string;
   redactionHoldback?: () => number;
   runTimeoutMs?: number;
@@ -72,7 +89,13 @@ export class RunManager {
   private readonly completionListeners = new Set<() => void>();
   private readonly pending = new Map<
     string,
-    { runId: string; resolve: (approved: boolean) => void }
+    {
+      runId: string;
+      resolve: (approved: boolean) => void;
+      valid?: () => Promise<boolean>;
+      expiresAt?: number;
+      timer?: NodeJS.Timeout;
+    }
   >();
   constructor(private readonly options: RunManagerOptions) {}
   onFinished(listener: () => void): () => void {
@@ -105,6 +128,9 @@ export class RunManager {
       text: "",
       pendingText: "",
       usage: null,
+      jobBrowserAccess: input.run.jobId
+        ? (getJob(this.options.db, input.run.jobId)?.browserAccess ?? "off")
+        : undefined,
     };
     this.active.set(input.run.id, active);
     active.timer = setTimeout(() => {
@@ -114,6 +140,8 @@ export class RunManager {
     appendAudit(this.options.db, "run.started", input.run.id, {
       profileId: input.profile.id,
       terminalMode: input.profile.terminalMode,
+      browser: browserPermissions(input.profile),
+      browserAccess: active.jobBrowserAccess,
     });
     void this.execute(active, input.messages).catch((error) => {
       if (!active.finished)
@@ -160,6 +188,7 @@ export class RunManager {
     appendAudit(this.options.db, "runtime.emergency_stop", null);
     this.cancelAll("emergency_stop");
     await this.options.terminal.stopAll();
+    await this.options.browser?.stopAll();
   }
   resume(): void {
     if (this.stopped)
@@ -170,18 +199,42 @@ export class RunManager {
   async shutdown(): Promise<void> {
     this.cancelAll();
     await this.options.terminal.stopAll();
+    await this.options.browser?.stopAll();
   }
 
-  decideApproval(id: string, approved: boolean): void {
+  async decideApproval(id: string, approved: boolean): Promise<void> {
     const pending = this.pending.get(id);
     const record = getApproval(this.options.db, id);
     if (!record) throw new RuntimeError("Approval not found.", 404);
     if (!pending || record.status !== "pending" || !this.isActive(record.runId))
       throw new RuntimeError("This approval is no longer pending.", 409);
     if (this.stopped) throw new RuntimeError("Emergency stop is active.", 423);
+    let valid = true;
+    try {
+      if (approved && pending.valid) valid = await pending.valid();
+    } catch {
+      valid = false;
+    }
+    if (
+      !valid ||
+      (pending.expiresAt !== undefined && Date.now() >= pending.expiresAt) ||
+      this.pending.get(id) !== pending ||
+      !this.isActive(record.runId) ||
+      this.stopped
+    ) {
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      resolveApproval(this.options.db, id, "cancelled");
+      pending.resolve(false);
+      throw new RuntimeError(
+        "Browser approval expired or the page, target or permissions changed.",
+        409,
+      );
+    }
     if (!resolveApproval(this.options.db, id, approved ? "approved" : "denied"))
       throw new RuntimeError("This approval was already resolved.", 409);
     this.pending.delete(id);
+    clearTimeout(pending.timer);
     appendAudit(this.options.db, approved ? "approval.approved" : "approval.denied", record.runId, {
       approvalId: id,
       toolCallId: record.toolCallId,
@@ -223,6 +276,7 @@ export class RunManager {
     const { db, redact } = this.options;
     active.controller.abort();
     clearTimeout(active.timer);
+    active.resumeBrowser?.();
     const checkpoint = { seq: active.seq, text: active.text, pendingText: active.pendingText };
     const outbox: RunEvent[] = [];
     active.outbox = outbox;
@@ -237,6 +291,7 @@ export class RunManager {
         for (const [id, pending] of this.pending) {
           if (pending.runId === active.run.id) {
             this.pending.delete(id);
+            clearTimeout(pending.timer);
             pending.resolve(false);
           }
         }
@@ -290,6 +345,7 @@ export class RunManager {
     for (const event of outbox) this.publish(active, event);
     active.listeners.clear();
     this.active.delete(active.run.id);
+    void this.options.browser?.close(active.run.id);
     for (const listener of this.completionListeners) {
       try {
         listener();
@@ -310,10 +366,160 @@ export class RunManager {
     );
   }
 
+  private browserPolicy(active: ActiveRun) {
+    const current = getProfile(this.options.db, active.profile.id);
+    const original = browserPermissions(active.profile);
+    if (active.run.jobId) {
+      const job = getJob(this.options.db, active.run.jobId);
+      if (!job || job.deletedAt || job.browserAccess !== active.jobBrowserAccess)
+        throw new RuntimeError("Scheduled browser permissions changed. Start a new run.", 403);
+    }
+    if (
+      !current ||
+      current.archivedAt !== null ||
+      original.mode === "off" ||
+      JSON.stringify(browserPermissions(current)) !== JSON.stringify(original)
+    )
+      throw new RuntimeError(
+        "Browser permissions changed or are disabled. Start a new run with the updated profile.",
+        403,
+      );
+    if (active.jobBrowserAccess === "off") return { ...original, mode: "off" as const };
+    return active.jobBrowserAccess === "observe"
+      ? { ...original, mode: "observe" as const }
+      : original;
+  }
+  async revokeBrowser(profileId: string): Promise<void> {
+    for (const active of this.active.values())
+      if (active.profile.id === profileId) {
+        this.cancelBrowserApprovals(active.run.id);
+        await this.options.browser?.close(active.run.id);
+        active.resumeBrowser?.();
+        delete active.browserWait;
+        delete active.resumeBrowser;
+      }
+  }
+  private cancelBrowserApprovals(runId: string) {
+    for (const [id, pending] of this.pending)
+      if (pending.runId === runId && pending.valid) {
+        clearTimeout(pending.timer);
+        this.pending.delete(id);
+        resolveApproval(this.options.db, id, "cancelled");
+        pending.resolve(false);
+      }
+  }
+  browserState(runId: string) {
+    return this.options.browser?.state(runId);
+  }
+  async browserControl(runId: string, action: "pause" | "resume" | "close") {
+    const active = this.active.get(runId);
+    if (!active) throw new RuntimeError("This run is no longer active.", 409);
+    this.cancelBrowserApprovals(runId);
+    if (action === "close") await this.options.browser?.close(runId);
+    else this.options.browser?.pause(runId, action === "pause");
+    if (action === "pause" && !active.browserWait)
+      active.browserWait = new Promise((resolve) => {
+        active.resumeBrowser = resolve;
+      });
+    if (action !== "pause") {
+      active.resumeBrowser?.();
+      delete active.browserWait;
+      delete active.resumeBrowser;
+    }
+    appendAudit(this.options.db, `browser.${action}`, runId);
+  }
+  async browserTakeover(runId: string, input: BrowserInput) {
+    const active = this.active.get(runId);
+    if (!active || this.stopped) throw new RuntimeError("This run is no longer active.", 409);
+    appendAudit(this.options.db, "browser.user_action", runId, { action: input.action });
+    return this.browserExecute(active, input, true);
+  }
+  private async browserApproval(
+    active: ActiveRun,
+    description: string,
+    valid: () => Promise<boolean>,
+  ) {
+    if (active.finished || active.controller.signal.aborted) return false;
+    const { db, redact } = this.options;
+    const tool = createToolCall(db, {
+      runId: active.run.id,
+      providerCallId: `browser-approval-${active.seq + 1}`,
+      name: "browser.approval",
+      input: { description: redact(description) },
+    });
+    updateToolCall(db, tool.id, "waiting");
+    this.emit(active, {
+      type: "tool.requested",
+      toolCallId: tool.id,
+      name: "browser.approval",
+      input: { description: redact(description) },
+    });
+    const approval = createApproval(db, active.run.id, tool.id, redact(description));
+    const approved = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        if (!this.pending.has(approval.id)) return;
+        this.pending.delete(approval.id);
+        resolveApproval(db, approval.id, "cancelled");
+        resolve(false);
+      }, 30_000);
+      timer.unref();
+      this.pending.set(approval.id, {
+        runId: active.run.id,
+        resolve,
+        valid,
+        expiresAt: Date.now() + 30_000,
+        timer,
+      });
+      this.emit(active, {
+        type: "approval.requested",
+        approvalId: approval.id,
+        toolCallId: tool.id,
+        command: approval.command,
+      });
+      appendAudit(db, "browser.approval_requested", active.run.id, {
+        approvalId: approval.id,
+        toolCallId: tool.id,
+      });
+    });
+    if (!active.finished) {
+      updateToolCall(
+        db,
+        tool.id,
+        approved ? "completed" : "denied",
+        approved ? "One browser action approved." : "Browser action denied, expired or cancelled.",
+      );
+      this.emit(active, {
+        type: "tool.output",
+        toolCallId: tool.id,
+        output: approved
+          ? "One browser action approved."
+          : "Browser action denied, expired or cancelled.",
+        isError: !approved,
+      });
+    }
+    return approved;
+  }
+  private browserExecute(active: ActiveRun, input: BrowserInput, human = false) {
+    if (!this.options.browser) throw new RuntimeError("Managed browser is unavailable.", 503);
+    return this.options.browser.execute(
+      active.run.id,
+      active.run.channelId,
+      input,
+      {
+        signal: active.controller.signal,
+        permissions: () => this.browserPolicy(active),
+        approve: (description, valid) => this.browserApproval(active, description, valid),
+      },
+      human,
+    );
+  }
+
   private async tool(
     active: ActiveRun,
     call: Extract<ProviderEvent, { type: "tool_call" }>,
   ): Promise<string> {
+    await active.browserWait;
+    if (active.finished) return "Run cancelled.";
     const { db, terminal, redact } = this.options;
     let input: unknown;
     try {
@@ -325,7 +531,10 @@ export class RunManager {
       runId: active.run.id,
       providerCallId: redact(call.id),
       name: redact(call.name),
-      input: JSON.parse(redact(JSON.stringify(input))),
+      input:
+        call.name === "browser" && input && typeof input === "object" && "text" in input
+          ? JSON.parse(redact(JSON.stringify({ ...input, text: "[value withheld]" })))
+          : JSON.parse(redact(JSON.stringify(input))),
     });
     this.emit(active, {
       type: "tool.requested",
@@ -339,6 +548,21 @@ export class RunManager {
       input: JSON.parse(record.inputJson),
     });
     try {
+      if (call.name === "browser") {
+        const parsed = browserInputSchema.parse(input);
+        this.browserPolicy(active);
+        updateToolCall(db, record.id, "running");
+        const result = await this.browserExecute(active, parsed);
+        if (active.finished) return "Browser action cancelled.";
+        const output = redact(JSON.stringify(result));
+        updateToolCall(db, record.id, "completed", output);
+        this.emit(active, { type: "tool.output", toolCallId: record.id, output, isError: false });
+        appendAudit(db, "browser.action", active.run.id, {
+          toolCallId: record.id,
+          action: parsed.action,
+        });
+        return output;
+      }
       if (call.name !== "terminal" || !this.hasPermission(active))
         throw new RuntimeError("This tool is disabled by the profile's terminal permissions.", 403);
       if (redact(call.argumentsJson) !== call.argumentsJson)
@@ -405,11 +629,20 @@ export class RunManager {
   private async execute(active: ActiveRun, messages: ChatMessage[]): Promise<void> {
     const provider = this.options.getChatProvider();
     updateRun(this.options.db, active.run.id, { provider: provider.kind ?? "unknown" });
-    const systemPrompt = runtimeSystemPrompt(active.profile);
+    const effectiveProfile = {
+      ...active.profile,
+      browser:
+        active.jobBrowserAccess === "off"
+          ? { ...browserPermissions(active.profile), mode: "off" as const }
+          : active.jobBrowserAccess === "observe"
+            ? { ...browserPermissions(active.profile), mode: "observe" as const }
+            : browserPermissions(active.profile),
+    };
+    const systemPrompt = runtimeSystemPrompt(effectiveProfile);
     const history: ChatMessage[] = systemPrompt
       ? [{ role: "system", content: systemPrompt }, ...messages]
       : [...messages];
-    const tools = toolsForProfile(active.profile);
+    const tools = toolsForProfile(effectiveProfile);
     this.emit(active, {
       type: "run.started",
       conversationId: active.run.channelId,
@@ -417,6 +650,7 @@ export class RunManager {
       runner: "native",
     });
     for (let round = 0; round < 8; round++) {
+      await active.browserWait;
       if (active.finished) return;
       const budget =
         (active.run.context as { availableInputTokens?: number } | null)?.availableInputTokens ??
@@ -498,6 +732,8 @@ export class RunManager {
           this.emit(active, { type: "usage", ...active.usage });
         }
       }
+      if (active.finished) return;
+      await active.browserWait;
       if (active.finished) return;
       flushText(true);
       if (finish === "error" || !finish)

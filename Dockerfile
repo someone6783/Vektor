@@ -13,6 +13,7 @@ COPY packages/db/package.json packages/db/package.json
 COPY packages/shared/package.json packages/shared/package.json
 
 RUN pnpm install --frozen-lockfile
+RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright pnpm --filter @vektor/api exec playwright install chromium
 
 COPY . .
 RUN node scripts/version.mjs --check && pnpm build \
@@ -35,6 +36,7 @@ ENV NODE_ENV=production \
     VEKTOR_DATA_DIR=/data \
     VEKTOR_RUNTIME_ENV=container \
     VEKTOR_WEB_DIST=/app/web-dist
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -43,6 +45,9 @@ RUN groupadd --system --gid 1001 vektor \
 
 COPY --from=build --chown=vektor:vektor /prod /app
 COPY --from=build --chown=vektor:vektor /app/apps/web/dist /app/web-dist
+COPY --from=build /ms-playwright /ms-playwright
+RUN node node_modules/playwright/cli.js install-deps chromium \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /data && chown vektor:vektor /data
 

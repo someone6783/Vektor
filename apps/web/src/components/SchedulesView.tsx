@@ -46,6 +46,9 @@ function JobEditor({
   const [catchUp, setCatchUp] = useState(job?.catchUp ?? false);
   const [includeHistory, setIncludeHistory] = useState(job?.includeHistory ?? false);
   const [allowTruncation, setAllowTruncation] = useState(job?.allowTruncation ?? false);
+  const [browserAccess, setBrowserAccess] = useState<"off" | "observe" | "interactive">(
+    job?.browserAccess ?? "off",
+  );
   const [preview, setPreview] = useState<SchedulePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,7 @@ function JobEditor({
       catchUp,
       includeHistory,
       allowTruncation: includeHistory && allowTruncation,
+      browserAccess,
     };
     try {
       if (job) await client.updateJob(job.id, input);
@@ -227,6 +231,23 @@ function JobEditor({
           className={fieldClass}
         />
       </label>
+      <label className="mt-3 block text-xs text-slate-400">
+        Declared browser capability
+        <select
+          aria-label="Job browser access"
+          value={browserAccess}
+          onChange={(event) => setBrowserAccess(event.target.value as typeof browserAccess)}
+          className={fieldClass}
+        >
+          <option value="off">Off</option>
+          <option value="observe">Observation only</option>
+          <option value="interactive">Interactive · waits for human approvals</option>
+        </select>
+      </label>
+      <p className="mt-2 text-xs text-slate-500">
+        This declaration can only reduce the profile’s browser permissions. Interactive scheduled
+        runs pause for approvals; they do not assume unattended consent.
+      </p>
       <div className="mt-3 space-y-2 text-xs text-slate-300">
         <label className="flex gap-2">
           <input

@@ -5,6 +5,11 @@ import { profiles } from "./schema.js";
 
 export type TerminalMode = "no-terminal" | "basic" | "full-access";
 export type ProfileColor = "emerald" | "sky" | "violet" | "amber" | "rose";
+export interface BrowserPermissions {
+  mode: "off" | "observe" | "interactive";
+  allowedOrigins: string[];
+  localOrigins: string[];
+}
 
 export interface ProfileRecord {
   id: string;
@@ -16,12 +21,14 @@ export interface ProfileRecord {
   maxTokens: number;
   terminalMode: TerminalMode;
   tools: string[];
+  browser?: BrowserPermissions;
   createdAt: number;
   updatedAt: number;
   archivedAt: number | null;
 }
 
 export interface CreateProfileRecordInput {
+  browser?: BrowserPermissions;
   name: string;
   model: string;
   systemPrompt?: string;
@@ -33,6 +40,7 @@ export interface CreateProfileRecordInput {
 }
 
 export interface UpdateProfileRecordInput {
+  browser?: BrowserPermissions;
   name?: string;
   model?: string;
   systemPrompt?: string;
@@ -96,10 +104,27 @@ function toRecord(row: typeof profiles.$inferSelect): ProfileRecord {
     maxTokens: params.maxTokens,
     terminalMode: row.terminalMode as TerminalMode,
     tools: parseTools(row.toolsJson),
+    browser: parseBrowser(row.browserJson),
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
     archivedAt: row.archivedAt?.getTime() ?? null,
   };
+}
+
+function parseBrowser(value: string): BrowserPermissions {
+  const off: BrowserPermissions = { mode: "off", allowedOrigins: [], localOrigins: [] };
+  try {
+    const parsed = JSON.parse(value) as BrowserPermissions;
+    if (
+      !["off", "observe", "interactive"].includes(parsed.mode) ||
+      !Array.isArray(parsed.allowedOrigins) ||
+      !Array.isArray(parsed.localOrigins)
+    )
+      return off;
+    return parsed;
+  } catch {
+    return off;
+  }
 }
 
 function paramsJson(input: { temperature?: number; maxTokens?: number }): string {
@@ -139,6 +164,9 @@ export function createProfile(db: VektorDatabase, input: CreateProfileRecordInpu
     paramsJson: paramsJson(input),
     terminalMode: input.terminalMode ?? "no-terminal",
     toolsJson: JSON.stringify(input.tools ?? []),
+    browserJson: JSON.stringify(
+      input.browser ?? { mode: "off", allowedOrigins: [], localOrigins: [] },
+    ),
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
@@ -167,6 +195,7 @@ export function updateProfile(
   if (patch.color !== undefined) set.color = patch.color;
   if (patch.terminalMode !== undefined) set.terminalMode = patch.terminalMode;
   if (patch.tools !== undefined) set.toolsJson = JSON.stringify(patch.tools);
+  if (patch.browser !== undefined) set.browserJson = JSON.stringify(patch.browser);
   if (patch.archived !== undefined) set.archivedAt = patch.archived ? now : null;
   if (patch.temperature !== undefined || patch.maxTokens !== undefined) {
     set.paramsJson = paramsJson({

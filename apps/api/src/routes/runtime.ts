@@ -47,7 +47,7 @@ export function registerRuntimeRoutes(
   app.post("/api/approvals/:approvalId", async (request) => {
     const { approvalId } = request.params as { approvalId: string };
     const { approved } = z.object({ approved: z.boolean() }).strict().parse(request.body);
-    manager.decideApproval(approvalId, approved);
+    await manager.decideApproval(approvalId, approved);
     return { resolved: true };
   });
   app.get("/api/runs", async (request) => {

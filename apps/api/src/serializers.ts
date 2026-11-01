@@ -21,6 +21,7 @@ export function toProfile(record: ProfileRecord): Profile {
     maxTokens: record.maxTokens,
     terminalMode: record.terminalMode,
     tools: record.tools,
+    browser: record.browser,
     createdAt: iso(record.createdAt),
     updatedAt: iso(record.updatedAt),
     archivedAt: isoOrNull(record.archivedAt),

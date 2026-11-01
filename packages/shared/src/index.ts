@@ -8,3 +8,4 @@ export * from "./scheduling.js";
 export * from "./usage.js";
 export * from "./build-info.js";
 export * from "./updates.js";
+export * from "./browser.js";

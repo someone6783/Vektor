@@ -27,6 +27,7 @@ const envSchema = z.object({
   VEKTOR_LOG_RETAINED_FILES: z.coerce.number().int().min(1).max(20).default(5),
   VEKTOR_OPENROUTER_KEY: z.string().min(1).optional(),
   VEKTOR_UPDATE_CHECK: z.enum(["0", "1"]).optional(),
+  VEKTOR_BROWSER_ARTIFACT_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   VEKTOR_GITHUB_TOKEN: z
     .string()
     .min(8)
@@ -67,6 +68,7 @@ export interface AppConfig {
   logRetainedFiles?: number;
   version: string;
   updateCheck?: boolean;
+  browserArtifactDays?: number;
   githubToken?: string;
   openRouterKey?: string;
   openRouterBaseUrl: string;
@@ -109,6 +111,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     updateCheck:
       parsed.VEKTOR_UPDATE_CHECK === undefined ? undefined : parsed.VEKTOR_UPDATE_CHECK === "1",
     githubToken: parsed.VEKTOR_GITHUB_TOKEN,
+    browserArtifactDays: parsed.VEKTOR_BROWSER_ARTIFACT_DAYS,
     openRouterKey: parsed.VEKTOR_OPENROUTER_KEY,
     openRouterBaseUrl: parsed.VEKTOR_OPENROUTER_BASE_URL,
     openRouterModel: parsed.VEKTOR_OPENROUTER_MODEL,

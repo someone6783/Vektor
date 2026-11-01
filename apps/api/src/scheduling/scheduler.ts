@@ -104,14 +104,24 @@ export class Scheduler {
     setSetting(this.options.db, "scheduler.paused", false);
     appendAudit(this.options.db, "scheduler.resumed", null);
   }
-  private target(profileId: string, channelId: string): void {
+  private target(profileId: string, channelId: string, browserAccess = "off"): void {
     const profile = getProfile(this.options.db, profileId);
     const channel = getChannel(this.options.db, channelId);
     if (!profile || profile.archivedAt !== null || !channel || channel.archivedAt !== null)
       throw new RuntimeError("Choose an active profile and channel.");
+    if (
+      browserAccess !== "off" &&
+      (profile.browser?.mode === "off" ||
+        !profile.browser ||
+        (browserAccess === "interactive" && profile.browser.mode !== "interactive"))
+    )
+      throw new RuntimeError(
+        "The job's declared browser capability exceeds its profile permissions.",
+        403,
+      );
   }
   create(input: CreateJob): JobRecord {
-    this.target(input.profileId, input.channelId);
+    this.target(input.profileId, input.channelId, input.browserAccess);
     if (listJobs(this.options.db).length >= 100)
       throw new RuntimeError(
         "At most 100 scheduled jobs are supported. Delete unused jobs before adding more.",
@@ -138,7 +148,7 @@ export class Scheduler {
     const job = this.get(id);
     const input = { ...job, ...patch };
     if (input.enabled || patch.profileId !== undefined || patch.channelId !== undefined)
-      this.target(input.profileId, input.channelId);
+      this.target(input.profileId, input.channelId, input.browserAccess);
     const preview = previewSchedule(input.schedule, input.timezone, this.now());
     const reschedule =
       patch.schedule !== undefined || patch.timezone !== undefined || patch.enabled !== undefined;
@@ -296,7 +306,7 @@ export class Scheduler {
     let messages: Awaited<ReturnType<ContextService["messages"]>> | undefined;
     if (!skip) {
       try {
-        this.target(job.profileId, job.channelId);
+        this.target(job.profileId, job.channelId, job.browserAccess);
         prepared = context.prepare(
           job.channelId,
           { content: job.prompt, profileId: job.profileId, attachmentIds: [] },
@@ -341,7 +351,7 @@ export class Scheduler {
       if (!skip && getActiveRun(tx, job.channelId)) skip = "channel_busy";
       if (!skip && !failure) {
         try {
-          this.target(job.profileId, job.channelId);
+          this.target(job.profileId, job.channelId, job.browserAccess);
           manager.assertCanStart();
         } catch (error) {
           failure = redact(error instanceof Error ? error.message : "Target unavailable.");

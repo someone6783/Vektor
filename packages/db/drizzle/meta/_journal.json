@@ -43,6 +43,13 @@
       "when": 1793492240486,
       "tag": "0005_dry_toro",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793499564089,
+      "tag": "0006_slow_old_lace",
+      "breakpoints": true
     }
   ]
 }

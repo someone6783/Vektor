@@ -11,7 +11,11 @@ import {
 import { createProfileSchema, makeApiError, updateProfileSchema } from "@vektor/shared";
 import { toProfile } from "../serializers.js";
 
-export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase): void {
+export function registerProfileRoutes(
+  app: FastifyInstance,
+  db: VektorDatabase,
+  revokeBrowser?: (id: string) => Promise<void>,
+): void {
   app.get("/api/profiles", async () => ({
     profiles: listProfiles(db).map(toProfile),
   }));
@@ -53,12 +57,18 @@ export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase):
         .send(makeApiError("not_found", "Profile not found.", { requestId: request.id }));
     }
 
-    if (input.terminalMode !== undefined || input.tools !== undefined)
+    if (input.browser !== undefined || input.archived === true) await revokeBrowser?.(profileId);
+    if (
+      input.terminalMode !== undefined ||
+      input.tools !== undefined ||
+      input.browser !== undefined
+    )
       appendAudit(db, "profile.permissions_changed", null, {
         profileId,
         previousMode: existing.terminalMode,
         terminalMode: profile.terminalMode,
         tools: profile.tools,
+        browser: profile.browser,
       });
     return { profile: toProfile(profile) };
   });
@@ -81,6 +91,7 @@ export function registerProfileRoutes(app: FastifyInstance, db: VektorDatabase):
     }
 
     archiveProfile(db, profileId);
+    await revokeBrowser?.(profileId);
     appendAudit(db, "profile.archived", null, { profileId });
     return reply.code(204).send();
   });

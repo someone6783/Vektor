@@ -42,10 +42,12 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm --filter @vektor/api exec playwright install --with-deps chromium
       - run: pnpm test
       - run: pnpm build
       - run: docker build -t vektor:phase7-check --build-arg VCS_REF="$GITHUB_SHA" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
       - run: python3 scripts/verify-phase7.py
+      - run: docker run --rm -i --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/browser-smoke.mjs
       - run: pnpm release:pack
       - run: pnpm release:verify
       - uses: actions/upload-artifact@v7

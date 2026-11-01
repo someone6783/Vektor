@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Run, RunDetails } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
+import { BrowserPanel } from "./BrowserPanel";
 
 export function RunTimeline({
   client,
@@ -122,6 +123,14 @@ export function RunTimeline({
               </pre>
             </details>
           ))}
+          {details.tools.some((tool) => tool.name.startsWith("browser")) ? (
+            <BrowserPanel
+              key={details.run.id}
+              client={client}
+              runId={details.run.id}
+              active={details.run.status === "running"}
+            />
+          ) : null}
           <ol className="space-y-1 text-[10px] text-slate-500">
             {details.events.map((event) => (
               <li key={event.seq}>

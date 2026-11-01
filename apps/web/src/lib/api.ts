@@ -1,4 +1,7 @@
 import {
+  browserStateSchema,
+  browserArtifactSchema,
+  type BrowserInput,
   updateCheckSchema,
   type UpdateCheck,
   type UpdatePreferences,
@@ -76,6 +79,37 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+  async browserState(runId: string) {
+    const result = await this.request<{ session: unknown; artifacts: unknown[] }>(
+      `/api/runs/${runId}/browser`,
+    );
+    return {
+      session: browserStateSchema.parse(result.session),
+      artifacts: result.artifacts.map((value) => browserArtifactSchema.parse(value)),
+    };
+  }
+  async browserControl(runId: string, action: "pause" | "resume" | "close") {
+    await this.request(`/api/runs/${runId}/browser/control`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+  }
+  async browserInput(runId: string, input: BrowserInput) {
+    return this.request(`/api/runs/${runId}/browser/input`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  async browserArtifact(id: string): Promise<Blob> {
+    const response = await apiFetch(`/api/browser-artifacts/${id}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!response.ok) throw await parseError(response);
+    return response.blob();
+  }
+  async deleteBrowserArtifacts(runId: string) {
+    await this.request(`/api/runs/${runId}/browser/artifacts`, { method: "DELETE" });
+  }
 
   async updateCheck(force = false): Promise<UpdateCheck> {
     return updateCheckSchema.parse(await this.request(`/api/update-check?force=${force}`));

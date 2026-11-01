@@ -42,6 +42,8 @@ docker build -t vektor:release-check .
 python3 scripts/verify-phase7.py --image vektor:release-check
 ```
 
+Browser-enabled host installations also need the pinned Chromium and OS dependencies described in [BROWSER.md](BROWSER.md). Docker packages them and CI runs the deterministic browser smoke before publishing.
+
 The API archive must be built on Linux x64 with Node 22 because it contains native
 SQLite dependencies. `release:verify` extracts it into a temporary directory, starts
 the production server with fresh data, checks health/version, web assets, API bearer

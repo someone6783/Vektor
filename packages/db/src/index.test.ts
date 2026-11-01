@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getOrCreateInstanceId,
-  createProfile,
   createChannel,
   createMessage,
   getMessage,
+  getProfile,
   listAttachments,
   createAttachment,
   linkMessageAttachments,
@@ -24,6 +24,15 @@ import {
 
 let tempDir: string | undefined;
 let connection: SqliteConnection | undefined;
+function legacyProfile(sqlite: SqliteConnection, name: string) {
+  const id = "legacy-profile";
+  sqlite
+    .prepare(
+      "INSERT INTO profiles (id, name, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(id, name, "test", Date.now(), Date.now());
+  return { id };
+}
 
 function setup() {
   tempDir = mkdtempSync(join(tmpdir(), "vektor-db-"));
@@ -57,7 +66,7 @@ describe("database bootstrap", () => {
     const { db, sqlite } = openDatabase(join(tempDir, "vektor.db"));
     connection = sqlite;
     runMigrations(db, legacy);
-    const profile = createProfile(db, { name: "Phase 3", model: "test" });
+    const profile = legacyProfile(sqlite, "Phase 3");
     const channel = createChannel(db, { name: "Files", profileId: profile.id });
     const message = createMessage(db, {
       channelId: channel.id,
@@ -82,6 +91,11 @@ describe("database bootstrap", () => {
       )
       .run("old-run", channel.id, profile.id, message.id, "test", "completed", Date.now());
     runMigrations(db);
+    expect(getProfile(db, profile.id)?.browser).toEqual({
+      mode: "off",
+      allowedOrigins: [],
+      localOrigins: [],
+    });
     expect(getRun(db, "old-run")).toMatchObject({
       status: "completed",
       terminalMode: "no-terminal",
@@ -107,7 +121,7 @@ describe("database bootstrap", () => {
     connection = sqlite;
     runMigrations(db, legacy);
     setSetting(db, "existing", { kept: true });
-    const profile = createProfile(db, { name: "Legacy profile", model: "test" });
+    const profile = legacyProfile(sqlite, "Legacy profile");
     const channel = createChannel(db, { name: "Legacy channel", profileId: profile.id });
     const message = createMessage(db, {
       channelId: channel.id,

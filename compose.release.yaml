@@ -7,6 +7,7 @@ services:
     environment:
       - VEKTOR_UPDATE_CHECK
       - VEKTOR_GITHUB_TOKEN
+      - VEKTOR_BROWSER_ARTIFACT_DAYS
     volumes:
       - vektor-data:/data
     restart: unless-stopped

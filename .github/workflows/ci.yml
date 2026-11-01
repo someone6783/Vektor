@@ -24,10 +24,12 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm --filter @vektor/api exec playwright install --with-deps chromium
       - run: pnpm test
       - run: pnpm build
       - run: docker build -t vektor:phase7-check .
       - run: python3 scripts/verify-phase7.py
+      - run: docker run --rm -i --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/browser-smoke.mjs
 
   desktop:
     runs-on: ubuntu-latest
