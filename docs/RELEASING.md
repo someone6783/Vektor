@@ -1,8 +1,12 @@
 # Release operations
 
-Release automation includes update checks and click-to-install desktop/Docker updates. See [UPDATES.md](UPDATES.md) for installation and host helper setup. No image or release has
-been published as part of local implementation. Remote multiarchitecture execution
-and the first live update notification still need a real release demonstration.
+Release automation includes update checks and click-to-install desktop/Docker updates.
+See [UPDATES.md](UPDATES.md) for installation and host helper setup.
+[v0.1.0 was published on 2026-11-01](https://github.com/someone6783/Vektor/releases/tag/v0.1.0)
+with verified Windows/Linux update signatures, public amd64/arm64 Docker images and
+attached BuildKit attestations. Anonymous registry access, a credential-free pull,
+published-image startup/auth/Web UI checks, release checksums and live GitHub update
+metadata/signatures passed. Windows GUI installation/replacement remains unverified.
 
 ## Version and repository metadata
 
@@ -76,6 +80,13 @@ leave a draft release or pushed image tags; dispatch the same tag to retry a dra
 Published releases cannot be overwritten by this workflow. There is no atomic
 transaction across GHCR and GitHub Releases.
 
+If publishing alone failed after all build jobs passed, dispatch the current Release
+workflow with the same tag and optional `artifact_run` input set to that prior run ID.
+The workflow verifies the exact tagged commit and successful server, Windows and
+Linux build jobs before reusing their signed artifacts. It normalizes desktop
+artifact subdirectories before generating release checksums. Published releases
+remain protected from overwrite.
+
 The workflow needs repository Actions enabled and GITHUB_TOKEN permissions to write
 repository contents and GHCR packages. An existing GHCR package may require granting
 this repository Actions access. No personal publisher token is required by the code.
@@ -120,7 +131,8 @@ the newer stable version, release link and last-check timestamp after Check now 
 within the 24-hour cache window. Remove network access and confirm startup/chat/runs
 continue with a quiet unable-to-check state. The offline, timeout, cache and older
 instance behavior is locally covered with deterministic fixtures; this final
-published end-to-end demonstration has not yet been run.
+published checks have passed using an older-version fixture and the real GitHub release.
+An actual GUI-driven desktop update between two published versions is still future work.
 
 Implementation references: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
 [Docker build-push action](https://github.com/docker/build-push-action), and
