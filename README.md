@@ -393,7 +393,8 @@ access, upgrades with the existing data volume, and the pending first-release de
 Phase 9 adds a browser tool independent of terminal permissions. It defaults off.
 Choose observation or interactive access in profile Settings and grant exact origins;
 local testing requires a separate exact loopback origin/port. Every run gets a fresh
-managed Chromium session. Interactive clicks, file transfers and network writes pause
+managed Chromium process. Choose a saved default profile to reuse site logins, or
+a fully separate temporary session for either observation or interactive access. Interactive clicks, file transfers and network writes pause
 for scoped approvals; emergency stop closes the session. The run timeline offers
 snapshots, masked screenshots, pause/takeover and artifact deletion.
 

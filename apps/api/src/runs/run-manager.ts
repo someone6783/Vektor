@@ -345,7 +345,7 @@ export class RunManager {
     for (const event of outbox) this.publish(active, event);
     active.listeners.clear();
     this.active.delete(active.run.id);
-    void this.options.browser?.close(active.run.id);
+    void this.options.browser?.finish(active.run.id);
     for (const listener of this.completionListeners) {
       try {
         listener();
@@ -410,6 +410,22 @@ export class RunManager {
   }
   browserState(runId: string) {
     return this.options.browser?.state(runId);
+  }
+  defaultBrowserProfile() {
+    return this.options.browser!.defaultProfileInfo();
+  }
+  async controlDefaultBrowserProfile(action: "disconnect" | "reset") {
+    const id = this.options.browser!.defaultProfileInfo().runId;
+    if (id) this.cancelBrowserApprovals(id);
+    const result = await this.options.browser!.defaultProfileControl(action);
+    const active = id ? this.active.get(id) : undefined;
+    if (active) {
+      active.resumeBrowser?.();
+      delete active.browserWait;
+      delete active.resumeBrowser;
+    }
+    appendAudit(this.options.db, `browser.default_profile_${action}`, id);
+    return result;
   }
   async browserControl(runId: string, action: "pause" | "resume" | "close") {
     const active = this.active.get(runId);

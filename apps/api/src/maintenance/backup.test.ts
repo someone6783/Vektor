@@ -15,6 +15,8 @@ import { encryptSecret, decryptSecret } from "../secrets.js";
 import { AttachmentService } from "../attachments/service.js";
 import { createBackup, restoreBackup, verifyBackup } from "./backup.js";
 import { acquireDataLock } from "./data-lock.js";
+import { DefaultBrowserProfileStore } from "../browser/profile.js";
+import { browserPermissionsSchema } from "@vektor/shared";
 
 let root: string;
 let dataDir: string;
@@ -55,6 +57,21 @@ describe("consistent offline backups", () => {
   it("restores database, immutable files, credentials, executable workspace files and scheduler state into a fresh directory", async () => {
     const token = storage!.accessToken;
     const instance = storage!.instanceId;
+    const browser = browserPermissionsSchema.parse({
+      mode: "observe",
+      session: "default",
+      allowedOrigins: ["https://saved.example"],
+    });
+    const browserState = {
+      cookies: [],
+      origins: [
+        {
+          origin: "https://saved.example",
+          localStorage: [{ name: "login", value: "saved-browser-credential" }],
+        },
+      ],
+    };
+    new DefaultBrowserProfileStore(storage!.db, storage!.secretsKey).save(browserState, browser);
     close();
     await createBackup(dataDir, backup);
     const manifest = await verifyBackup(backup);
@@ -64,6 +81,9 @@ describe("consistent offline backups", () => {
     storage = bootstrapStorage(loadConfig({ NODE_ENV: "test", VEKTOR_DATA_DIR: target }));
     expect(storage.instanceId).toBe(instance);
     expect(storage.accessToken).toBe(token);
+    expect(new DefaultBrowserProfileStore(storage.db, storage.secretsKey).load(browser)).toEqual(
+      browserState,
+    );
     expect(getSetting(storage.db, "scheduler.paused")).toBe(true);
     expect(getSetting(storage.db, "runtime.emergencyStopped")).toBe(true);
     expect(

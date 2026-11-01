@@ -147,6 +147,50 @@ async function decide(id: string, approved: boolean) {
 }
 
 describe("browser API, approvals and recovery", () => {
+  it("authenticates saved-profile controls and resets a pending default session without reviving its saved state", async () => {
+    expect((await app.inject({ url: "/api/browser/profile" })).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          url: "/api/browser/profile/control",
+          method: "POST",
+          payload: { action: "reset" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect((await app.inject({ url: "/api/browser/profile", headers })).json()).toMatchObject({
+      configured: false,
+      inUse: false,
+    });
+    await app.inject({
+      url: `/api/profiles/${profileId}`,
+      method: "PATCH",
+      headers,
+      payload: { browser: { mode: "interactive", session: "default", localOrigins: [origin] } },
+    });
+    const runId = await start();
+    const approval = await pending();
+    expect((await app.inject({ url: "/api/browser/profile", headers })).json()).toMatchObject({
+      inUse: true,
+      runId,
+    });
+    const result = await app.inject({
+      url: "/api/browser/profile/control",
+      method: "POST",
+      headers,
+      payload: { action: "reset" },
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ configured: false, inUse: false, savedAt: null });
+    expect((await decide(approval.id, true)).statusCode).toBe(409);
+    await vi.waitFor(() => expect(getRun(storage.db, runId)?.status).toBe("completed"), {
+      timeout: 5000,
+    });
+    expect((await app.inject({ url: "/api/browser/profile", headers })).json().configured).toBe(
+      false,
+    );
+    expect(posts).toBe(0);
+  }, 30_000);
   it("requires a scheduled job declaration and still pauses interactive jobs for approvals", async () => {
     await enable();
     const create = async (browserAccess?: "off" | "observe" | "interactive") =>

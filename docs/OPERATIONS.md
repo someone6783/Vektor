@@ -253,5 +253,8 @@ Token-only configuration does not opt a private repository into checks.
 See [BROWSER.md](BROWSER.md) for the pinned engine, profile and scheduled-job grants,
 network boundaries, takeover, artifact retention and packaged checks. Browser access
 is off by default and independent of terminal access. Screenshots are stored in the
-SQLite backup; cookies and temporary browser profiles are discarded and never restored.
+SQLite backup. Separate-session cookies and temporary Chromium profiles are discarded.
+The optional default profile saves cookies/site storage encrypted in SQLite, so backups
+restore its last saved state as well. Reset in Settings removes current saved state,
+not older backup copies.
 After a crash, interrupted runs require a deliberate new run/retry and fresh approvals.

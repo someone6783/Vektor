@@ -17,6 +17,14 @@ export function registerBrowserRoutes(
   db: VektorDatabase,
   manager: RunManager,
 ) {
+  app.get("/api/browser/profile", async () => manager.defaultBrowserProfile());
+  app.post("/api/browser/profile/control", async (request) => {
+    const { action } = z
+      .object({ action: z.enum(["disconnect", "reset"]) })
+      .strict()
+      .parse(request.body);
+    return manager.controlDefaultBrowserProfile(action);
+  });
   const run = (id: string) => {
     if (!getRun(db, id)) throw new RuntimeError("Run not found.", 404);
   };

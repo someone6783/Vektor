@@ -142,6 +142,7 @@ export async function buildApp({
     config.channelFileBytes,
   );
   const browser = new BrowserService({
+    secretsKey: storage.secretsKey,
     db: storage.db,
     attachments,
     dataDir: storage.dataDir,

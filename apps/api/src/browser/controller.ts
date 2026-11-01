@@ -23,7 +23,11 @@ export interface BrowserController {
   pause(paused: boolean): void;
   close(): Promise<void>;
 }
+export type BrowserStorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
 export interface BrowserSessionOptions {
+  storageState?: BrowserStorageState;
+  saveStorageState?: (value: BrowserStorageState) => void;
+  onStorageError?: () => void;
   root: string;
   signal: AbortSignal;
   permissions: () => BrowserPermissions;
@@ -65,7 +69,11 @@ export class PlaywrightBrowser implements BrowserController {
   };
   private readonly network: BrowserNetwork;
   private readonly lifecycle = new AbortController();
+  private storageReady = false;
+  private savingProfile?: Promise<void>;
+  private profileDigest?: string;
   constructor(readonly options: BrowserSessionOptions) {
+    if (options.storageState) this.profileDigest = digest(JSON.stringify(options.storageState));
     this.network = new BrowserNetwork({
       ...options,
       signal: AbortSignal.any([options.signal, this.lifecycle.signal]),
@@ -137,9 +145,15 @@ export class PlaywrightBrowser implements BrowserController {
           .catch(() => route.abort("blockedbyclient"))
           .catch(() => {}),
       );
+      if (this.options.storageState) {
+        await context.setStorageState(this.options.storageState);
+        if (this.closed || this.options.signal.aborted)
+          throw new RuntimeError("Browser session cancelled.", 409);
+      }
       context.on("page", (page) => this.register(page));
       for (const page of context.pages()) this.register(page);
       this.page = context.pages()[0] ?? (await context.newPage());
+      this.storageReady = true;
     } catch (error) {
       await this.close();
       throw error instanceof RuntimeError
@@ -151,6 +165,7 @@ export class PlaywrightBrowser implements BrowserController {
     }
   }
   private register(page: Page) {
+    if (this.closed) return;
     if (this.pages.size >= 4) {
       void page.close();
       return;
@@ -171,6 +186,7 @@ export class PlaywrightBrowser implements BrowserController {
       void download.cancel().catch(() => {});
     });
     page.on("framenavigated", (frame) => {
+      if (this.closed) return;
       if (frame !== page.mainFrame()) return;
       this.epoch++;
       this.activity++;
@@ -243,6 +259,7 @@ export class PlaywrightBrowser implements BrowserController {
     }
     return {
       mode,
+      session: this.options.saveStorageState ? "default" : "separate",
       active: !this.closed && !!this.context,
       paused: this.paused,
       sensitive: this.sensitive,
@@ -474,8 +491,9 @@ export class PlaywrightBrowser implements BrowserController {
   }
   private async observe(): Promise<Record<string, unknown>> {
     if (this.sensitive) {
-      this.snapshot =
-        "Preview withheld after private input. Close the session to clear private state.";
+      this.snapshot = this.options.saveStorageState
+        ? "Preview withheld after private input. Disconnect to end takeover; saved logins remain until the default profile is reset."
+        : "Preview withheld after private input. Close the session to clear private state.";
       return { untrusted: true, ...this.state() };
     }
     for (const ref of this.refs.values()) await ref.dispose().catch(() => {});
@@ -484,8 +502,9 @@ export class PlaywrightBrowser implements BrowserController {
     const page = this.page;
     if (!page || page.isClosed()) return { untrusted: true, ...this.state() };
     if (this.sensitive) {
-      this.snapshot =
-        "Preview withheld after private input. Close the session to clear private state.";
+      this.snapshot = this.options.saveStorageState
+        ? "Preview withheld after private input. Disconnect to end takeover; saved logins remain until the default profile is reset."
+        : "Preview withheld after private input. Close the session to clear private state.";
       return { untrusted: true, ...this.state() };
     }
     const elements = await page.$$(
@@ -525,11 +544,43 @@ export class PlaywrightBrowser implements BrowserController {
     this.options.signal.removeEventListener("abort", this.abort);
     this.closing = (async () => {
       const context = this.context ?? (await this.launching?.catch(() => undefined));
+      await this.savingProfile;
+      await this.saveProfile();
       await context?.close().catch(() => {});
+      this.storageReady = false;
       if (this.directory)
         await rm(this.directory, { recursive: true, force: true }).catch(() => {});
       this.pages.clear();
     })();
     return this.closing;
+  }
+  private saveProfile(): Promise<void> {
+    if (this.savingProfile) return this.savingProfile;
+    if (!this.context || !this.storageReady || !this.options.saveStorageState)
+      return Promise.resolve();
+    this.savingProfile = (async () => {
+      let timer: NodeJS.Timeout | undefined;
+      try {
+        const state = await Promise.race([
+          this.context!.storageState({ indexedDB: true }),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error("Profile snapshot deadline")), 3000);
+            timer.unref();
+          }),
+        ]);
+        const fingerprint = digest(JSON.stringify(state));
+        if (fingerprint !== this.profileDigest) {
+          this.options.saveStorageState!(state);
+          this.profileDigest = fingerprint;
+        }
+      } catch {
+        this.options.onStorageError?.();
+      } finally {
+        clearTimeout(timer);
+      }
+    })().finally(() => {
+      this.savingProfile = undefined;
+    });
+    return this.savingProfile;
   }
 }

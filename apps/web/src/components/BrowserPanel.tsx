@@ -95,7 +95,7 @@ export function BrowserPanel({
       className="my-3 space-y-2 rounded-lg border border-sky-400/20 p-3"
     >
       <p className="font-medium text-sky-300">
-        Managed browser ·{" "}
+        Managed browser · {state?.session === "default" ? "Default profile" : "Separate session"} ·{" "}
         {state?.active ? (state.paused ? "Paused for takeover" : "Agent active") : "Session closed"}
       </p>
       {state?.active ? (
@@ -118,7 +118,7 @@ export function BrowserPanel({
               onClick={() => void perform(() => client.browserControl(runId, "close"))}
               className="text-rose-300"
             >
-              Close and clear session
+              {state.session === "default" ? "Disconnect session" : "Close and clear session"}
             </button>
           </div>
           <p className="text-[10px] text-slate-500">
@@ -215,7 +215,10 @@ export function BrowserPanel({
           {state.sensitive ? (
             <p className="text-amber-200">
               Private input suppresses page previews and screenshots for the remainder of this
-              session. Close it to clear private state.
+              session.{" "}
+              {state.session === "default"
+                ? "Disconnect to end takeover. Saved logins remain until you reset the default profile in Settings."
+                : "Close it to clear private state."}
             </p>
           ) : null}
         </>

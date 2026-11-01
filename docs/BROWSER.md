@@ -8,7 +8,19 @@ user's instruction to start Phase 9; Phase 8's first live publication remains pe
 ## Enable a profile
 
 Browser access defaults off for existing and new profiles. In Settings, choose
-Observation only or Interactive and enter exact HTTP(S) origins, including any
+Observation only or Interactive, then choose a browser profile:
+
+| Access      | Default profile                                            | Separate session                                        |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------- |
+| Observation | Reuses saved site logins with read/navigation tools.       | Starts clean with read/navigation tools.                |
+| Interactive | Reuses saved site logins; actions still require approvals. | Starts fully separate; actions still require approvals. |
+
+Existing profiles retain separate sessions. Newly enabling observation in Settings
+selects Default initially; newly enabling interactive access selects Separate. You
+can explicitly choose either session type for either access mode. The default
+profile belongs to Vektor; personal Chrome/Chromium profiles remain separate.
+
+Enter exact HTTP(S) origins, including any
 required subresource/CDN origins. Wildcards, credentials, paths and non-HTTP schemes
 are refused. Terminal access does not grant browser access, and no-terminal profiles
 can independently use an enabled browser. Changing or archiving a profile closes
@@ -41,12 +53,36 @@ automation permissions for the user's personal desktop.
 
 ## Session and network boundaries
 
-Each run lazily launches a fresh Chromium process with a new private profile
-directory. Cookies, storage, history and tabs are not reused across runs. Only PATH,
-the temporary HOME/TMPDIR and a fixed locale reach the browser process; backend,
-provider and GitHub credentials are not inherited. No persistent-session feature
-is offered in this phase. Close and clear session ends that session; a later tool
-request can create another fresh session while the run still has permission.
+Each run launches a fresh Chromium process in a private temporary directory. With
+**Separate session**, no saved browser state is loaded or written, and closing the
+session deletes its cookies/storage and temporary profile. Separate sessions are
+independent of the default profile and of other runs.
+
+With **Default profile**, authorized cookies, local storage and IndexedDB are loaded
+from Vektor's saved profile, then saved back when the session disconnects or closes.
+The state is encrypted with the existing secrets key in SQLite, limited to 4 MiB,
+and included in normal data backups. Loading and saving use only origins/domains
+allowed by the current agent profile; state for other origins is preserved without
+being loaded. This retains site logins/preferences, not personal browser tabs,
+history, extensions, password-manager entries or sessionStorage. A failed/oversized
+save keeps the previous snapshot and reports an error in profile status. Corrupt
+saved state requires an explicit reset rather than silently starting an empty profile.
+
+Only one run may use Default at a time, including while its final snapshot is being
+saved. A second run must wait or use Separate. Two total sessions remain the limit,
+so one default and one separate session can run alongside each other.
+
+Settings → Default browser profile provides status, Disconnect and Reset. Disconnect
+closes the current default session and keeps saved logins; Reset also deletes saved
+state and prevents the closing session from restoring it. Both invalidate pending
+browser approvals and prevent that run from automatically reconnecting. Separate
+sessions are unaffected. Reset does not erase backups or revoke remote server sessions.
+
+Only PATH, the temporary HOME/TMPDIR and a fixed locale reach the browser process;
+backend, provider and GitHub credentials are not inherited. Temporary Chromium
+profiles are still removed on close and after a crashed backend restarts. A crash
+keeps only the default profile's previously completed saved snapshot, not any new
+unsaved state or interrupted browser actions.
 
 Chromium's ordinary HTTP networking points at a nonfunctional proxy with loopback
 bypass disabled. Service workers, WebSockets, QUIC and non-proxied WebRTC UDP are
@@ -139,7 +175,8 @@ stop controls still apply. Cancellation closes Chromium and aborts pending HTTP
 requests; shutdown waits for session cleanup. Chromium's debugging pipe closes when
 the API dies, ending its process. Restart marks interrupted runs failed, cancels
 their approvals, deletes only this backend's abandoned temporary profiles and does
-not replay browser actions or restore cookies.
+not replay browser actions. Separate-session cookies are discarded; a default session
+may explicitly load its last completed encrypted snapshot on a new run.
 
 ## Verification
 
@@ -172,3 +209,9 @@ Primary implementation references: [Playwright network interception](https://pla
 [browser contexts](https://playwright.dev/docs/api/class-browsercontext),
 [page APIs](https://playwright.dev/docs/api/class-page), and
 [Playwright releases](https://github.com/microsoft/playwright/releases).
+
+Saved-profile verification additionally covers encrypted backup/restore, authorized-origin
+filtering, default-profile reuse in observation mode, separate-session cookie/storage
+isolation, profile ownership through asynchronous close, reset without stale state
+revival, authenticated management endpoints and Settings profile selection. Storage
+reuse follows the [Playwright authentication state APIs](https://playwright.dev/docs/auth).

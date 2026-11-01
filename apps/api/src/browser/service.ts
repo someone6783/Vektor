@@ -17,6 +17,7 @@ import {
 } from "@vektor/shared";
 import type { AttachmentService } from "../attachments/service.js";
 import { RuntimeError } from "../runtime/terminal.js";
+import { DefaultBrowserProfileStore } from "./profile.js";
 import {
   PlaywrightBrowser,
   type BrowserController,
@@ -26,10 +27,18 @@ import {
 export class BrowserService {
   private readonly sessions = new Map<string, BrowserController>();
   private readonly closing = new Set<Promise<void>>();
+  private readonly closingRuns = new Map<string, Promise<void>>();
   private readonly root: string;
+  private readonly profile?: DefaultBrowserProfileStore;
+  private defaultOwner: string | null = null;
+  private defaultGeneration = 0;
+  private changingDefault = false;
+  private profileError: "save_failed" | null = null;
+  private readonly disconnected = new Set<string>();
   constructor(
     readonly options: {
       db: VektorDatabase;
+      secretsKey?: Buffer;
       attachments: AttachmentService;
       dataDir: string;
       redact: (value: string) => string;
@@ -38,6 +47,8 @@ export class BrowserService {
       factory?: (options: BrowserSessionOptions) => BrowserController;
     },
   ) {
+    if (options.secretsKey)
+      this.profile = new DefaultBrowserProfileStore(options.db, options.secretsKey);
     this.root = join(
       tmpdir(),
       `vektor-browser-${createHash("sha256").update(options.dataDir).digest("hex").slice(0, 20)}`,
@@ -46,6 +57,34 @@ export class BrowserService {
   async initialize() {
     await rm(this.root, { recursive: true, force: true });
     await mkdir(this.root, { recursive: true, mode: 0o700 });
+  }
+  defaultProfileInfo() {
+    return {
+      ...(this.profile?.info ?? { configured: false, savedAt: null }),
+      inUse: this.defaultOwner !== null,
+      runId: this.defaultOwner,
+      error: this.profileError,
+    };
+  }
+  async defaultProfileControl(action: "disconnect" | "reset") {
+    if (this.changingDefault)
+      throw new RuntimeError("The default browser profile is already being updated.", 409);
+    this.changingDefault = true;
+    try {
+      if (action === "reset") this.defaultGeneration++;
+      const owner = this.defaultOwner;
+      if (owner) {
+        this.disconnected.add(owner);
+        await this.close(owner);
+      }
+      if (action === "reset") {
+        this.profile?.reset();
+        this.profileError = null;
+      }
+    } finally {
+      this.changingDefault = false;
+    }
+    return this.defaultProfileInfo();
   }
   private session(runId: string) {
     const value = this.sessions.get(runId);
@@ -89,10 +128,37 @@ export class BrowserService {
       if (human) throw new RuntimeError("Start a browser session before takeover.", 409);
       if (this.sessions.size >= 2)
         throw new RuntimeError("Two managed browser sessions are already active.", 429);
+      const saved = permissions.session === "default";
+      if (saved && (!this.profile || this.changingDefault || this.disconnected.has(runId)))
+        throw new RuntimeError(
+          "The default browser profile is disconnected or unavailable. Start a new run.",
+          409,
+        );
+      if (saved && this.defaultOwner !== null)
+        throw new RuntimeError(
+          "The default browser profile is already in use. Wait for that run or choose a separate session.",
+          409,
+        );
+      const storageState = saved ? this.profile!.load(permissions) : undefined;
+      const generation = this.defaultGeneration;
       const factory =
         this.options.factory ?? ((sessionOptions) => new PlaywrightBrowser(sessionOptions));
       controller = factory({
         ...options,
+        ...(saved
+          ? {
+              storageState,
+              saveStorageState: (state) => {
+                if (this.defaultOwner === runId && generation === this.defaultGeneration) {
+                  this.profile!.save(state, permissions);
+                  this.profileError = null;
+                }
+              },
+              onStorageError: () => {
+                if (generation === this.defaultGeneration) this.profileError = "save_failed";
+              },
+            }
+          : {}),
         root: this.root,
         redact: this.options.redact,
         protectedPort: this.options.protectedPort,
@@ -144,17 +210,29 @@ export class BrowserService {
           }
         },
       });
+      if (saved) this.defaultOwner = runId;
       this.sessions.set(runId, controller);
     }
     return controller.execute(input, human);
   }
   close(runId: string): Promise<void> {
+    const existing = this.closingRuns.get(runId);
+    if (existing) return existing;
     const controller = this.sessions.get(runId);
     this.sessions.delete(runId);
     const pending = controller?.close() ?? Promise.resolve();
     this.closing.add(pending);
-    void pending.finally(() => this.closing.delete(pending));
+    this.closingRuns.set(runId, pending);
+    void pending.finally(() => {
+      this.closing.delete(pending);
+      this.closingRuns.delete(runId);
+      if (this.defaultOwner === runId) this.defaultOwner = null;
+    });
     return pending;
+  }
+  finish(runId: string) {
+    this.disconnected.delete(runId);
+    return this.close(runId);
   }
   async stopAll() {
     await Promise.all([...this.sessions.keys()].map((id) => this.close(id)));

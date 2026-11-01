@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserPermissionsSchema, type BrowserPermissions } from "@vektor/shared";
 import type { BrowserContext } from "playwright";
-import { PlaywrightBrowser, type BrowserSessionOptions } from "./controller.js";
+import {
+  PlaywrightBrowser,
+  type BrowserSessionOptions,
+  type BrowserStorageState,
+} from "./controller.js";
 
 let server: Server;
 let outside: Server;
@@ -23,7 +27,7 @@ async function listen(value: Server) {
   await new Promise<void>((resolve) => value.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(value.address() as { port: number }).port}`;
 }
-function browser() {
+function browser(overrides: Partial<BrowserSessionOptions> = {}) {
   const value = new PlaywrightBrowser({
     root: directory,
     signal: controller.signal,
@@ -40,6 +44,7 @@ function browser() {
       buffer: Buffer.from("safe upload"),
     }),
     download: async (filename, buffer) => ({ id: "download-id", filename, size: buffer.length }),
+    ...overrides,
   });
   browsers.push(value);
   return value;
@@ -88,11 +93,15 @@ beforeEach(async () => {
     }
     if (request.url === "/cookie") {
       response.setHeader("Set-Cookie", "private=one; Path=/");
-      response.end("<h1>Cookie set</h1>");
+      response.end(
+        '<h1>Cookie set</h1><script>localStorage.setItem("preference", "saved-value")</script>',
+      );
       return;
     }
     if (request.url === "/check-cookie") {
-      response.end(`<h1>Cookie ${request.headers.cookie ?? "none"}</h1>`);
+      response.end(
+        `<h1>Cookie ${request.headers.cookie ?? "none"}</h1><p id="stored"></p><script>document.querySelector("#stored").textContent="Storage "+(localStorage.getItem("preference") || "none")</script>`,
+      );
       return;
     }
     response.end(
@@ -118,6 +127,67 @@ afterEach(async () => {
 });
 
 describe("real isolated Chromium controller", () => {
+  it("reuses saved default cookies and local storage in observation mode while keeping separate sessions clean", async () => {
+    let saved: BrowserStorageState | undefined;
+    const first = browser({
+      saveStorageState: (value) => {
+        saved = value;
+      },
+    });
+    await first.execute({ action: "navigate", url: `${origin}/cookie` });
+    const firstContext = (first as unknown as { context: BrowserContext }).context;
+    await firstContext.pages()[0]!.evaluate(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open("saved-login", 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("auth");
+          request.onerror = () => reject(new Error("fixture IndexedDB open failed"));
+          request.onsuccess = () => {
+            const db = request.result;
+            const transaction = db.transaction("auth", "readwrite");
+            transaction.objectStore("auth").put("saved-login-token", "login");
+            transaction.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            transaction.onerror = () => reject(new Error("fixture IndexedDB write failed"));
+          };
+        }),
+    );
+    expect(first.state().session).toBe("default");
+    await first.close();
+    expect(saved?.cookies.length).toBeGreaterThan(0);
+    permissions.mode = "observe";
+    const second = browser({ storageState: saved, saveStorageState: () => {} });
+    const reused = await second.execute({ action: "navigate", url: `${origin}/check-cookie` });
+    expect(reused.snapshot).toContain("Cookie private=one");
+    expect(reused.snapshot).toContain("Storage saved-value");
+    const secondContext = (second as unknown as { context: BrowserContext }).context;
+    const login = await secondContext.pages()[0]!.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.open("saved-login", 1);
+          request.onerror = () => reject(new Error("fixture IndexedDB restore failed"));
+          request.onsuccess = () => {
+            const db = request.result;
+            const read = db.transaction("auth").objectStore("auth").get("login");
+            read.onsuccess = () => {
+              db.close();
+              resolve(read.result);
+            };
+            read.onerror = () => reject(new Error("fixture IndexedDB read failed"));
+          };
+        }),
+    );
+    expect(login).toBe("saved-login-token");
+    await expect(second.execute({ action: "click", ref: "anything" })).rejects.toThrow(
+      /Observation/,
+    );
+    const separate = browser();
+    const clean = await separate.execute({ action: "navigate", url: `${origin}/check-cookie` });
+    expect(clean.snapshot).toContain("Cookie none");
+    expect(clean.snapshot).toContain("Storage none");
+  }, 30_000);
   it("inspects, fills, approves one click and one network write, then submits", async () => {
     const value = browser();
     let snapshot = await value.execute({ action: "navigate", url: origin });

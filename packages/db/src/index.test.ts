@@ -93,6 +93,7 @@ describe("database bootstrap", () => {
     runMigrations(db);
     expect(getProfile(db, profile.id)?.browser).toEqual({
       mode: "off",
+      session: "separate",
       allowedOrigins: [],
       localOrigins: [],
     });

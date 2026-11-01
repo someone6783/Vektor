@@ -20,6 +20,7 @@ const originSchema = z
 export const browserPermissionsSchema = z
   .object({
     mode: z.enum(["off", "observe", "interactive"]).default("off"),
+    session: z.enum(["default", "separate"]).default("separate"),
     allowedOrigins: z.array(originSchema).max(20).default([]),
     localOrigins: z
       .array(
@@ -77,6 +78,7 @@ export const browserInputSchema = z.discriminatedUnion("action", [
 ]);
 export type BrowserInput = z.infer<typeof browserInputSchema>;
 export const browserStateSchema = z.object({
+  session: z.enum(["default", "separate"]).optional(),
   mode: z.enum(["off", "observe", "interactive"]).optional(),
   active: z.boolean(),
   paused: z.boolean(),
@@ -96,3 +98,11 @@ export const browserArtifactSchema = z.object({
   size: z.number(),
 });
 export type BrowserArtifact = z.infer<typeof browserArtifactSchema>;
+export const defaultBrowserProfileSchema = z.object({
+  configured: z.boolean(),
+  inUse: z.boolean(),
+  runId: z.string().nullable(),
+  savedAt: z.string().nullable(),
+  error: z.enum(["save_failed"]).nullable(),
+});
+export type DefaultBrowserProfile = z.infer<typeof defaultBrowserProfileSchema>;

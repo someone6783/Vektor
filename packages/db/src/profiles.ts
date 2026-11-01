@@ -6,6 +6,7 @@ import { profiles } from "./schema.js";
 export type TerminalMode = "no-terminal" | "basic" | "full-access";
 export type ProfileColor = "emerald" | "sky" | "violet" | "amber" | "rose";
 export interface BrowserPermissions {
+  session: "default" | "separate";
   mode: "off" | "observe" | "interactive";
   allowedOrigins: string[];
   localOrigins: string[];
@@ -112,7 +113,12 @@ function toRecord(row: typeof profiles.$inferSelect): ProfileRecord {
 }
 
 function parseBrowser(value: string): BrowserPermissions {
-  const off: BrowserPermissions = { mode: "off", allowedOrigins: [], localOrigins: [] };
+  const off: BrowserPermissions = {
+    mode: "off",
+    session: "separate",
+    allowedOrigins: [],
+    localOrigins: [],
+  };
   try {
     const parsed = JSON.parse(value) as BrowserPermissions;
     if (
@@ -121,7 +127,12 @@ function parseBrowser(value: string): BrowserPermissions {
       !Array.isArray(parsed.localOrigins)
     )
       return off;
-    return parsed;
+    if (parsed.session !== undefined && !["default", "separate"].includes(parsed.session))
+      return off;
+    return {
+      ...parsed,
+      session: parsed.session ?? "separate",
+    };
   } catch {
     return off;
   }

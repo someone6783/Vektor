@@ -1,4 +1,5 @@
 import {
+  defaultBrowserProfileSchema,
   browserStateSchema,
   browserArtifactSchema,
   type BrowserInput,
@@ -79,6 +80,17 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+  async defaultBrowserProfile() {
+    return defaultBrowserProfileSchema.parse(await this.request("/api/browser/profile"));
+  }
+  async controlDefaultBrowserProfile(action: "disconnect" | "reset") {
+    return defaultBrowserProfileSchema.parse(
+      await this.request("/api/browser/profile/control", {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }),
+    );
+  }
   async browserState(runId: string) {
     const result = await this.request<{ session: unknown; artifacts: unknown[] }>(
       `/api/runs/${runId}/browser`,

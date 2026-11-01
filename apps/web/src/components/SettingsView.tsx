@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AboutView } from "./AboutView";
+import { BrowserProfileCard } from "./BrowserProfileCard";
 import {
   browserPermissionsSchema,
   type BrowserPermissions,
@@ -51,6 +52,9 @@ function ProfileEditor({
   const [terminalTool, setTerminalTool] = useState(profile.tools.includes("terminal"));
   const initialBrowser = browserPermissionsSchema.parse(profile.browser ?? {});
   const [browserMode, setBrowserMode] = useState<BrowserPermissions["mode"]>(initialBrowser.mode);
+  const [browserSession, setBrowserSession] = useState<BrowserPermissions["session"]>(
+    initialBrowser.session,
+  );
   const [origins, setOrigins] = useState(initialBrowser.allowedOrigins.join("\n"));
   const [localOrigins, setLocalOrigins] = useState(initialBrowser.localOrigins.join("\n"));
   const [localAcknowledged, setLocalAcknowledged] = useState(
@@ -71,6 +75,7 @@ function ProfileEditor({
     try {
       const browser = browserPermissionsSchema.parse({
         mode: browserMode,
+        session: browserSession,
         allowedOrigins: origins.split(/\s+/).filter(Boolean),
         localOrigins: localOrigins.split(/\s+/).filter(Boolean),
       });
@@ -225,7 +230,12 @@ function ProfileEditor({
           <select
             aria-label={`Browser access for ${profile.name}`}
             value={browserMode}
-            onChange={(event) => setBrowserMode(event.target.value as BrowserPermissions["mode"])}
+            onChange={(event) => {
+              const mode = event.target.value as BrowserPermissions["mode"];
+              if (browserMode === "off")
+                setBrowserSession(mode === "observe" ? "default" : "separate");
+              setBrowserMode(mode);
+            }}
             className="ml-3 rounded border border-white/10 bg-slate-950 p-1"
           >
             <option value="off">Off</option>
@@ -234,12 +244,33 @@ function ProfileEditor({
           </select>
         </label>
         <p>
-          Uses a fresh managed Chromium session for each run, separate from your personal browser
-          and terminal permissions. Page content cannot approve actions. Navigation makes network
-          requests and may have external effects even in observation mode.
+          Uses managed Chromium with independent browser and terminal permissions. Choose a saved
+          default profile or a separate temporary session. Page content cannot approve actions.
+          Navigation makes network requests and may have external effects even in observation mode.
         </p>
         {browserMode !== "off" ? (
           <>
+            <label className="block">
+              Browser profile
+              <select
+                aria-label={`Browser profile for ${profile.name}`}
+                value={browserSession}
+                onChange={(event) =>
+                  setBrowserSession(event.target.value as BrowserPermissions["session"])
+                }
+                className="ml-3 rounded border border-white/10 bg-slate-950 p-1"
+              >
+                <option value="default">Default profile · saved logins and site storage</option>
+                <option value="separate">
+                  Separate session · starts clean, discarded after run
+                </option>
+              </select>
+            </label>
+            <p>
+              {browserSession === "default"
+                ? "Shares Vektor’s saved browser profile with other profiles that select Default. Only one run can use it at a time. Observation and interactive permissions still apply."
+                : "Fully separate from the default profile and other runs. Cookies and site storage are cleared when the session closes. Interactive actions still require approvals."}
+            </p>
             <label className="block">
               Allowed origins (one per line)
               <textarea
@@ -612,6 +643,7 @@ export function SettingsView({
         </section>
 
         <UsageView client={client} />
+        <BrowserProfileCard client={client} />
         <HealthCard />
         <AboutView client={client} />
       </div>
