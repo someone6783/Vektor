@@ -9,9 +9,15 @@ on:
         description: Existing version tag to release (for example v0.1.0)
         required: true
         type: string
+      artifact_run:
+        description: Optional prior Release run with all build jobs successful for this exact tag commit
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 # Serialize releases so stable aliases cannot race.
 concurrency:
@@ -23,6 +29,7 @@ env:
 
 jobs:
   verify:
+    if: inputs.artifact_run == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -58,6 +65,7 @@ jobs:
           if-no-files-found: error
 
   desktop:
+    if: inputs.artifact_run == ''
     strategy:
       fail-fast: false
       matrix:
@@ -121,12 +129,46 @@ jobs:
             apps/web/src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error
 
+  reuse:
+    if: inputs.artifact_run != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate prior builds belong to the exact release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN: ${{ inputs.artifact_run }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          const id = process.env.ARTIFACT_RUN;
+          if (!/^[0-9]+$/.test(id)) throw new Error('Invalid build run ID.');
+          const repo = process.env.GITHUB_REPOSITORY;
+          const api = path => JSON.parse(execFileSync('gh', ['api', path], {encoding:'utf8'}));
+          const run = api(`repos/${repo}/actions/runs/${id}`);
+          const sha = execFileSync('git', ['rev-parse', 'HEAD'], {encoding:'utf8'}).trim();
+          const tagged = execFileSync('git', ['rev-list', '-n', '1', process.env.RELEASE_TAG], {encoding:'utf8'}).trim();
+          if (run.head_sha !== sha || tagged !== sha || run.path !== '.github/workflows/release.yml' || run.status !== 'completed')
+            throw new Error('Prior builds must be a completed Release run for this exact tag commit.');
+          const jobs = api(`repos/${repo}/actions/runs/${id}/jobs?per_page=100`).jobs;
+          const required = ['verify', 'desktop (ubuntu-24.04, linux, deb,appimage)', 'desktop (windows-latest, windows, nsis)'];
+          if (!required.every(name => jobs.some(job => job.name === name && job.conclusion === 'success')))
+            throw new Error('Server, Linux desktop and Windows desktop builds must all have passed.');
+          console.log(`Reusing verified release artifacts from ${id}, source ${sha}.`);
+          JS
+
   publish:
-    needs: [verify, desktop]
+    needs: [verify, desktop, reuse]
+    if: always() && !cancelled() && ((needs.verify.result == 'success' && needs.desktop.result == 'success') || needs.reuse.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
+      actions: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -158,14 +200,35 @@ jobs:
           JS
       - uses: actions/download-artifact@v8
         with:
+          run-id: ${{ inputs.artifact_run || github.run_id }}
+          github-token: ${{ github.token }}
           pattern: server-web
           path: release-artifacts
           merge-multiple: true
       - uses: actions/download-artifact@v8
         with:
+          run-id: ${{ inputs.artifact_run || github.run_id }}
+          github-token: ${{ github.token }}
           pattern: desktop-*-x64
           merge-multiple: true
           path: release-artifacts
+      - name: Flatten desktop artifact directories
+        run: |
+          node --input-type=module <<'JS'
+          import { readdirSync, copyFileSync, rmSync, constants } from 'node:fs';
+          import { join } from 'node:path';
+          const root = 'release-artifacts';
+          for (const entry of readdirSync(root, {withFileTypes:true})) {
+            if (!entry.isDirectory()) continue;
+            if (!['deb','appimage','nsis'].includes(entry.name)) throw new Error('Unexpected artifact directory.');
+            const directory = join(root, entry.name);
+            for (const file of readdirSync(directory, {withFileTypes:true})) {
+              if (!file.isFile() || !/\.(deb|AppImage|exe|sig)$/.test(file.name)) throw new Error('Unexpected desktop artifact.');
+              copyFileSync(join(directory,file.name), join(root,file.name), constants.COPYFILE_EXCL);
+            }
+            rmSync(directory, {recursive:true});
+          }
+          JS
       - run: node scripts/release.mjs checksums release-artifacts
       - name: Reserve a draft release before pushing images
         env:
