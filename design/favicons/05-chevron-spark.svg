@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Vektor">
+  <title>Vektor</title>
+  <defs>
+    <linearGradient id="v-mark" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#bcd3ff"/>
+      <stop offset="1" stop-color="#5b8bff"/>
+    </linearGradient>
+    <linearGradient id="v-spark" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#dbe8ff"/>
+      <stop offset="1" stop-color="#93b5ff"/>
+    </linearGradient>
+  </defs>
+  <path d="M14 15.35H24.08L32 36.14l7.92-20.79H50L37.04 49.1H26.96Z" fill="url(#v-mark)"/>
+  <path d="M55.5 1.8Q55.66 8.84 62.7 9Q55.66 9.16 55.5 16.2Q55.34 9.16 48.3 9Q55.34 8.84 55.5 1.8Z" fill="url(#v-spark)"/>
+</svg>
