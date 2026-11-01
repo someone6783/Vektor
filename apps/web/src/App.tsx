@@ -11,6 +11,9 @@ import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
 import { RuntimeControls } from "./components/RuntimeControls";
 import { UpdateIndicator } from "./components/UpdateIndicator";
+import { Icon } from "./components/Icon";
+import { OverflowMenu } from "./components/OverflowMenu";
+import { ThemePicker } from "./components/ThemePicker";
 import { AuditView } from "./components/AuditView";
 import { SchedulesView } from "./components/SchedulesView";
 import { ApiClient, ApiError } from "./lib/api";
@@ -68,8 +71,11 @@ function TokenGate({
   return (
     <div className="grid min-h-screen place-items-center bg-slate-950 px-6 text-slate-100">
       <div className="w-full max-w-md">
+        <div className="mb-6 flex justify-end">
+          <ThemePicker />
+        </div>
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-400 text-lg font-bold text-slate-950">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent-400 text-lg font-bold text-slate-950">
             V
           </div>
           <div>
@@ -95,7 +101,7 @@ function TokenGate({
             onChange={(event) => onChange(event.target.value)}
             placeholder="Paste the token from /data/access-token"
             autoComplete="off"
-            className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
           {error ? (
             <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
@@ -105,7 +111,7 @@ function TokenGate({
           <button
             type="submit"
             disabled={draft.trim().length === 0}
-            className="mt-4 w-full rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+            className="mt-4 w-full rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
           >
             Unlock workspace
           </button>
@@ -114,7 +120,7 @@ function TokenGate({
             <code className="font-mono text-slate-500">/data/access-token</code>.
           </p>
           {onConnection ? (
-            <button type="button" onClick={onConnection} className="mt-4 text-xs text-emerald-300">
+            <button type="button" onClick={onConnection} className="mt-4 text-xs text-accent-300">
               Backend connection
             </button>
           ) : null}
@@ -133,6 +139,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [view, setView] = useState<"chat" | "settings" | "audit" | "schedules">("chat");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settings, setSettings] = useState<SettingsViewData | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -765,62 +772,38 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <header className="flex shrink-0 items-center gap-4 border-b border-white/10 bg-slate-950/80 px-4 py-2.5">
+    <div className="app-shell flex h-dvh flex-col overflow-hidden bg-slate-950 text-slate-100">
+      <header className="app-header flex shrink-0 flex-wrap items-center gap-3 border-b border-white/10 bg-slate-900 px-4 py-3">
+        {view === "chat" ? (
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label="Toggle conversations"
+            aria-expanded={sidebarOpen}
+            aria-controls="workspace-sidebar"
+            onClick={() => setSidebarOpen((open) => !open)}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden="true"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        ) : null}
         <div className="flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-400 text-sm font-bold text-slate-950">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent-400 text-sm font-bold text-slate-950">
             V
           </div>
           <span className="text-sm font-semibold tracking-wide">Vektor</span>
         </div>
 
-        <nav className="flex items-center gap-1" aria-label="Sections">
-          <button
-            type="button"
-            onClick={() => setView("chat")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              view === "chat"
-                ? "bg-white/10 text-slate-100"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("settings")}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              view === "settings"
-                ? "bg-white/10 text-slate-100"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
-            }`}
-          >
-            Settings
-          </button>
-        </nav>
-
-        <button
-          type="button"
-          onClick={() => setView("schedules")}
-          className={`rounded-lg px-3 py-1.5 text-xs ${view === "schedules" ? "bg-white/10 text-slate-100" : "text-slate-400"}`}
-        >
-          Schedules
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setView("audit")}
-          className={`rounded-lg px-3 py-1.5 text-xs ${view === "audit" ? "bg-white/10 text-slate-100" : "text-slate-400"}`}
-        >
-          Audit
-        </button>
-
         <div className="ml-auto flex items-center gap-3">
-          {onConnection ? (
-            <button type="button" onClick={onConnection} className="text-xs text-slate-400">
-              Backend
-            </button>
-          ) : null}
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] ${
               online
@@ -835,27 +818,6 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             {online ? "Local" : "Offline"}
           </span>
 
-          {view === "chat" && profiles.length > 0 ? (
-            <label className="flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1">
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: `var(--profile-${activeProfile?.color ?? "emerald"})` }}
-              />
-              <select
-                value={activeProfile?.id ?? ""}
-                onChange={(event) => void switchProfile(event.target.value)}
-                className="max-w-40 truncate bg-transparent text-xs text-slate-200 outline-none"
-                aria-label="Active profile"
-              >
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id} className="bg-slate-900">
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
           <UpdateIndicator client={client} />
           <RuntimeControls
             client={client}
@@ -864,30 +826,73 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             onError={reportError}
           />
 
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                localStorage.removeItem(tokenStorageKey());
-              } catch {
-                // Ignore storage failures.
-              }
-              stopStream();
-              bootedRef.current = null;
-              setToken("");
-              setTokenDraft("");
-            }}
-            className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:text-slate-200"
-          >
-            Lock
-          </button>
+          <OverflowMenu label="Workspace actions">
+            <div className="menu-label">Workspace</div>
+            <button type="button" onClick={() => setView("chat")}>
+              <Icon name="chat" /> Chat
+            </button>
+            <button type="button" onClick={() => setView("settings")}>
+              <Icon name="settings" /> Settings
+            </button>
+            <button type="button" onClick={() => setView("schedules")}>
+              <Icon name="clock" /> Schedules
+            </button>
+            <button type="button" onClick={() => setView("audit")}>
+              <Icon name="history" /> Audit log
+            </button>
+            <div className="menu-divider" />
+            <ThemePicker />
+            {onConnection ? (
+              <button type="button" onClick={onConnection} className="text-xs text-slate-400">
+                <Icon name="connection" /> Backend
+              </button>
+            ) : null}
+            {view === "chat" && profiles.length > 0 ? (
+              <label className="flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: `var(--profile-${activeProfile?.color ?? "emerald"})` }}
+                />
+                <select
+                  value={activeProfile?.id ?? ""}
+                  onChange={(event) => void switchProfile(event.target.value)}
+                  className="max-w-40 truncate bg-transparent text-xs text-slate-200 outline-none"
+                  aria-label="Active profile"
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id} className="bg-slate-900">
+                      {profile.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.removeItem(tokenStorageKey());
+                } catch {
+                  // Ignore storage failures.
+                }
+                stopStream();
+                bootedRef.current = null;
+                setToken("");
+                setTokenDraft("");
+              }}
+              className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:text-slate-200"
+            >
+              <Icon name="lock" /> Lock workspace
+            </button>
+          </OverflowMenu>
         </div>
       </header>
 
       {booting ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="flex items-center gap-3 text-sm text-slate-500">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-accent-400" />
             Loading workspace…
           </div>
         </div>
@@ -914,12 +919,18 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           Settings are unavailable. Check the API connection.
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1">
+        <div className="workspace-body flex min-h-0 flex-1" data-sidebar-open={sidebarOpen}>
           <Sidebar
             channels={channels}
             activeChannelId={activeChannelId}
-            onSelect={selectChannel}
-            onCreate={createChannel}
+            onSelect={(id) => {
+              selectChannel(id);
+              setSidebarOpen(false);
+            }}
+            onCreate={async (name, kind) => {
+              await createChannel(name, kind);
+              setSidebarOpen(false);
+            }}
             onRename={renameChannel}
             onArchive={archiveChannel}
           />

@@ -1,3 +1,5 @@
+import { Icon } from "./Icon";
+import { OverflowMenu } from "./OverflowMenu";
 import { useState } from "react";
 import { APP_VERSION, type Channel } from "@vektor/shared";
 
@@ -72,43 +74,44 @@ function ChannelRow({
             value={value}
             onChange={(event) => setValue(event.target.value)}
             onBlur={() => void save()}
-            className="min-w-0 flex-1 rounded-md border border-emerald-400/40 bg-slate-950 px-2 py-1 text-xs text-slate-100 outline-none"
+            className="min-w-0 flex-1 rounded-md border border-accent-400/40 bg-slate-950 px-2 py-1 text-xs text-slate-100 outline-none"
           />
         </form>
       ) : (
-        <div className="group flex items-center gap-1">
+        <div className={`channel-row ${active ? "channel-selected" : ""}`}>
           <button
             type="button"
             onClick={onSelect}
+            aria-current={active ? "page" : undefined}
             className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm transition ${
               active
-                ? "bg-emerald-400/10 font-medium text-emerald-200"
-                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                ? "font-medium"
+                : "text-slate-400 hover:text-slate-200"
             }`}
           >
             <span className="mr-1.5 text-slate-600">{channel.kind === "dm" ? "@" : "#"}</span>
             {channel.name}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setValue(channel.name);
-              setEditing(true);
-            }}
-            title="Rename"
-            className="hidden rounded px-1 text-[10px] text-slate-500 hover:text-slate-200 group-hover:block"
-          >
-            edit
-          </button>
-          <button
-            type="button"
-            onClick={() => void archive()}
-            disabled={busy}
-            title="Archive"
-            className="hidden rounded px-1 text-[10px] text-slate-500 hover:text-rose-300 group-hover:block"
-          >
-            archive
-          </button>
+          <OverflowMenu label={`Actions for ${channel.name}`}>
+            <button
+              type="button"
+              onClick={() => {
+                setValue(channel.name);
+                setEditing(true);
+              }}
+              className="text-slate-200 hover:bg-white/5"
+            >
+              <Icon name="edit" /> Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => void archive()}
+              disabled={busy}
+              className="text-rose-300 hover:bg-white/5"
+            >
+              <Icon name="archive" /> Archive
+            </button>
+          </OverflowMenu>
         </div>
       )}
     </li>
@@ -147,7 +150,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-white/10 bg-slate-950/60">
+    <aside id="workspace-sidebar" className="channel-sidebar flex shrink-0 flex-col border-r">
       <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
           Channels
@@ -232,13 +235,13 @@ export function Sidebar({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={creating === "dm" ? "Ada" : "research"}
-            className="mt-1 w-full rounded-md border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-md border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
           <div className="mt-2 flex gap-2">
             <button
               type="submit"
               disabled={busy || draft.trim().length === 0}
-              className="rounded-md bg-emerald-400 px-2 py-1 text-[11px] font-semibold text-slate-950 disabled:opacity-40"
+              className="rounded-md bg-accent-400 px-2 py-1 text-[11px] font-semibold text-slate-950 disabled:opacity-40"
             >
               Create
             </button>

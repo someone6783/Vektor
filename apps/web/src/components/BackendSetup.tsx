@@ -101,7 +101,7 @@ export function BackendSetup({ onConnected }: { onConnected: () => void }) {
           </p>
           <button
             disabled={busy}
-            className="mt-4 rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+            className="mt-4 rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
           >
             {busy ? "Checking…" : "Check and save connection"}
           </button>
@@ -112,7 +112,7 @@ export function BackendSetup({ onConnected }: { onConnected: () => void }) {
           </p>
         ) : null}
         {health ? (
-          <div role="status" className="mt-4 text-xs text-emerald-200">
+          <div role="status" className="mt-4 text-xs text-accent-200">
             Healthy · version {health.version} · database {health.database}
             <br />
             Instance {health.instanceId}

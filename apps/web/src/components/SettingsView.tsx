@@ -122,7 +122,7 @@ function ProfileEditor({
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-accent-400/50"
           />
         </div>
         <div>
@@ -151,7 +151,7 @@ function ProfileEditor({
             list={`models-${profile.id}`}
             value={model}
             onChange={(event) => setModel(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
           <datalist id={`models-${profile.id}`}>
             {models.map((item) => (
@@ -173,7 +173,7 @@ function ProfileEditor({
               setFullAccessAcknowledged(false);
             }}
             aria-label={`Terminal mode for ${profile.name}`}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
           >
             {terminalModes.map((mode) => (
               <option key={mode.value} value={mode.value}>
@@ -191,7 +191,7 @@ function ProfileEditor({
             step={0.1}
             value={temperature}
             onChange={(event) => setTemperature(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
         </div>
         <div>
@@ -204,7 +204,7 @@ function ProfileEditor({
             max={200000}
             value={maxTokens}
             onChange={(event) => setMaxTokens(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
         </div>
       </div>
@@ -215,7 +215,7 @@ function ProfileEditor({
           value={systemPrompt}
           onChange={(event) => setSystemPrompt(event.target.value)}
           rows={4}
-          className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-xs leading-5 text-slate-100 outline-none focus:border-emerald-400/50"
+          className="mt-1 w-full resize-y rounded-lg border border-white/10 bg-slate-950 px-2 py-2 text-xs leading-5 text-slate-100 outline-none focus:border-accent-400/50"
         />
       </div>
 
@@ -320,7 +320,7 @@ function ProfileEditor({
           type="button"
           onClick={() => void save()}
           disabled={busy || (terminalMode === "full-access" && !fullAccessAcknowledged)}
-          className="rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
+          className="rounded-lg bg-accent-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
         >
           Save profile
         </button>
@@ -448,7 +448,7 @@ export function SettingsView({
     <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-400">
             Settings
           </p>
           <h1 className="mt-2 text-2xl font-semibold">Providers, models, and profiles</h1>
@@ -475,7 +475,7 @@ export function SettingsView({
             <span
               className={`rounded-full border px-3 py-1 text-[11px] ${
                 settings.openRouterConfigured
-                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
+                  ? "border-accent-400/30 bg-accent-400/10 text-accent-300"
                   : "border-amber-400/30 bg-amber-400/10 text-amber-200"
               }`}
             >
@@ -490,13 +490,13 @@ export function SettingsView({
               onChange={(event) => setKeyDraft(event.target.value)}
               placeholder="sk-or-v1-… (write-only)"
               autoComplete="off"
-              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
             />
             <button
               type="button"
               onClick={() => void saveKey()}
               disabled={busy || keyDraft.trim().length === 0}
-              className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40"
+              className="rounded-lg bg-accent-400 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-40"
             >
               Save key
             </button>
@@ -540,7 +540,7 @@ export function SettingsView({
               list="settings-models"
               value={defaultModel}
               onChange={(event) => setDefaultModel(event.target.value)}
-              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+              className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
             />
             <datalist id="settings-models">
               {settings.models.map((model) => (
@@ -591,13 +591,13 @@ export function SettingsView({
                 value={newName}
                 onChange={(event) => setNewName(event.target.value)}
                 placeholder="Name"
-                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
               />
               <input
                 value={newModel}
                 onChange={(event) => setNewModel(event.target.value)}
                 placeholder="Model"
-                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-emerald-400/50"
+                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
               />
               <button
                 type="button"

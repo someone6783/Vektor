@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
+import { OverflowMenu } from "./OverflowMenu";
+import { createPortal } from "react-dom";
 import type { Attachment, Channel, ContextEstimate, Profile, Run } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { AttachmentPreview } from "./Attachments";
 
 interface Props {
+  contextTarget?: HTMLElement | null;
   activeRunCount?: number;
   executionStopped?: boolean;
   client: ApiClient;
@@ -19,6 +23,7 @@ interface Props {
 }
 
 export function ContextComposer({
+  contextTarget = null,
   activeRunCount = 0,
   executionStopped = false,
   client,
@@ -185,6 +190,48 @@ export function ContextComposer({
     }
   };
 
+  const attachmentList = files.length ? (
+    <ul aria-label="Channel attachments" className="mb-3 max-h-44 space-y-2 overflow-y-auto">
+      {files.map((file) => (
+        <li
+          key={file.id}
+          className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-1.5 text-xs"
+        >
+          <label className="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              type="checkbox"
+              checked={file.included}
+              disabled={working || sending}
+              onChange={() => void changeFile(file)}
+              aria-label={`Include ${file.filename} in context`}
+            />
+            <span className="truncate">{file.filename}</span>
+            <span className="shrink-0 text-slate-500">{Math.ceil(file.size / 1024)} KB</span>
+          </label>
+          <OverflowMenu label={`Actions for ${file.filename}`}>
+            <button
+              type="button"
+              onClick={() => setPreview(file)}
+              className="text-accent-300"
+              aria-label={`Preview ${file.filename}`}
+            >
+              <Icon name="file" /> Preview
+            </button>
+            <button
+              type="button"
+              disabled={busy || working || sending}
+              onClick={() => void changeFile(file, true)}
+              className="text-slate-400 disabled:opacity-30"
+              aria-label={`Remove ${file.filename}`}
+            >
+              <Icon name="trash" /> Remove
+            </button>
+          </OverflowMenu>
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
   return (
     <div
       onDragOver={(event) => {
@@ -201,11 +248,11 @@ export function ContextComposer({
         setDragging(false);
         void upload(Array.from(event.dataTransfer.files));
       }}
-      className="mx-auto max-w-3xl"
+      className="context-composer"
     >
       <div
         aria-label="Message composer"
-        className={`rounded-2xl border p-3 ${dragging ? "border-emerald-300 bg-emerald-400/10" : "border-white/10 bg-slate-900/70"}`}
+        className={`message-composer border p-3 ${dragging ? "border-accent-300 bg-accent-400/10" : "border-white/10 bg-slate-900/70"}`}
       >
         <input
           ref={input}
@@ -218,45 +265,7 @@ export function ContextComposer({
             event.target.value = "";
           }}
         />
-        {files.length ? (
-          <ul aria-label="Channel attachments" className="mb-3 max-h-44 space-y-2 overflow-y-auto">
-            {files.map((file) => (
-              <li
-                key={file.id}
-                className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-1.5 text-xs"
-              >
-                <label className="flex min-w-0 flex-1 items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={file.included}
-                    disabled={working || sending}
-                    onChange={() => void changeFile(file)}
-                    aria-label={`Include ${file.filename} in context`}
-                  />
-                  <span className="truncate">{file.filename}</span>
-                  <span className="shrink-0 text-slate-500">{Math.ceil(file.size / 1024)} KB</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setPreview(file)}
-                  className="text-emerald-300"
-                  aria-label={`Preview ${file.filename}`}
-                >
-                  Preview
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || working || sending}
-                  onClick={() => void changeFile(file, true)}
-                  className="text-slate-400 disabled:opacity-30"
-                  aria-label={`Remove ${file.filename}`}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        {!contextTarget ? attachmentList : null}
         <textarea
           aria-label="Message"
           value={draft}
@@ -277,7 +286,7 @@ export function ContextComposer({
               void submit();
             }
           }}
-          rows={3}
+          rows={2}
           placeholder={`Message ${channel.kind === "dm" ? "@" : "#"}${channel.name}`}
           className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-600"
         />
@@ -307,14 +316,14 @@ export function ContextComposer({
             {error}
           </p>
         ) : null}
-        <div className="flex items-center gap-2">
+        <div className="composer-toolbar flex items-center gap-2">
           <button
             type="button"
             aria-label={working ? "Processing files" : "Attach files"}
             title="Attach files · You can also paste images or drop files"
             disabled={working || !loaded || sending}
             onClick={() => input.current?.click()}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-slate-100 focus-visible:outline focus-visible:outline-emerald-400 disabled:opacity-40"
+            className="attach-button grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-slate-100 focus-visible:outline focus-visible:outline-accent-400 disabled:opacity-40"
           >
             <svg
               aria-hidden="true"
@@ -339,29 +348,27 @@ export function ContextComposer({
                 Stop
               </button>
             ) : canRetry ? (
-              <button
-                type="button"
-                disabled={executionStopped}
-                onClick={onRetry}
-                className="rounded-lg border border-white/10 px-3 py-1.5 text-xs"
-              >
-                Regenerate
-              </button>
+              <OverflowMenu label="Message actions">
+                <button type="button" disabled={executionStopped} onClick={onRetry}>
+                  <Icon name="refresh" /> Regenerate
+                </button>
+              </OverflowMenu>
             ) : null}
             <button
               type="button"
               disabled={!canSend}
               onClick={() => void submit()}
-              className="rounded-lg bg-emerald-400 px-4 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
+              className="rounded-lg bg-accent-400 px-4 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
             >
               {sending ? "Sending…" : "Send"}
+              <Icon name="arrow" />
             </button>
           </div>
         </div>
       </div>
       <footer
         aria-label="Conversation status"
-        className="relative flex min-h-8 items-center gap-4 px-1 text-[10px] text-slate-500"
+        className="composer-status relative flex items-center text-slate-400"
       >
         <details
           ref={contextMenu}
@@ -376,7 +383,7 @@ export function ContextComposer({
         >
           <summary
             aria-label="Context usage"
-            className={`flex cursor-pointer list-none items-center gap-1.5 rounded py-1 outline-none hover:text-slate-200 focus-visible:ring-1 focus-visible:ring-emerald-400 [&::-webkit-details-marker]:hidden ${estimate?.exceedsBudget ? "text-rose-300" : estimate?.requiresTruncation ? "text-amber-200" : ""}`}
+            className={`flex cursor-pointer list-none items-center gap-1.5 rounded py-1 outline-none hover:text-slate-200 focus-visible:ring-1 focus-visible:ring-accent-400 [&::-webkit-details-marker]:hidden ${estimate?.exceedsBudget ? "text-rose-300" : estimate?.requiresTruncation ? "text-amber-200" : ""}`}
           >
             <svg
               aria-hidden="true"
@@ -418,7 +425,7 @@ export function ContextComposer({
               <path d="m4 10 4-4 4 4" />
             </svg>
           </summary>
-          <div className="absolute bottom-full left-0 z-30 mb-2 max-h-72 w-80 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-xl border border-white/10 bg-slate-900 p-4 text-xs text-slate-400 shadow-xl">
+          <div className="context-popover absolute bottom-full left-0 z-30 mb-2 max-h-72 w-80 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-xl border border-white/10 bg-slate-900 p-4 text-xs text-slate-400 shadow-xl">
             <h2 className="mb-3 font-medium text-slate-100">Context usage</h2>
             {estimate ? (
               <>
@@ -466,7 +473,7 @@ export function ContextComposer({
         >
           <span
             aria-hidden="true"
-            className={`h-1 w-1 rounded-full ${activeRunCount ? "animate-pulse bg-emerald-400" : "bg-slate-600"}`}
+            className={`h-1 w-1 rounded-full ${activeRunCount ? "animate-pulse bg-accent-400" : "bg-slate-600"}`}
           />
           {activeRunCount} active {activeRunCount === 1 ? "run" : "runs"}
         </span>
@@ -478,6 +485,81 @@ export function ContextComposer({
         </span>
         <span className="ml-auto hidden sm:inline">Enter sends · Shift+Enter adds a line</span>
       </footer>
+      {contextTarget
+        ? createPortal(
+            <>
+              <section className="context-section">
+                <h3>Included context</h3>
+                {files.length ? (
+                  attachmentList
+                ) : (
+                  <p>
+                    {loaded
+                      ? "No files attached. Use the + button to add context."
+                      : "Loading attachments…"}
+                  </p>
+                )}
+              </section>
+              <section className="context-section">
+                <h3>Context budget</h3>
+                {estimate ? (
+                  <>
+                    <p>{estimate.model}</p>
+                    <meter
+                      aria-label="Inspector context budget"
+                      min={0}
+                      max={estimate.contextWindow}
+                      value={Math.min(
+                        estimate.contextWindow,
+                        estimate.inputTokens + estimate.reservedOutputTokens,
+                      )}
+                    />
+                    <p>
+                      {(estimate.inputTokens + estimate.reservedOutputTokens).toLocaleString()} /{" "}
+                      {estimate.contextWindow.toLocaleString()} tokens
+                    </p>
+                    <p>
+                      Includes {estimate.reservedOutputTokens.toLocaleString()} tokens reserved for
+                      the response.
+                    </p>
+                    {estimate.warnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
+                    ))}
+                  </>
+                ) : (
+                  <p>Estimating context…</p>
+                )}
+              </section>
+              <section className="context-section">
+                <h3>Execution</h3>
+                <p>
+                  {profile.terminalMode === "no-terminal"
+                    ? "Terminal access is disabled."
+                    : profile.terminalMode === "full-access"
+                      ? "Full access · Each command needs approval."
+                      : "Basic · Workspace commands only."}
+                </p>
+                <p>
+                  {activeRunCount} active {activeRunCount === 1 ? "run" : "runs"} across all
+                  channels.
+                </p>
+                {executionStopped ? (
+                  <p className="text-rose-300">Execution stopped. Resume from runtime controls.</p>
+                ) : null}
+              </section>
+              {lastRun?.usage ? (
+                <section className="context-section">
+                  <h3>Last run usage</h3>
+                  <p>
+                    {lastRun.usage.promptTokens.toLocaleString()} input +{" "}
+                    {lastRun.usage.completionTokens.toLocaleString()} output tokens
+                  </p>
+                </section>
+              ) : null}
+            </>,
+            contextTarget,
+          )
+        : null}
       {preview ? (
         <AttachmentPreview file={preview} client={client} onClose={() => setPreview(null)} />
       ) : null}

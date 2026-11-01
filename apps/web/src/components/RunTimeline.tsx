@@ -65,7 +65,7 @@ export function RunTimeline({
     }
   };
   return (
-    <details className="max-h-64 shrink-0 overflow-auto border-b border-white/10 px-6 py-2 text-xs">
+    <details className="run-timeline max-h-64 shrink-0 overflow-auto border-b border-white/10 px-6 py-2 text-xs">
       <summary className="cursor-pointer text-slate-400">Run timeline and tool calls</summary>
       {error ? (
         <p role="alert" className="mt-2 text-rose-300">

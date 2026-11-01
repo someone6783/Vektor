@@ -72,7 +72,7 @@ export function AttachmentPreview({
           <a
             href={url}
             download={file.filename}
-            className="mt-4 inline-block text-sm text-emerald-300 underline"
+            className="mt-4 inline-block text-sm text-accent-300 underline"
           >
             Download original
           </a>

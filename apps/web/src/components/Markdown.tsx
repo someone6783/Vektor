@@ -43,7 +43,7 @@ const components: Components = {
       {...props}
       target="_blank"
       rel="noreferrer"
-      className="text-emerald-300 underline decoration-emerald-400/40 underline-offset-2"
+      className="text-accent-300 underline decoration-accent-400/40 underline-offset-2"
     >
       {children}
     </a>

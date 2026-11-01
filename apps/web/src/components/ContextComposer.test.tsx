@@ -116,6 +116,46 @@ function setup(activeRunCount = 0) {
 }
 
 describe("context composer", () => {
+  it("edits shared file context in the inspector without losing the composer draft", async () => {
+    const inspector = document.createElement("div");
+    document.body.append(inspector);
+    try {
+      render(
+        <ContextComposer
+          contextTarget={inspector}
+          client={client}
+          channel={channel}
+          profile={profile}
+          busy={false}
+          historyVersion={0}
+          lastRun={null}
+          onSend={onSend}
+          onStop={() => {}}
+          onRetry={() => {}}
+          canRetry={false}
+        />,
+      );
+      const checkbox = await within(inspector).findByRole("checkbox", {
+        name: "Include pixel.png in context",
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+        target: { value: "Use only the PDF" },
+      });
+      fireEvent.click(checkbox);
+      await waitFor(() => expect(client.updateAttachment).toHaveBeenCalledWith("image", false));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
+      expect(
+        within(inspector).getByRole("meter", { name: "Inspector context budget" }),
+      ).toHaveValue(2068);
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Use only the PDF");
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(onSend).toHaveBeenCalledWith("Use only the PDF", ["pdf"], false));
+    } finally {
+      cleanup();
+      inspector.remove();
+    }
+  });
+
   it("opens context details from the bottom bar and dismisses them without losing the draft", async () => {
     setup(3);
     const message = screen.getByRole("textbox", { name: "Message" });
@@ -154,6 +194,7 @@ describe("context composer", () => {
     await screen.findByRole("checkbox", { name: "Include pixel.png in context" });
     fireEvent.click(screen.getByRole("checkbox", { name: "Include pixel.png in context" }));
     await waitFor(() => expect(client.updateAttachment).toHaveBeenCalledWith("image", false));
+    fireEvent.click(screen.getByLabelText("Actions for notes.pdf"));
     fireEvent.click(screen.getByRole("button", { name: "Preview notes.pdf" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("PDF preview contents");
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
@@ -216,6 +257,7 @@ describe("context composer", () => {
     onSend.mockRejectedValue(new Error("Provider unavailable"));
     setup();
     await screen.findByRole("checkbox", { name: "Include pixel.png in context" });
+    fireEvent.click(screen.getByLabelText("Actions for pixel.png"));
     fireEvent.click(screen.getByRole("button", { name: "Preview pixel.png" }));
     await screen.findByRole("img", { name: "pixel.png" });
     fireEvent.click(screen.getByRole("button", { name: "Close preview" }));

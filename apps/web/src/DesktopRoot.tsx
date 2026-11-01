@@ -43,7 +43,7 @@ export function DesktopRoot() {
           className="fixed bottom-4 left-4 z-50 max-w-lg rounded-xl border border-white/20 bg-slate-900 p-4 text-sm text-slate-100 shadow-xl"
         >
           {notice}
-          <button className="ml-4 text-emerald-300" onClick={() => setNotice(null)}>
+          <button className="ml-4 text-accent-300" onClick={() => setNotice(null)}>
             Dismiss
           </button>
         </div>

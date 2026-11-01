@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vektor — Four workspace directions</title>
+  <style>
+    :root { color-scheme:light dark; --radius:16px; --font-sans:Inter,ui-sans-serif,system-ui,sans-serif; --font-mono:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    * { box-sizing:border-box; }
+    html, body { margin:0; }
+    body { font-family:var(--font-sans); color:var(--foreground,light-dark(#242831,#eceef1)); line-height:1.55; }
+    button,input,textarea,select { font:inherit; }
+    button { cursor:pointer; }
+    button:disabled { cursor:default; opacity:.55; }
+    button,a,input,textarea,select,summary { -webkit-tap-highlight-color:transparent; }
+    :focus-visible { outline:3px solid var(--ring,#709cff); outline-offset:3px; }
+    [hidden] { display:none !important; }
+    a { color:inherit; text-underline-offset:3px; }
+    .intro { display:flex; justify-content:space-between; align-items:end; gap:20px; padding:12px 0 22px; }
+    .eyebrow { font-size:11px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; }
+    .intro h1 { font-size:clamp(25px,4vw,38px); line-height:1.15; font-weight:550; letter-spacing:-.045em; margin:9px 0; }
+    .intro p { margin:0; font-size:14px; opacity:.78; max-width:560px; }
+    .edition { font:11px var(--font-mono); white-space:nowrap; opacity:.65; padding-bottom:4px; }
+    .directions { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:20px; }
+    .direction { text-align:left; padding:14px; border:1px solid var(--border,light-dark(#b4bac4,#464b55)); border-radius:12px; background:var(--card,light-dark(#f0f2f5,#1d2129)); color:inherit; min-height:114px; transition:transform .16s; }
+    .direction:hover { transform:translateY(-2px); }
+    .direction[aria-pressed="true"] { outline:2px solid var(--ring,#709cff); outline-offset:2px; }
+    .direction .number { font:10px var(--font-mono); opacity:.7; }
+    .direction strong { font-size:16px; font-weight:600; display:block; margin-top:4px; }
+    .direction small { display:block; font-size:11px; margin-top:2px; opacity:.8; }
+    .swatches { display:flex; margin-top:10px; gap:4px; }
+    .swatches i { width:21px; height:6px; background:var(--swatch); border-radius:2px; border:1px solid #8886; }
+    .design-note { display:flex; justify-content:space-between; gap:18px; margin:0 0 12px; font-size:12px; }
+    .design-note p { margin:0; max-width:700px; }
+    .design-note span { white-space:nowrap; opacity:.7; }
+    .workspace { --canvas:#102522; --surface:#152f2b; --raised:#1b3934; --text:#eff8f4; --muted-text:#a7beb7; --line:#45675f; --accent-color:#79e5bf; --accent-ink:#102522; --selected:#214c3e; --success-color:#93e7ba; --warning-color:#ffda9b; --warning-bg:#372d1e; --ring:var(--accent-color); color:var(--text); background:var(--canvas); border:1px solid var(--line); border-radius:16px; overflow:hidden; font-size:13px; box-shadow:0 16px 45px #0002; }
+    .workspace[data-design="folio"] { --canvas:#faf7ef; --surface:#f0ece3; --raised:#ffffff; --text:#292a32; --muted-text:#61616d; --line:#b7b1c0; --accent-color:#6542a2; --accent-ink:#ffffff; --selected:#e9e0f4; --success-color:#236a46; --warning-color:#77500a; --warning-bg:#fff0d2; }
+    .workspace[data-design="orbit"] { --canvas:#101720; --surface:#17212e; --raised:#1d2b3d; --text:#f0f5ff; --muted-text:#adbed5; --line:#4c6380; --accent-color:#94b6ff; --accent-ink:#101c35; --selected:#273e65; --success-color:#96e8c0; --warning-color:#ffdb9a; --warning-bg:#352e22; }
+    .workspace[data-design="beacon"] { --canvas:#131313; --surface:#1d1d1d; --raised:#282828; --text:#fff8eb; --muted-text:#c3bfb6; --line:#767168; --accent-color:#ffcf70; --accent-ink:#211907; --selected:#40351f; --success-color:#b6e8a4; --warning-color:#ffcf70; --warning-bg:#352b19; }
+    .workspace { --control-line:#6a9287; }
+    .workspace[data-design="folio"] { --control-line:#86798e; }
+    .workspace[data-design="orbit"] { --control-line:#7189a5; }
+    .workspace[data-design="beacon"] { --control-line:#767168; }
+    .workspace button,.workspace input,.workspace textarea,.workspace select { color:inherit; }
+    .workspace button { background:none; border:0; border-radius:7px; min-height:36px; }
+    .workspace button:hover { background:var(--raised); }
+    .workspace .muted { color:var(--muted-text); }
+    .workspace svg { width:17px; height:17px; flex-shrink:0; vertical-align:middle; }
+    .appbar { height:56px; display:flex; align-items:center; gap:12px; padding:0 18px; border-bottom:1px solid var(--line); background:var(--surface); }
+    .brand { display:flex; gap:9px; align-items:center; font-size:16px; letter-spacing:-.04em; }
+    .brandmark { width:26px; height:26px; display:grid; place-items:center; background:var(--accent-color); color:var(--accent-ink); border-radius:8px; font-weight:800; }
+    .breadcrumb { color:var(--muted-text); margin-left:10px; font-size:12px; }
+    .top-actions { margin-left:auto; display:flex; align-items:center; gap:10px; }
+    .local { display:flex; gap:6px; align-items:center; font-size:11px; color:var(--muted-text); }
+    .status-dot { width:6px; height:6px; display:inline-block; background:var(--success-color); border-radius:50%; }
+    .workspace .icon-button { width:36px; display:inline-grid; place-items:center; }
+    .workspace .outline { display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid var(--control-line); padding:5px 11px; font-size:12px; }
+    .key { font:10px var(--font-mono); border:1px solid var(--line); padding:1px 4px; border-radius:4px; color:var(--muted-text); }
+    .appbody { display:grid; grid-template-columns:190px minmax(0,1fr) 230px; min-height:620px; }
+    .sidebar { background:var(--surface); border-right:1px solid var(--line); padding:18px 12px; display:flex; flex-direction:column; gap:4px; }
+    .workspace .new-chat { display:flex; gap:9px; align-items:center; width:100%; border:1px solid var(--control-line); padding:7px 10px; font-weight:600; margin-bottom:15px; }
+    .nav-label { display:flex; align-items:center; justify-content:space-between; color:var(--muted-text); font-size:10px; letter-spacing:.1em; text-transform:uppercase; margin:15px 9px 7px; }
+    .workspace .nav-item { display:flex; width:100%; align-items:center; text-align:left; gap:9px; padding:8px 10px; color:var(--muted-text); min-height:40px; font-size:12px; }
+    .workspace .nav-item.active { color:var(--text); background:var(--selected); box-shadow:inset 3px 0 var(--accent-color); font-weight:600; }
+    .nav-item .count { margin-left:auto; font:10px var(--font-mono); }
+    .side-bottom { margin-top:auto; padding-top:35px; }
+    .profile { padding:12px 7px 0; border-top:1px solid var(--line); display:flex; gap:8px; align-items:center; margin-top:10px; }
+    .avatar { width:28px; height:28px; border:1px solid var(--line); border-radius:9px; display:inline-grid; place-items:center; font-size:11px; background:var(--raised); flex-shrink:0; }
+    .profile strong { font-size:11px; display:block; }
+    .profile small { font-size:10px; color:var(--muted-text); }
+    .chat { min-width:0; display:flex; flex-direction:column; }
+    .chat-header { padding:18px 24px 15px; display:flex; gap:10px; align-items:center; border-bottom:1px solid var(--line); }
+    .chat-header h2 { font-size:15px; margin:0; letter-spacing:-.02em; font-weight:600; }
+    .chat-header p { font-size:11px; color:var(--muted-text); margin:3px 0 0; }
+    .chat-header .outline { margin-left:auto; }
+    .conversation { padding:23px 28px 16px; flex:1; min-height:320px; max-height:490px; overflow:auto; scrollbar-width:thin; }
+    .day { text-align:center; color:var(--muted-text); font-size:10px; margin:0 0 22px; }
+    .user-turn { max-width:88%; margin-left:auto; background:var(--raised); border:1px solid var(--line); padding:12px 15px; border-radius:12px 12px 3px 12px; line-height:1.65; font-size:13px; }
+    .user-time { color:var(--muted-text); font-size:10px; text-align:right; margin-top:5px; }
+    .agent { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:650; margin:23px 0 12px; }
+    .agent .avatar { color:var(--accent-color); border-color:var(--line); }
+    .agent small { color:var(--muted-text); font-size:10px; font-weight:400; }
+    .reply { font-size:13px; line-height:1.8; }
+    .reply p { margin:0 0 14px; }
+    .reply h3 { font-size:17px; line-height:1.4; letter-spacing:-.025em; margin:4px 0 12px; }
+    .findings { display:grid; gap:10px; margin:0 0 16px; }
+    .finding { display:grid; grid-template-columns:22px 1fr; gap:9px; }
+    .finding b { font-size:10px; font-weight:500; color:var(--accent-color); font-family:var(--font-mono); padding-top:2px; }
+    .finding strong { font-size:12px; display:block; font-weight:600; }
+    .finding p { color:var(--muted-text); font-size:12px; margin:1px 0 0; line-height:1.6; }
+    .workspace details { border:1px solid var(--line); border-radius:8px; }
+    .workspace summary { cursor:pointer; font-size:11px; padding:10px 12px; color:var(--muted-text); }
+    .tool-output { font:11px/1.8 var(--font-mono); padding:0 12px 12px; color:var(--muted-text); overflow-wrap:anywhere; }
+    .message-actions { display:flex; gap:8px; margin-top:8px; color:var(--muted-text); }
+    .workspace .message-actions button { min-height:32px; padding:3px 7px; font-size:10px; }
+    .composer-area { padding:12px 22px 15px; margin-top:auto; }
+    .context-strip { display:flex; align-items:center; gap:7px; margin:0 1px 9px; font-size:10px; color:var(--muted-text); flex-wrap:wrap; }
+    .context-strip .context-amount { margin-left:auto; }
+    .composer { border:1px solid var(--control-line); border-radius:12px; background:var(--surface); padding:12px; }
+    .composer:focus-within { border-color:var(--accent-color); box-shadow:0 0 0 1px var(--accent-color); }
+    .composer textarea { display:block; width:100%; resize:vertical; min-height:58px; max-height:150px; background:transparent; border:0; outline:none; font-size:13px; line-height:1.6; }
+    .composer textarea::placeholder { color:var(--muted-text); opacity:1; }
+    .composer-footer { display:flex; align-items:center; gap:6px; margin-top:6px; }
+    .composer select { background:var(--surface); border:1px solid var(--control-line); padding:5px; font-size:10px; max-width:155px; border-radius:6px; min-height:34px; }
+    .workspace .primary { background:var(--accent-color); color:var(--accent-ink); padding:7px 13px; font-weight:650; font-size:12px; }
+    .workspace .primary:hover { filter:brightness(1.08); background:var(--accent-color); }
+    .workspace .send { margin-left:auto; display:flex; gap:8px; align-items:center; }
+    .composer-hint { font-size:9px; color:var(--muted-text); text-align:center; margin-top:7px; }
+    .attachment { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--line); padding:3px 7px; border-radius:5px; margin-bottom:8px; font-size:10px; overflow-wrap:anywhere; }
+    .inspector { border-left:1px solid var(--line); padding:20px 15px; background:var(--surface); }
+    .inspector-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; font-size:12px; font-weight:600; }
+    .inspector h3 { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted-text); font-weight:600; margin:21px 0 10px; }
+    .inspector p { font-size:11px; color:var(--muted-text); line-height:1.7; margin:4px 0 12px; }
+    .activity { list-style:none; margin:0; padding:0; }
+    .activity li { display:flex; gap:9px; padding:0 0 17px; font-size:11px; }
+    .check { color:var(--success-color); font-size:12px; }
+    .activity strong { font-weight:500; display:block; }
+    .activity small { color:var(--muted-text); font-size:10px; }
+    .permission { background:var(--warning-bg); padding:12px; border:1px solid var(--warning-color); border-radius:9px; }
+    .permission strong { font-size:11px; color:var(--warning-color); }
+    .permission p { font-size:10px; color:var(--text); margin:6px 0 8px; }
+    .permission code { display:block; overflow-wrap:anywhere; font:10px/1.6 var(--font-mono); margin-bottom:10px; }
+    .permission .decisions { display:flex; gap:6px; }
+    .workspace .permission button { flex:1; min-height:34px; font-size:10px; padding:5px; border:1px solid var(--control-line); }
+    .workspace .permission .approve { background:var(--accent-color); color:var(--accent-ink); border-color:var(--accent-color); font-weight:650; }
+    .file-row { display:flex; align-items:start; gap:7px; margin:10px 0; font-size:11px; cursor:pointer; overflow-wrap:anywhere; }
+    .file-row input { accent-color:var(--accent-color); margin:3px 0 0; }
+    .file-row small { display:block; color:var(--muted-text); font-size:9px; }
+    .meter { height:4px; background:var(--line); border-radius:5px; margin:10px 0 7px; }
+    .meter span { width:18%; height:4px; display:block; border-radius:5px; background:var(--accent-color); }
+    .appfoot { display:flex; justify-content:space-between; padding:6px 15px; gap:8px; border-top:1px solid var(--line); color:var(--muted-text); font:9px/1.5 var(--font-mono); background:var(--surface); }
+    .mobile-menu { display:none !important; }
+    .inspector-toggle { white-space:nowrap; }
+    .workspace.without-inspector .appbody { grid-template-columns:190px minmax(0,1fr); }
+    .workspace.without-inspector .inspector { display:none; }
+    /* Folio: quiet reading space, horizontal channels, contextual notebook. */
+    [data-design="folio"] .appbar { background:var(--canvas); height:65px; border-bottom:0; padding:0 25px; }
+    [data-design="folio"] .appbody { grid-template-columns:minmax(0,1fr) 240px; padding:0 20px 18px; gap:22px; }
+    [data-design="folio"] .sidebar { grid-column:1 / -1; flex-direction:row; align-items:center; flex-wrap:wrap; padding:0 0 13px; border:0; border-bottom:1px solid var(--line); gap:5px; background:transparent; }
+    [data-design="folio"] .nav-label,[data-design="folio"] .side-dm,[data-design="folio"] .profile { display:none; }
+    [data-design="folio"] .side-bottom { display:flex; gap:5px; margin:0; padding:0; }
+    [data-design="folio"] .sidebar nav { display:flex; gap:5px; flex-wrap:wrap; }
+    [data-design="folio"] .sidebar .nav-item { width:auto; padding:6px 12px; }
+    [data-design="folio"] .sidebar .new-chat { width:auto; margin:0 9px 0 0; }
+    [data-design="folio"] .chat-header { padding:12px 7px; border:0; }
+    [data-design="folio"] .chat-header h2 { font-size:20px; font-family:Georgia,serif; font-weight:400; }
+    [data-design="folio"] .conversation { padding:14px 10px 20px; }
+    [data-design="folio"] .reply h3 { font-family:Georgia,serif; font-size:24px; font-weight:400; }
+    [data-design="folio"] .reply { font-size:14px; line-height:1.9; }
+    [data-design="folio"] .composer-area { padding:10px 0 0; }
+    [data-design="folio"] .composer { background:var(--raised); }
+    [data-design="folio"] .inspector { border:0; border-radius:10px; padding:18px; align-self:start; }
+    [data-design="folio"].without-inspector .appbody { grid-template-columns:minmax(0,1fr); }
+    /* Orbit: slim workspace rail, persistent context band, structured tool cards. */
+    [data-design="orbit"] .appbody { grid-template-columns:154px minmax(0,1fr) 230px; }
+    [data-design="orbit"] .sidebar { padding:18px 8px; }
+    [data-design="orbit"] .chat-header { background:var(--surface); }
+    [data-design="orbit"] .user-turn { background:var(--selected); }
+    [data-design="orbit"] .finding { background:var(--surface); padding:10px 12px; border-radius:8px; border:1px solid var(--line); }
+    [data-design="orbit"] .context-strip { background:var(--raised); border:1px solid var(--line); padding:7px 9px; border-radius:6px; }
+    [data-design="orbit"] .composer { border-radius:8px; }
+    [data-design="orbit"].without-inspector .appbody { grid-template-columns:154px minmax(0,1fr); }
+    /* Beacon: explicit command navigation, high contrast and larger targets. */
+    [data-design="beacon"] { font-size:14px; }
+    [data-design="beacon"] .appbody { grid-template-columns:210px minmax(0,1fr); }
+    [data-design="beacon"] .sidebar { background:var(--canvas); }
+    [data-design="beacon"] .sidebar button { min-height:44px; font-size:13px; }
+    [data-design="beacon"] .chat-header { border-bottom:2px solid var(--line); }
+    [data-design="beacon"] .chat-header h2 { font-size:17px; }
+    [data-design="beacon"] .conversation { max-height:none; padding:23px 30px 18px; }
+    [data-design="beacon"] .user-turn { font-size:14px; background:var(--surface); }
+    [data-design="beacon"] .reply { font-size:14px; }
+    [data-design="beacon"] .finding strong,[data-design="beacon"] .finding p { font-size:13px; }
+    [data-design="beacon"] .inspector { grid-column:2; display:grid; grid-template-columns:1fr 1fr; gap:0 25px; border-left:0; border-top:1px solid var(--line); margin:0 22px 18px; border-radius:8px; }
+    [data-design="beacon"] .inspector-heading { grid-column:1/-1; margin-bottom:10px; }
+    [data-design="beacon"] .inspector h3 { margin-top:8px; }
+    [data-design="beacon"] .inspector .resources { grid-column:2; grid-row:2 / 4; }
+    [data-design="beacon"] .sidebar { grid-row:1 / 3; }
+    [data-design="beacon"].without-inspector .appbody { grid-template-columns:210px minmax(0,1fr); }
+    [data-design="beacon"] .composer { border:2px solid var(--line); }
+    [data-design="beacon"] .composer-footer button { min-height:44px; }
+    .rationale { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin:20px 0; font-size:12px; }
+    .rationale article { border-top:1px solid var(--border,#464b55); padding-top:12px; }
+    .rationale h3 { font-size:11px; margin:0 0 7px; font-weight:650; }
+    .rationale p { margin:0; opacity:.8; line-height:1.7; }
+    .source-notes { font-size:12px; border-top:1px solid var(--border,#464b55); padding-top:13px; }
+    .source-notes summary { cursor:pointer; padding:5px 0; }
+    .source-notes p { opacity:.85; }
+    .source-notes li { margin:8px 0; overflow-wrap:anywhere; }
+    .source-notes code { font-size:10px; }
+    .prototype-note { font-size:11px; opacity:.7; padding:12px 0 4px; }
+    .page-content { padding:25px; }
+    .page-content h3 { font-size:23px; margin:0 0 5px; }
+    .schedule-card { padding:17px; border:1px solid var(--line); border-radius:10px; background:var(--surface); margin:20px 0; }
+    .schedule-card p { color:var(--muted-text); font-size:12px; }
+    .schedule-top { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .field { display:block; margin:20px 0; font-size:12px; }
+    .field select { background:var(--surface); padding:10px; border:1px solid var(--line); border-radius:7px; display:block; margin-top:8px; max-width:100%; }
+    dialog { color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:12px; width:min(450px,90%); padding:20px; }
+    dialog::backdrop { background:#0009; }
+    .dialog-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+    dialog input { width:100%; background:var(--canvas); border:1px solid var(--line); padding:10px; border-radius:7px; }
+    dialog ul { list-style:none; padding:0; margin:12px 0 0; }
+    .notice { font-size:11px; color:var(--accent-color); min-height:18px; margin-top:6px; }
+    .composer-hint,.context-strip,.day,.user-time,.profile small,.file-row small,.activity small { font-size:11px; }
+    .workspace .message-actions button,.permission p,.permission code,.workspace .permission button { font-size:11px; }
+    .field select,dialog input { border-color:var(--control-line); }
+    .workspace .composer { border-color:var(--control-line); }
+    @media(min-width:1000px) { .conversation { padding-left:max(28px,calc((100% - 650px)/2)); padding-right:max(28px,calc((100% - 650px)/2)); } }
+    @media(max-width:1000px) { .appbody,[data-design="orbit"] .appbody { grid-template-columns:154px minmax(0,1fr); } .inspector { grid-column:2; border-left:0; border-top:1px solid var(--line); display:grid; grid-template-columns:1fr 1fr; gap:0 20px; } .inspector-heading { grid-column:1/-1; margin-bottom:8px; } .inspector .resources { grid-column:2; grid-row:2 / 4; } .inspector h3 { margin-top:8px; } .sidebar { grid-row:1 / 3; } [data-design="folio"] .sidebar { grid-row:auto; } [data-design="folio"] .appbody { grid-template-columns:minmax(0,1fr); } [data-design="folio"] .inspector { grid-column:1; } .conversation { max-height:460px; } .workspace.without-inspector .appbody { grid-template-columns:154px minmax(0,1fr); } [data-design="folio"].without-inspector .appbody { grid-template-columns:1fr; } .breadcrumb { display:none; } }
+    @media(max-width:600px) { .intro { display:block; } .edition { display:none; } .directions { grid-template-columns:1fr 1fr; } .direction { min-height:100px; } .design-note { display:block; } .design-note span { display:block; margin-top:5px; } .appbar { padding:0 12px; gap:7px; } .appbar .local,.appbar .key,.breadcrumb { display:none; } .appbody,[data-design="orbit"] .appbody,[data-design="beacon"] .appbody,.workspace.without-inspector .appbody,[data-design="orbit"].without-inspector .appbody,[data-design="beacon"].without-inspector .appbody { grid-template-columns:minmax(0,1fr); } .sidebar { display:none; grid-column:1; grid-row:auto !important; border-right:0; border-bottom:1px solid var(--line); } .sidebar.mobile-open { display:flex; } .mobile-menu { display:inline-grid !important; } .chat-header { padding:14px; } .chat-header h2 { font-size:14px; } .conversation,[data-design="beacon"] .conversation { padding:18px 16px; } .composer-area { padding:10px 12px; } .composer select { max-width:132px; } .inspector,[data-design="folio"] .inspector,[data-design="beacon"] .inspector { grid-column:1; margin:0; display:block; border-radius:0; } [data-design="beacon"] .inspector .resources { grid-row:auto; } .inspector-heading { margin-bottom:16px; } [data-design="folio"] .appbody { padding:0 12px 12px; gap:10px; } [data-design="folio"] .sidebar { display:flex; } [data-design="folio"] .sidebar .nav-item { font-size:11px; padding:6px 8px; } [data-design="folio"] .sidebar .new-chat { font-size:11px; } [data-design="folio"] .appbar { padding:0 12px; } [data-design="folio"] .mobile-menu { display:none !important; } .rationale { grid-template-columns:1fr; gap:10px; } .appfoot span:last-child { display:none; } .context-strip { font-size:9px; } .chat-header .outline { padding:5px 8px; font-size:10px; } }
+    @media(prefers-reduced-motion:reduce) { * { transition:none !important; scroll-behavior:auto !important; } }
+    @media(max-width:600px) { .workspace button,.workspace .icon-button,.workspace .outline,.workspace .nav-item,.workspace .message-actions button,.workspace .permission button,.composer select { min-height:44px; } .context-strip { font-size:11px; } }
+  </style>
+</head>
+<body>
+  <header class="intro">
+    <div><div class="eyebrow">Vektor / Design explorations</div><h1>A clearer place to think.</h1><p>Four workspace directions, informed by the Hermes and T3 Code source. Choose a direction, then try its navigation, context controls and composer.</p></div>
+    <div class="edition">01—04 / INTERACTIVE STUDIES</div>
+  </header>
+  <nav class="directions" aria-label="Choose a design direction" id="directions"></nav>
+  <div class="design-note"><p id="design-description"></p><span id="design-format"></span></div>
+  <section class="workspace" id="workspace" aria-label="Interactive Vektor concept"></section>
+  <section class="rationale" aria-label="Design decisions" id="rationale"></section>
+  <details class="source-notes"><summary>Research, source links & contrast measurements</summary><div id="source-notes"></div></details>
+  <p class="prototype-note">Interactive design prototypes · All conversations, approvals and schedules are sample data. No backend calls, command execution or uploads. Open this file directly in a browser.</p>
+  <script>
+    const icons = {
+      plus:'<path d="M12 5v14M5 12h14"/>', search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
+      chat:'<path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-2 2V11.5a9.5 9.5 0 0 1 19 0Z"/>',
+      hash:'<path d="M9 3 7 21M17 3l-2 18M4 8h17M3 16h17"/>', clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      settings:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',
+      activity:'<path d="M3 12h4l3-8 4 16 3-8h4"/>', panel:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+      arrow:'<path d="M12 19V5m-6 6 6-6 6 6"/>', clip:'<path d="m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9"/>',
+      copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>', menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+      close:'<path d="m6 6 12 12M6 18 18 6"/>', file:'<path d="M14 3H5v18h14V8Zm0 0v5h5M8 13h8M8 17h6"/>',
+      chevron:'<path d="m8 5 7 7-7 7"/>', shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Zm-4 9 3 3 5-6"/>'
+    };
+    const icon = name => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icons[name]+'</svg>';
+    const designs = [
+      { id:'signal', name:'Signal', kind:'Calm / focused', palette:['#102522','#152f2b','#79e5bf','#eff8f4'], format:'01 / TEAL + MINT',
+        description:'A familiar channel workspace with softer teal surfaces, mint actions and a quiet activity pane. The easiest evolution of today’s Vektor.',
+        hermes:'The dashboard’s deep teal foundation, plus the desktop’s chat-first hierarchy and contextual panels.',
+        t3:'A stable header, bounded conversation width and tool work grouped behind disclosure controls.',
+        usability:'Selected channels have a persistent edge marker. Mint identifies actions; labelled status and approval states carry meaning without colour alone.' },
+      { id:'folio', name:'Folio', kind:'Light / editorial', palette:['#faf7ef','#f0ece3','#6542a2','#292a32'], format:'02 / PAPER + IRIS',
+        description:'A warm reading workspace with horizontal channel navigation and a contextual notebook. More room for long answers, with a restrained violet action colour.',
+        hermes:'Whitespace instead of stacked cards, plus the dashboard’s warm cream character. The serif reading voice is a new Vektor direction.',
+        t3:'The light theme’s clear text hierarchy, a restrained composer and separate prompt/context controls.',
+        usability:'The long-form response is the visual anchor. A warm canvas reduces glare; darker secondary text keeps metadata readable.' },
+      { id:'orbit', name:'Orbit', kind:'Structured / technical', palette:['#101720','#17212e','#94b6ff','#f0f5ff'], format:'03 / NAVY + COBALT',
+        description:'A technical cockpit with a narrow navigation rail, structured findings and an explicit context band. Designed for frequent tool and model switching.',
+        hermes:'The official desktop’s blue accent family, neutral chrome, consistent controls and on-demand detail.',
+        t3:'Composer context strips, separated activity and concrete tool output. The layout exposes context before sending.',
+        usability:'Files, context budget and model are close to the prompt. Findings are scannable cards; command approvals show the exact action.' },
+      { id:'beacon', name:'Beacon', kind:'Bold / high contrast', palette:['#131313','#282828','#ffcf70','#fff8eb'], format:'04 / INK + AMBER',
+        description:'A strong contrast workspace with larger controls and an activity shelf below the conversation. Fewer competing columns, clearer decisions.',
+        hermes:'Warm cream from the dashboard, chat as the main canvas, and a contextual shelf rather than permanent background detail.',
+        t3:'A near-neutral dark foundation and explicit action hierarchy. Amber is a new Vektor accent; status always includes text.',
+        usability:'Larger navigation and send targets, strong borders and readable metadata. The activity shelf can close to give the conversation full attention.' }
+    ];
+    const state = { design:'signal', view:'chat', channel:'research', inspector:true, permission:'pending', included:true, file:null, messages:[], schedule:true };
+    const workspace = document.getElementById('workspace');
+    const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const navItem = (name,label,symbol,count='') => {
+      const active=state.view===name&&(name!=='chat'||state.channel===label);
+      return '<button class="nav-item '+(active?'active':'')+'" data-view="'+name+'" '+(name==='chat'?'data-channel="'+label+'"':'')+' '+(active?'aria-current="page"':'')+'>'+icon(symbol)+'<span>'+label+'</span>'+(count?'<span class="count">'+count+'</span>':'')+'</button>';
+    };
+    function sidebar() {
+      return '<aside class="sidebar" id="sidebar"><button class="new-chat" data-action="new">'+icon('plus')+'New conversation</button><div class="nav-label">Channels <span>03</span></div><nav aria-label="Channels">'+navItem('chat','research','hash','2')+navItem('chat','general','hash')+navItem('chat','product','hash')+'</nav><div class="nav-label side-dm">Direct messages</div><div class="side-dm">'+navItem('chat','Ada','chat')+'</div><div class="side-bottom">'+navItem('schedules','Schedules','clock')+navItem('activity','Run history','activity')+navItem('settings','Settings','settings')+'<div class="profile"><span class="avatar">A</span><div><strong>Aaron’s workspace</strong><small>Local · Personal</small></div></div></div></aside>';
+    }
+    function response() {
+      return '<div class="agent"><span class="avatar">V</span>Research assistant <small>· Completed</small></div><div class="reply"><h3>A clearer view of what’s next.</h3><p>The three notes point to the same priority: make the everyday workflow easier to scan before adding more features.</p><div class="findings"><div class="finding"><b>01</b><div><strong>Give the conversation room.</strong><p>Keep the answer central. Bring supporting activity into view when it helps.</p></div></div><div class="finding"><b>02</b><div><strong>Make the next action obvious.</strong><p>Separate the prompt, included context and permission decisions.</p></div></div><div class="finding"><b>03</b><div><strong>Make small details readable.</strong><p>Use stronger secondary text and labels alongside every status colour.</p></div></div></div><details><summary>3 files reviewed · 2 tool steps · 8.4 seconds</summary><div class="tool-output">✓ Read research-notes.md<br>✓ Read product-brief.md<br>✓ Read usability-review.md<br>✓ Compared recurring themes<br>✓ Prepared summary</div></details><div class="message-actions"><button data-action="copy">'+icon('copy')+' Copy summary</button><button data-action="followup">Ask a follow-up '+icon('chevron')+'</button></div></div>';
+    }
+    function conversation() {
+      const isResearch=state.channel==='research';
+      return '<div class="conversation" id="conversation" role="log" aria-label="Sample conversation" aria-live="polite"><div class="day">Today · Sample conversation</div>'+(isResearch?'<div class="user-turn">Review the research notes and give me three practical ways to improve our workspace.</div><div class="user-time">You · 10:42</div>'+response():'<div class="agent"><span class="avatar">V</span>Workspace assistant</div><div class="reply"><h3>'+escapeHTML(state.channel==='New conversation'?'What would you like to explore?':'Welcome to '+state.channel+'.')+'</h3><p>This is a separate sample conversation. Write a message below to try the composer.</p></div>')+state.messages.filter(m=>m.channel===state.channel).map(m=>'<div class="user-turn" style="margin-top:20px">'+escapeHTML(m.text)+'</div><div class="agent"><span class="avatar">V</span>Prototype response</div><div class="reply"><p>Your message appears here in the '+escapeHTML(designs.find(d=>d.id===state.design).name)+' layout. In the connected app, your selected profile would generate the answer.</p></div>').join('')+'</div>';
+    }
+    function composer() {
+      return '<form class="composer-area" id="composer-form"><div class="context-strip">'+icon('shield')+'<span>Ask before commands</span><span aria-hidden="true">·</span><span id="context-files">'+(state.included?'2 files':'1 file')+' in context</span><span class="context-amount" id="context-amount">'+(state.included?'18':'12')+'% context used</span></div><div class="composer">'+(state.file?'<div class="attachment">'+icon('file')+escapeHTML(state.file)+'<button type="button" data-action="remove-file" aria-label="Remove attached file">×</button></div>':'')+'<textarea id="prompt" aria-label="Message to your assistant" placeholder="Ask a question, or explore an idea…" rows="2"></textarea><div class="composer-footer"><button type="button" class="icon-button" data-action="attach" aria-label="Attach a local file for the prototype">'+icon('clip')+'</button><select aria-label="Assistant profile"><option>Research assistant</option><option>General assistant</option><option>Writing assistant</option></select><button type="submit" class="primary send" id="send-button">Send '+icon('arrow')+'</button></div></div><input type="file" id="file-input" hidden><div class="composer-hint">Ctrl / ⌘ + Enter to send · Your files stay on this device in this prototype</div><div class="notice" id="composer-notice" role="status"></div></form>';
+    }
+    function inspector() {
+      return '<aside class="inspector" aria-label="Activity and context"><div class="inspector-heading">Workspace context <span class="muted">'+icon('panel')+'</span></div><section><h3>Latest activity</h3><ol class="activity"><li><span class="check">✓</span><div><strong>Reviewed source files</strong><small>3 documents · 4.2 seconds</small></div></li><li><span class="check">✓</span><div><strong>Summary ready</strong><small>Research assistant · 10:42</small></div></li></ol></section><section class="permission" id="permission">'+permissionHTML()+'</section><section class="resources"><h3>Included context</h3><label class="file-row"><input type="checkbox" id="include-file" '+(state.included?'checked':'')+'><span>research-notes.md<small>1,280 tokens · Toggle to include</small></span></label><div class="file-row">'+icon('file')+'<span>product-brief.md<small>640 tokens · Included</small></span></div><h3>Context budget</h3><div class="meter"><span id="context-meter" style="width:'+(state.included?'18':'12')+'%"></span></div><p id="context-budget">'+(state.included?'23,040':'15,360')+' / 128,000 tokens<br>Includes reserved response space</p></section></aside>';
+    }
+    function permissionHTML() {
+      return state.permission==='pending'?'<strong>! Command needs approval</strong><p>The assistant wants to list workspace files.</p><code>ls -la ./research</code><p>Location: workspace · Timeout: 15s</p><div class="decisions"><button class="approve" data-action="approve">Approve once</button><button data-action="deny">Deny</button></div>':'<strong>'+(state.permission==='approved'?'✓ Approved once':'⊘ Command denied')+'</strong><p>'+(state.permission==='approved'?'Demo decision recorded. No command was executed.':'Demo decision recorded. The assistant can continue without this command.')+'</p><button class="outline" data-action="reset-permission">Reset example</button>';
+    }
+    function content() {
+      if(state.view==='chat') return '<section class="chat"><header class="chat-header"><div><h2>'+(state.channel==='Ada'?'@ ':'# ')+escapeHTML(state.channel)+'</h2><p>Research assistant · Local workspace</p></div><button class="outline inspector-toggle" data-action="inspector" aria-expanded="'+state.inspector+'">'+icon('panel')+' Context</button></header>'+conversation()+composer()+'</section>';
+      if(state.view==='schedules') return '<section class="chat page-content"><div class="eyebrow muted">Workspace / Automations</div><h3>Your recurring work.</h3><p class="muted">Keep routines visible and easy to pause.</p><article class="schedule-card"><div class="schedule-top"><strong>Monday research briefing</strong><button class="outline" data-action="schedule" aria-pressed="'+state.schedule+'">'+(state.schedule?'Pause schedule':'Resume schedule')+'</button></div><p>Every Monday at 09:00 · Australia/Perth</p><p>Delivery: #research · Research assistant</p><div class="notice" id="schedule-status">'+(state.schedule?'✓ Active · Next run: Monday, 2 November':'Ⅱ Paused · No future runs until resumed')+'</div></article><p class="muted">Sample schedule. Changes here affect this prototype only.</p></section>';
+      if(state.view==='settings') return '<section class="chat page-content"><div class="eyebrow muted">Workspace / Preferences</div><h3>Make it your space.</h3><p class="muted">A small set of explicit, readable controls.</p><label class="field">Assistant profile<select><option>Research assistant</option><option>General assistant</option></select></label><label class="field">Command permission<select><option>Ask before every command</option><option>No terminal access</option></select></label><label class="field"><input type="checkbox" checked> Show context estimates before sending</label><button class="primary" data-action="save">Save demo preferences</button><p class="notice" id="settings-status" role="status"></p></section>';
+      return '<section class="chat page-content"><div class="eyebrow muted">Workspace / Run history</div><h3>Every step, in view.</h3><p class="muted">Text labels distinguish complete, pending and denied actions.</p><article class="schedule-card"><strong>✓ Research summary · Completed</strong><p>Today, 10:42 · 3 files · 8.4 seconds</p><details><summary>View steps</summary><div class="tool-output">1. Context assembled<br>2. Source files reviewed<br>3. Summary generated<br>4. Response saved</div></details></article><article class="schedule-card"><strong>! File listing · '+(state.permission==='pending'?'Awaiting approval':state.permission==='approved'?'Approved once':'Denied')+'</strong><p>ls -la ./research · Workspace</p></article></section>';
+    }
+    function render() {
+      const design=designs.find(d=>d.id===state.design);
+      document.getElementById('directions').innerHTML=designs.map((d,i)=>'<button class="direction" data-design="'+d.id+'" aria-pressed="'+(d.id===state.design)+'"><span class="number">0'+(i+1)+'</span><strong>'+d.name+'</strong><small>'+d.kind+'</small><span class="swatches" aria-label="Palette: '+d.palette.join(', ')+'">'+d.palette.map(c=>'<i style="--swatch:'+c+'"></i>').join('')+'</span></button>').join('');
+      document.getElementById('design-description').textContent=design.description;
+      document.getElementById('design-format').textContent=design.format;
+      workspace.dataset.design=state.design;
+      workspace.style.colorScheme=state.design==='folio'?'light':'dark';
+      workspace.classList.toggle('without-inspector',!state.inspector || state.view!=='chat');
+      workspace.innerHTML='<header class="appbar"><button class="icon-button mobile-menu" data-action="menu" aria-label="Toggle navigation" aria-expanded="false">'+icon('menu')+'</button><div class="brand"><span class="brandmark">V</span><strong>vektor</strong></div><div class="breadcrumb">Personal workspace <span aria-hidden="true">/</span> '+escapeHTML(state.view==='chat'?state.channel:state.view)+'</div><div class="top-actions"><span class="local"><i class="status-dot"></i>Local workspace</span><button class="outline" data-action="search" aria-label="Search channels">'+icon('search')+' Find <span class="key">⌘ K</span></button></div></header><div class="appbody">'+sidebar()+content()+(state.view==='chat'?inspector():'')+'</div><footer class="appfoot"><span>LOCAL WORKSPACE · '+design.name.toUpperCase()+' STUDY</span><span>DEMO DATA · NO CONNECTED SERVICES</span></footer><dialog id="search-dialog"><div class="dialog-title"><strong>Find a conversation</strong><button class="icon-button" data-action="close-search" aria-label="Close search">'+icon('close')+'</button></div><label for="channel-search" class="muted">Channel or person</label><input id="channel-search" placeholder="Search research, product, Ada…" autocomplete="off"><ul id="search-results"></ul></dialog>';
+      document.getElementById('rationale').innerHTML=[['From Hermes',design.hermes],['From T3 Code',design.t3],['What improves',design.usability]].map(([h,p])=>'<article><h3>'+h+'</h3><p>'+p+'</p></article>').join('');
+      bind();
+    }
+    function showSearch() { const dialog=document.getElementById('search-dialog'); dialog.showModal(); search(''); document.getElementById('channel-search').focus(); }
+    function search(query) { const names=['research','general','product','Ada'].filter(n=>n.toLowerCase().includes(query.toLowerCase())); document.getElementById('search-results').innerHTML=names.length?names.map(n=>'<li><button class="nav-item" data-search-channel="'+n+'">'+icon(n==='Ada'?'chat':'hash')+n+'</button></li>').join(''):'<li class="muted">No conversations match.</li>'; }
+    function send(event) {
+      event.preventDefault();
+      const prompt=document.getElementById('prompt');
+      if(!prompt.value.trim()) { document.getElementById('composer-notice').textContent='Write a message before sending.'; prompt.focus(); return; }
+      state.messages.push({channel:state.channel,text:prompt.value.trim()+(state.file?' [File: '+state.file+']':'')}); state.file=null;
+      render(); document.getElementById('conversation').scrollTop=document.getElementById('conversation').scrollHeight; document.getElementById('prompt').focus();
+    }
+    function bind() {
+      const form=document.getElementById('composer-form'); if(form) form.addEventListener('submit',send);
+      const prompt=document.getElementById('prompt'); if(prompt) prompt.addEventListener('keydown',event=>{if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)) send(event);});
+      const checkbox=document.getElementById('include-file'); if(checkbox) checkbox.addEventListener('change',()=>{
+        state.included=checkbox.checked;
+        document.getElementById('context-files').textContent=state.included?'2 files in context':'1 file in context';
+        document.getElementById('context-amount').textContent=(state.included?'18':'12')+'% context used';
+        document.getElementById('context-meter').style.width=(state.included?'18':'12')+'%';
+        document.getElementById('context-budget').innerHTML=(state.included?'23,040':'15,360')+' / 128,000 tokens<br>Includes reserved response space';
+      });
+      const file=document.getElementById('file-input'); if(file) file.addEventListener('change',()=>{const text=document.getElementById('prompt').value; state.file=file.files[0]?.name??null;render();document.getElementById('prompt').value=text;});
+      document.getElementById('channel-search').addEventListener('input',event=>search(event.target.value));
+    }
+    document.addEventListener('click',async event=>{
+      const button=event.target.closest('button'); if(!button) return;
+      if(button.dataset.design) {const text=document.getElementById('prompt')?.value;state.design=button.dataset.design;render();if(text&&document.getElementById('prompt'))document.getElementById('prompt').value=text;return;}
+      if(button.dataset.view) { state.view=button.dataset.view; if(button.dataset.channel)state.channel=button.dataset.channel;render();return; }
+      if(button.dataset.searchChannel) {state.view='chat';state.channel=button.dataset.searchChannel;render();return;}
+      switch(button.dataset.action) {
+        case 'inspector': {const text=document.getElementById('prompt')?.value;state.inspector=!state.inspector;render();document.getElementById('prompt').value=text;break;}
+        case 'menu': {const open=document.getElementById('sidebar').classList.toggle('mobile-open');button.setAttribute('aria-expanded',open);break;}
+        case 'new':state.view='chat';state.channel='New conversation';render();document.getElementById('prompt').focus();break;
+        case 'search':showSearch();break;
+        case 'close-search':document.getElementById('search-dialog').close();break;
+        case 'approve':case 'deny':state.permission=button.dataset.action==='approve'?'approved':'denied';document.getElementById('permission').innerHTML=permissionHTML();break;
+        case 'reset-permission':state.permission='pending';document.getElementById('permission').innerHTML=permissionHTML();break;
+        case 'attach':document.getElementById('file-input').click();break;
+        case 'remove-file':{const text=document.getElementById('prompt').value;state.file=null;render();document.getElementById('prompt').value=text;break;}
+        case 'followup':document.getElementById('prompt').value='Turn these findings into a prioritised action plan.';document.getElementById('prompt').focus();break;
+        case 'copy':try {await navigator.clipboard.writeText('1. Give the conversation room.\n2. Make the next action obvious.\n3. Make small details readable.');button.textContent='✓ Copied';}catch {button.textContent='Copy unavailable in this viewer';}break;
+        case 'schedule':state.schedule=!state.schedule;render();break;
+        case 'save':document.getElementById('settings-status').textContent='✓ Demo preferences saved for this preview.';break;
+      }
+    });
+    document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();showSearch();}});
+    const hermesCommit='016b76da3a8a88e28775e08b6ca2846f471b8eda';
+    const t3Commit='43d445b408fb0f612f17388fdc8cdbd2f2e1f24c';
+    const sourceLink=(repo,commit,path,label)=>'<a href="https://github.com/'+repo+'/blob/'+commit+'/'+path+'" target="_blank" rel="noreferrer">'+label+'</a>';
+    function luminance(hex) { const channels=hex.slice(1).match(/../g).map(c=>parseInt(c,16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4);return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722; }
+    function contrast(a,b) {const values=[luminance(a),luminance(b)].sort((x,y)=>x-y);return ((values[1]+.05)/(values[0]+.05)).toFixed(2);}
+    const measurements=[
+      ['Signal','#102522','#152f2b','#eff8f4','#a7beb7','#79e5bf','#102522','#6a9287'],
+      ['Folio','#faf7ef','#f0ece3','#292a32','#61616d','#6542a2','#ffffff','#86798e'],
+      ['Orbit','#101720','#17212e','#f0f5ff','#adbed5','#94b6ff','#101c35','#7189a5'],
+      ['Beacon','#131313','#1d1d1d','#fff8eb','#c3bfb6','#ffcf70','#211907','#767168']
+    ];
+    document.getElementById('source-notes').innerHTML='<p>Two research agents independently cloned and read the official projects. These studies combine patterns from both; the four palettes and layouts are Vektor proposals.</p><ul><li><strong>Hermes</strong> · <code>'+hermesCommit+'</code><br>'+sourceLink('NousResearch/hermes-agent',hermesCommit,'apps/desktop/DESIGN.md','Desktop design principles')+' · '+sourceLink('NousResearch/hermes-agent',hermesCommit,'apps/desktop/src/themes/presets.ts','Desktop presets')+' · '+sourceLink('NousResearch/hermes-agent',hermesCommit,'web/src/themes/presets.ts','Dashboard themes')+' · '+sourceLink('NousResearch/hermes-agent',hermesCommit,'apps/desktop/src/themes/retint.ts','Accent contrast adaptation')+'<br>Desktop: neutral surfaces, blue accents (#0053FD light / #4A84FE dark). Dashboard: teal #041C1C and cream #FFE6CB. Chat stays central; inspection is contextual.</li><li><strong>T3 Code</strong> · <code>'+t3Commit+'</code><br>'+sourceLink('pingdotgg/t3code',t3Commit,'packages/shared/src/themePalettes.ts','Semantic palettes')+' · '+sourceLink('pingdotgg/t3code',t3Commit,'apps/web/src/components/chat/ComposerSurface.tsx','Composer structure')+' · '+sourceLink('pingdotgg/t3code',t3Commit,'apps/web/src/components/chat/WorkLog.tsx','Grouped work log')+' · '+sourceLink('pingdotgg/t3code',t3Commit,'apps/web/src/index.css','Layout geometry')+'<br>Dark canvas #0A0A0A, text #F5F5F5, accent #346BF1. Bounded chat width, a consistent header, a separate composer context strip and expandable tool work.</li></ul><p><strong>Contrast measurements</strong> · Computed from sRGB palette tokens. Body text is measured against the canvas; secondary text and control outlines against the surface; button text against its accent fill.</p><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;text-align:left;font-size:11px"><thead><tr><th style="padding:7px">Study</th><th>Body</th><th>Secondary</th><th>Button</th><th>Control outline</th></tr></thead><tbody>'+measurements.map(([n,b,s,t,m,a,i,c])=>'<tr><th style="padding:7px">'+n+'</th><td>'+contrast(t,b)+':1</td><td>'+contrast(m,s)+':1</td><td>'+contrast(i,a)+':1</td><td>'+contrast(c,s)+':1</td></tr>').join('')+'</tbody></table></div><p>These text pairs exceed 4.5:1; the control outlines exceed 3:1. This is a palette check, not a full accessibility certification. Keyboard focus, labelled states, native form controls and reduced-motion support are included. Mobile targets are at least 44px high.</p><p><strong>Vektor changes to carry forward:</strong> replace scattered hardcoded slate/emerald classes with semantic theme roles; make channel actions available to keyboard and touch users; keep selected-channel markers; separate approvals from ordinary activity. These prototypes demonstrate the workspace direction; production integration is a separate step.</p>';
+    render();
+  </script>
+</body>
+</html>
