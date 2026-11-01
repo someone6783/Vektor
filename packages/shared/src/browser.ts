@@ -21,6 +21,7 @@ export const browserPermissionsSchema = z
   .object({
     mode: z.enum(["off", "observe", "interactive"]).default("off"),
     session: z.enum(["default", "separate"]).default("separate"),
+    display: z.enum(["headless", "window"]).default("headless"),
     allowedOrigins: z.array(originSchema).max(20).default([]),
     localOrigins: z
       .array(
@@ -78,6 +79,9 @@ export const browserInputSchema = z.discriminatedUnion("action", [
 ]);
 export type BrowserInput = z.infer<typeof browserInputSchema>;
 export const browserStateSchema = z.object({
+  display: z.enum(["headless", "window"]).optional(),
+  phase: z.enum(["idle", "starting", "active", "closed", "failed"]).optional(),
+  error: z.string().nullable().optional(),
   session: z.enum(["default", "separate"]).optional(),
   mode: z.enum(["off", "observe", "interactive"]).optional(),
   active: z.boolean(),
@@ -106,3 +110,9 @@ export const defaultBrowserProfileSchema = z.object({
   error: z.enum(["save_failed"]).nullable(),
 });
 export type DefaultBrowserProfile = z.infer<typeof defaultBrowserProfileSchema>;
+export const browserCapabilitiesSchema = z.object({
+  visibleWindowAvailable: z.boolean(),
+  reason: z.string().nullable(),
+  windowLocation: z.literal("backend"),
+});
+export type BrowserCapabilities = z.infer<typeof browserCapabilitiesSchema>;

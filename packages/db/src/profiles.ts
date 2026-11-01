@@ -7,6 +7,7 @@ export type TerminalMode = "no-terminal" | "basic" | "full-access";
 export type ProfileColor = "emerald" | "sky" | "violet" | "amber" | "rose";
 export interface BrowserPermissions {
   session: "default" | "separate";
+  display: "headless" | "window";
   mode: "off" | "observe" | "interactive";
   allowedOrigins: string[];
   localOrigins: string[];
@@ -116,6 +117,7 @@ function parseBrowser(value: string): BrowserPermissions {
   const off: BrowserPermissions = {
     mode: "off",
     session: "separate",
+    display: "headless",
     allowedOrigins: [],
     localOrigins: [],
   };
@@ -129,9 +131,12 @@ function parseBrowser(value: string): BrowserPermissions {
       return off;
     if (parsed.session !== undefined && !["default", "separate"].includes(parsed.session))
       return off;
+    if (parsed.display !== undefined && !["headless", "window"].includes(parsed.display))
+      return off;
     return {
       ...parsed,
       session: parsed.session ?? "separate",
+      display: parsed.display ?? "headless",
     };
   } catch {
     return off;

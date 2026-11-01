@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserPermissionsSchema, type BrowserPermissions } from "@vektor/shared";
 import type { BrowserContext } from "playwright";
+import { browserDesktop } from "./desktop.js";
+import { testDisplay } from "./display.test-utils.js";
 import {
   PlaywrightBrowser,
   type BrowserSessionOptions,
@@ -127,6 +129,91 @@ afterEach(async () => {
 });
 
 describe("real isolated Chromium controller", () => {
+  it("opens and focuses a real headed window and pauses privately on native user input", async () => {
+    const display = await testDisplay();
+    const takeover = vi.fn();
+    const closed = vi.fn();
+    permissions.display = "window";
+    const value = browser({
+      desktop: browserDesktop({ DISPLAY: display.display }, "linux"),
+      onTakeover: takeover,
+      onWindowClosed: closed,
+    });
+    try {
+      let snapshot = await value.execute({ action: "navigate", url: origin });
+      expect(value.state()).toMatchObject({ display: "window", phase: "active", paused: false });
+      const context = (value as unknown as { context: BrowserContext }).context;
+      const page = context.pages()[0]!;
+      const cdp = await context.newCDPSession(page);
+      const window = await cdp.send("Browser.getWindowForTarget");
+      expect(window.windowId).toBeGreaterThan(0);
+      expect(
+        await page.evaluate(() =>
+          Object.getOwnPropertyNames(globalThis).some((name) => name.startsWith("activity_")),
+        ),
+      ).toBe(false);
+      await value.focus();
+      snapshot = await value.execute({
+        action: "fill",
+        ref: ref(snapshot, "Name"),
+        text: "Agent input",
+      });
+      expect(takeover).not.toHaveBeenCalled();
+      expect(snapshot.paused).toBe(false);
+      await value.execute({ action: "click", ref: ref(snapshot, "Submit") });
+      await vi.waitFor(() => expect(posts).toBe(1), { timeout: 5000 });
+      expect(takeover).not.toHaveBeenCalled();
+      await value.execute({ action: "navigate", url: origin });
+      const box = (await page.getByLabel("Name", { exact: true }).boundingBox())!;
+      await page.mouse.click(box.x + 4, box.y + 4);
+      await vi.waitFor(() => expect(takeover).toHaveBeenCalled());
+      expect(value.state()).toMatchObject({ paused: true, sensitive: true });
+      await expect(value.execute({ action: "snapshot" })).rejects.toThrow(/paused/);
+      await page.close();
+      await vi.waitFor(() => expect(closed).toHaveBeenCalled());
+      expect(value.state().active).toBe(false);
+    } finally {
+      await value.close();
+      await display.stop();
+    }
+  }, 30_000);
+  it("reports an unavailable desktop instead of silently launching headless", async () => {
+    permissions.display = "window";
+    const value = browser({ desktop: browserDesktop({}, "linux") });
+    await expect(value.execute({ action: "tabs" })).rejects.toThrow(/no desktop display/);
+    expect(value.state()).toMatchObject({ active: false, phase: "failed", display: "window" });
+  });
+  it("checkpoints saved logins while a visible default-profile window is open", async () => {
+    const display = await testDisplay();
+    permissions.display = "window";
+    permissions.session = "default";
+    let saved: BrowserStorageState | undefined;
+    const value = browser({
+      desktop: browserDesktop({ DISPLAY: display.display }, "linux"),
+      saveStorageState: (state) => {
+        saved = state;
+      },
+    });
+    try {
+      await value.execute({ action: "navigate", url: `${origin}/cookie` });
+      await vi.waitFor(
+        () =>
+          expect(
+            saved?.cookies.some((cookie) => cookie.name === "private" && cookie.value === "one"),
+          ).toBe(true),
+        { timeout: 5000 },
+      );
+      expect(saved?.origins[0]?.localStorage).toEqual(
+        expect.arrayContaining([{ name: "preference", value: "saved-value" }]),
+      );
+      const context = (value as unknown as { context: BrowserContext }).context;
+      await context.pages()[0]!.close();
+      expect(saved?.cookies.some((cookie) => cookie.name === "private")).toBe(true);
+    } finally {
+      await value.close();
+      await display.stop();
+    }
+  }, 30_000);
   it("reuses saved default cookies and local storage in observation mode while keeping separate sessions clean", async () => {
     let saved: BrowserStorageState | undefined;
     const first = browser({

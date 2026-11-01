@@ -94,6 +94,7 @@ describe("database bootstrap", () => {
     expect(getProfile(db, profile.id)?.browser).toEqual({
       mode: "off",
       session: "separate",
+      display: "headless",
       allowedOrigins: [],
       localOrigins: [],
     });

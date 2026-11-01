@@ -401,3 +401,8 @@ snapshots, masked screenshots, pause/takeover and artifact deletion.
 Host backends need `pnpm browser:install`; Docker includes the pinned engine.
 [Browser operations and boundaries](docs/BROWSER.md) documents setup, private input,
 scheduled declarations, network/file guardrails, retention and verification.
+
+Profiles also choose Headless or Visible window independently of browser permissions
+and saved/separate sessions. A visible window opens on the backend's desktop; the run
+panel offers Open, Focus and private takeover controls. Docker needs an explicitly
+connected display. Existing profiles stay headless. See [browser setup](docs/BROWSER.md).

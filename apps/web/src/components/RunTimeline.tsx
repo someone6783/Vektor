@@ -123,7 +123,10 @@ export function RunTimeline({
               </pre>
             </details>
           ))}
-          {details.tools.some((tool) => tool.name.startsWith("browser")) ? (
+          {details.tools.some((tool) => tool.name.startsWith("browser")) ||
+          (details.run.status === "running" &&
+            details.browser?.mode &&
+            details.browser.mode !== "off") ? (
             <BrowserPanel
               key={details.run.id}
               client={client}

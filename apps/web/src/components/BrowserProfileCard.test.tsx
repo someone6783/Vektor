@@ -60,6 +60,9 @@ describe("browser profile selection", () => {
     );
     fireEvent.change(mode, { target: { value: "interactive" } });
     fireEvent.change(choice, { target: { value: "separate" } });
+    fireEvent.change(screen.getByLabelText("Browser window for Browser test"), {
+      target: { value: "window" },
+    });
     await waitFor(() => expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
     await waitFor(() =>
@@ -69,6 +72,7 @@ describe("browser profile selection", () => {
           browser: expect.objectContaining({
             mode: "interactive",
             session: "separate",
+            display: "window",
           }),
         }),
       ),

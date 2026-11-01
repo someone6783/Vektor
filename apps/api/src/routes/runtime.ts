@@ -65,6 +65,7 @@ export function registerRuntimeRoutes(
     const run = getRun(db, runId);
     if (!run) throw new RuntimeError("Run not found.", 404);
     return {
+      browser: manager.browserState(runId),
       run: toRun(run),
       tools: listToolCalls(db, runId).map((tool) =>
         toolCallSchema.parse({

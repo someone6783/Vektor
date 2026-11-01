@@ -7,6 +7,7 @@ import {
   type ElementHandle,
   type Page,
   type Request,
+  type CDPSession,
 } from "playwright";
 import {
   browserPermissionsSchema,
@@ -16,15 +17,20 @@ import {
 } from "@vektor/shared";
 import { BrowserNetwork, browserUrl } from "./network.js";
 import { RuntimeError } from "../runtime/terminal.js";
+import { browserDesktop, type BrowserDesktop } from "./desktop.js";
 
 export interface BrowserController {
   execute(input: BrowserInput, human?: boolean): Promise<Record<string, unknown>>;
   state(): BrowserState;
   pause(paused: boolean): void;
   close(): Promise<void>;
+  focus?(): Promise<void>;
 }
 export type BrowserStorageState = Awaited<ReturnType<BrowserContext["storageState"]>>;
 export interface BrowserSessionOptions {
+  desktop?: BrowserDesktop;
+  onTakeover?: () => void;
+  onWindowClosed?: () => void;
   storageState?: BrowserStorageState;
   saveStorageState?: (value: BrowserStorageState) => void;
   onStorageError?: () => void;
@@ -70,6 +76,13 @@ export class PlaywrightBrowser implements BrowserController {
   private readonly network: BrowserNetwork;
   private readonly lifecycle = new AbortController();
   private storageReady = false;
+  private launchError: string | null = null;
+  private readonly guards = new Map<
+    Page,
+    Promise<{ cdp: CDPSession; world: string; control: string }>
+  >();
+  private nativeTakeover = false;
+  private profileTimer?: NodeJS.Timeout;
   private savingProfile?: Promise<void>;
   private profileDigest?: string;
   constructor(readonly options: BrowserSessionOptions) {
@@ -103,12 +116,18 @@ export class PlaywrightBrowser implements BrowserController {
     return this.redact(value);
   }
   private async ready() {
-    this.policy();
+    const permissions = this.policy();
     if (this.context) return;
+    const desktop = this.options.desktop ?? browserDesktop();
+    const visible = permissions.display === "window";
+    if (visible && !desktop.capabilities.visibleWindowAvailable) {
+      this.launchError = desktop.capabilities.reason;
+      throw new RuntimeError(this.launchError ?? "A backend desktop display is required.", 503);
+    }
     this.directory = await mkdtemp(join(this.options.root, "session-"));
     try {
       this.launching = chromium.launchPersistentContext(this.directory, {
-        headless: true,
+        headless: !visible,
         chromiumSandbox: false,
         viewport: { width: 960, height: 640 },
         acceptDownloads: false,
@@ -121,17 +140,27 @@ export class PlaywrightBrowser implements BrowserController {
           "--disable-features=WebRtcHideLocalIpsWithMdns",
           "--host-resolver-rules=MAP * ~NOTFOUND",
           "--disable-background-networking",
+          ...(visible ? desktop.args : []),
         ],
         env: {
           PATH: process.env.PATH ?? "/usr/bin:/bin",
           HOME: this.directory,
           TMPDIR: this.directory,
           LANG: "C.UTF-8",
+          ...(visible ? desktop.env : {}),
         },
         timeout: 15_000,
       });
       const context = await this.launching;
       this.context = context;
+      context.on("close", () => {
+        if (this.closed || !visible) return;
+        this.closed = true;
+        clearInterval(this.profileTimer);
+        this.storageReady = false;
+        this.lifecycle.abort();
+        this.options.onWindowClosed?.();
+      });
       if (this.closed || this.options.signal.aborted) {
         await context.close();
         throw new RuntimeError("Browser session cancelled.");
@@ -153,15 +182,23 @@ export class PlaywrightBrowser implements BrowserController {
       context.on("page", (page) => this.register(page));
       for (const page of context.pages()) this.register(page);
       this.page = context.pages()[0] ?? (await context.newPage());
+      if (visible) await Promise.all(this.guards.values());
       this.storageReady = true;
+      if (visible && this.options.saveStorageState) {
+        this.profileTimer = setInterval(() => {
+          if (!this.closed) void this.saveProfile();
+        }, 2000);
+        this.profileTimer.unref();
+      }
     } catch (error) {
+      this.launchError =
+        error instanceof RuntimeError
+          ? error.message
+          : visible
+            ? "Visible Chromium could not open on the backend desktop. Check the display connection and browser installation, or choose Headless."
+            : "Managed Chromium could not start. Install the pinned browser with pnpm browser:install; see browser operations.";
       await this.close();
-      throw error instanceof RuntimeError
-        ? error
-        : new RuntimeError(
-            "Managed Chromium could not start. Install the pinned browser with pnpm browser:install; see browser operations.",
-            503,
-          );
+      throw new RuntimeError(this.launchError, 503);
     }
   }
   private register(page: Page) {
@@ -172,8 +209,16 @@ export class PlaywrightBrowser implements BrowserController {
     }
     const id = randomUUID();
     this.pages.set(id, page);
+    if (this.options.permissions().display === "window") {
+      const guard = this.windowGuard(page);
+      void guard.catch(() => {
+        void page.close().catch(() => {});
+      });
+      this.guards.set(page, guard);
+    }
     page.on("close", () => {
       this.pages.delete(id);
+      this.guards.delete(page);
       if (this.page === page) {
         this.page = this.pages.values().next().value;
         this.epoch++;
@@ -181,6 +226,9 @@ export class PlaywrightBrowser implements BrowserController {
     });
     page.on("dialog", (dialog) => {
       void dialog.dismiss().catch(() => {});
+    });
+    page.on("domcontentloaded", () => {
+      if (!this.closed && this.storageReady && this.guards.has(page)) void this.saveProfile();
     });
     page.on("download", (download) => {
       void download.cancel().catch(() => {});
@@ -190,6 +238,7 @@ export class PlaywrightBrowser implements BrowserController {
       if (frame !== page.mainFrame()) return;
       this.epoch++;
       this.activity++;
+      if (this.nativeTakeover) void this.guardMode(page, false, true).catch(() => {});
       if (frame.url() !== "about:blank") {
         try {
           browserUrl(frame.url(), this.policy());
@@ -199,10 +248,89 @@ export class PlaywrightBrowser implements BrowserController {
       }
     });
   }
+  private async windowGuard(page: Page) {
+    const cdp = await this.context!.newCDPSession(page);
+    await cdp.send("Page.enable");
+    await cdp.send("Runtime.enable");
+    const world = `vektor-${randomUUID()}`;
+    const binding = `activity_${randomUUID().replaceAll("-", "")}`;
+    const control = `control_${randomUUID().replaceAll("-", "")}`;
+    await cdp.send("Runtime.addBinding", { name: binding, executionContextName: world });
+    cdp.on("Runtime.bindingCalled", (event) => {
+      if (event.name !== binding || this.closed || (this.busy && !this.paused)) return;
+      this.takeOverWindow(page);
+    });
+    const source = `(() => { const state = globalThis[${JSON.stringify(control)}] = { automation: false, manual: false };
+      for (const type of ['pointerdown','click','keydown','beforeinput','submit','wheel']) window.addEventListener(type, event => {
+        if (!event.isTrusted || state.automation) return;
+        globalThis[${JSON.stringify(binding)}]('takeover');
+        if (!state.manual) { event.preventDefault(); event.stopImmediatePropagation(); }
+      }, {capture:true, passive:false}); })()`;
+    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source, worldName: world });
+    const context = await cdp.send("Page.createIsolatedWorld", {
+      frameId: (await cdp.send("Page.getFrameTree")).frameTree.frame.id,
+      worldName: world,
+    });
+    await cdp.send("Runtime.evaluate", {
+      expression: source,
+      contextId: context.executionContextId,
+    });
+    return { cdp, world, control };
+  }
+  private async guardMode(page: Page, automation: boolean, manual: boolean) {
+    const guard = await this.guards.get(page);
+    if (!guard || page.isClosed()) return;
+    const frameId = (await guard.cdp.send("Page.getFrameTree")).frameTree.frame.id;
+    const world = await guard.cdp.send("Page.createIsolatedWorld", {
+      frameId,
+      worldName: guard.world,
+    });
+    await guard.cdp.send("Runtime.evaluate", {
+      contextId: world.executionContextId,
+      expression: `Object.assign(globalThis[${JSON.stringify(guard.control)}] || {}, ${JSON.stringify({ automation, manual })})`,
+    });
+  }
+  private takeOverWindow(page = this.page) {
+    if (this.closed) return;
+    const alreadyManual = this.nativeTakeover;
+    if (page) this.page = page;
+    this.sensitive = true;
+    this.nativeTakeover = true;
+    this.paused = true;
+    this.epoch++;
+    this.activity++;
+    this.snapshot =
+      "Browser window is under private user control. Close the session to resume automation in a fresh session.";
+    if (!alreadyManual) this.options.onTakeover?.();
+    if (this.page) void this.guardMode(this.page, false, true).catch(() => {});
+  }
+  private async automated<T>(page: Page, operation: () => Promise<T>): Promise<T> {
+    await this.guardMode(page, true, this.nativeTakeover);
+    try {
+      return await operation();
+    } finally {
+      await this.guardMode(page, false, this.nativeTakeover).catch(() => {});
+    }
+  }
+  async focus() {
+    if (this.options.permissions().display !== "window" || this.closed)
+      throw new RuntimeError("This run has no visible browser window.", 409);
+    await this.ready();
+    await this.page?.bringToFront();
+  }
   private async route(request: Request) {
     const permissions = this.policy();
     if (++this.requests > 200) throw new RuntimeError("Browser session reached its request limit.");
-    if (this.paused && !this.humanActing) throw new RuntimeError("Browser network is paused.", 423);
+    if (
+      this.options.permissions().display === "window" &&
+      request.isNavigationRequest() &&
+      request.frame() === request.frame().page().mainFrame() &&
+      !this.busy &&
+      !this.humanActing
+    )
+      this.takeOverWindow(request.frame().page());
+    if (this.paused && !this.humanActing && !this.nativeTakeover)
+      throw new RuntimeError("Browser network is paused.", 423);
     browserUrl(request.url(), permissions);
     const body = request.postDataBuffer() ?? undefined;
     if (body && body.length > 2 * 1024 * 1024)
@@ -221,7 +349,7 @@ export class PlaywrightBrowser implements BrowserController {
         `Browser network write: ${request.method()} ${this.visibleUrl(request.url())}\nTarget SHA-256 ${digest(request.url())}\nFrom ${this.visibleUrl(url)}\nPayload SHA-256 ${hash}; ${body?.length ?? 0} bytes. Page content cannot approve this request.`,
         async () =>
           !this.closed &&
-          (!this.paused || this.humanActing) &&
+          (!this.paused || this.humanActing || this.nativeTakeover) &&
           this.epoch === epoch &&
           this.activity === activity &&
           this.page === source &&
@@ -231,7 +359,7 @@ export class PlaywrightBrowser implements BrowserController {
       if (
         !approved ||
         this.closed ||
-        (this.paused && !this.humanActing) ||
+        (this.paused && !this.humanActing && !this.nativeTakeover) ||
         this.epoch !== epoch ||
         this.activity !== activity ||
         this.page !== source ||
@@ -252,13 +380,27 @@ export class PlaywrightBrowser implements BrowserController {
   }
   state(): BrowserState {
     let mode: BrowserPermissions["mode"] = "off";
+    let display: BrowserPermissions["display"] = "headless";
     try {
-      if (!this.closed) mode = this.options.permissions().mode;
+      const permissions = this.options.permissions();
+      display = permissions.display ?? "headless";
+      if (!this.closed) mode = permissions.mode;
     } catch {
       /* Revoked sessions show no capabilities. */
     }
     return {
       mode,
+      display,
+      phase: this.launchError
+        ? "failed"
+        : this.closed
+          ? "closed"
+          : this.context
+            ? "active"
+            : this.launching
+              ? "starting"
+              : "idle",
+      error: this.launchError,
       session: this.options.saveStorageState ? "default" : "separate",
       active: !this.closed && !!this.context,
       paused: this.paused,
@@ -276,6 +418,11 @@ export class PlaywrightBrowser implements BrowserController {
     this.activity++;
     this.refs.clear();
     this.snapshot = "";
+    if (this.options.permissions().display === "window") {
+      this.nativeTakeover = paused;
+      if (paused) this.sensitive = true;
+      if (this.page) void this.guardMode(this.page, false, paused).catch(() => {});
+    }
   }
   async execute(input: BrowserInput, human = false): Promise<Record<string, unknown>> {
     if (this.busy)
@@ -313,6 +460,7 @@ export class PlaywrightBrowser implements BrowserController {
           if (this.pages.size >= 4)
             throw new RuntimeError("At most four browser tabs are supported.");
           this.page = await this.context!.newPage();
+          await this.guards.get(this.page);
         }
         // A human takeover may navigate, but page scripts still cannot write without approval.
         await this.page!.goto(input.url, { waitUntil: "domcontentloaded" });
@@ -351,7 +499,7 @@ export class PlaywrightBrowser implements BrowserController {
             this.snapshot = "Preview withheld after private input.";
           }
           this.activity++;
-          await target.fill(input.text);
+          await this.automated(page, () => target.fill(input.text));
         } else {
           const upload =
             input.action === "upload" ? await this.options.upload(input.attachmentId) : null;
@@ -382,8 +530,8 @@ export class PlaywrightBrowser implements BrowserController {
             );
           this.policy();
           this.activity++;
-          if (upload) await target.setInputFiles(upload);
-          else await target.click({ noWaitAfter: true });
+          if (upload) await this.automated(page, () => target.setInputFiles(upload));
+          else await this.automated(page, () => target.click({ noWaitAfter: true }));
         }
       } else if (input.action === "download") {
         const url = browserUrl(input.url, permissions).href;
@@ -422,7 +570,9 @@ export class PlaywrightBrowser implements BrowserController {
           note: "Review the excluded attachment preview before including it in context.",
         };
       } else if (input.action === "scroll") {
-        await page.mouse.wheel(0, input.direction === "down" ? input.amount : -input.amount);
+        await this.automated(page, () =>
+          page.mouse.wheel(0, input.direction === "down" ? input.amount : -input.amount),
+        );
       } else if (input.action === "wait") await page.waitForTimeout(input.ms);
       if (this.options.signal.aborted || this.closed)
         throw new RuntimeError("Browser action cancelled.");
@@ -536,6 +686,7 @@ export class PlaywrightBrowser implements BrowserController {
   async close() {
     if (this.closing) return this.closing;
     this.closed = true;
+    clearInterval(this.profileTimer);
     this.epoch++;
     this.refs.clear();
     this.snapshot = "";

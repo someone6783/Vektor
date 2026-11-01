@@ -459,6 +459,12 @@ Dependencies: first usable release (Phases 1–8), including Phase 4's approval/
 
 Exit criteria: a profile can inspect a test page, fill a form in interactive mode, and pause before submission; denial prevents submission, approval permits only that action, and emergency stop terminates the session. Observation-only mode cannot submit, and unapproved network/file targets remain blocked.
 
+Visible-window follow-up: profiles independently select Headless or Visible window.
+The run panel exposes Open/Focus, launch status and private takeover. Windows use the
+backend desktop, with explicit no-display diagnostics for normal Docker setups.
+Headed Chromium is verified on Xvfb, including native-input pause, saved-profile
+checkpoints and closure without automatic relaunch. Existing profiles remain headless.
+
 ## Phase 10 — Computer use (after v1)
 
 Goal: let an explicitly enabled profile interact with applications through screenshots, pointer actions, and keyboard input in a controlled desktop session.

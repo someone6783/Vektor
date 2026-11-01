@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { browserInputSchema, type BrowserArtifact, type BrowserState } from "@vektor/shared";
+import {
+  browserInputSchema,
+  type BrowserArtifact,
+  type BrowserState,
+  type BrowserCapabilities,
+} from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 
 export function BrowserPanel({
@@ -21,6 +26,19 @@ export function BrowserPanel({
   const [image, setImage] = useState<Blob | null>(null);
   const [imageUrl, setImageUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [capabilities, setCapabilities] = useState<BrowserCapabilities | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    void client
+      .browserCapabilities()
+      .then((value) => {
+        if (mounted) setCapabilities(value);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
   const load = async () => {
     const result = await client.browserState(runId);
     setState(result.session);
@@ -95,9 +113,59 @@ export function BrowserPanel({
       className="my-3 space-y-2 rounded-lg border border-sky-400/20 p-3"
     >
       <p className="font-medium text-sky-300">
-        Managed browser · {state?.session === "default" ? "Default profile" : "Separate session"} ·{" "}
-        {state?.active ? (state.paused ? "Paused for takeover" : "Agent active") : "Session closed"}
+        Managed browser ·{" "}
+        {state?.session === "default"
+          ? "Default profile"
+          : state?.session === "separate"
+            ? "Separate session"
+            : "Session"}{" "}
+        ·{" "}
+        {state?.display === "window"
+          ? "Visible window"
+          : state?.display === "headless"
+            ? "Headless"
+            : "Browser"}{" "}
+        ·{" "}
+        {state?.phase === "starting"
+          ? "Starting browser…"
+          : state?.active
+            ? state.paused
+              ? "Paused for takeover"
+              : "Agent active"
+            : state?.phase === "failed"
+              ? "Launch failed"
+              : "Session closed"}
       </p>
+      {state?.display === "window" ? (
+        <div className="space-y-2">
+          <p className="text-[10px] text-slate-500">
+            The Chromium window opens on the backend machine’s desktop. Pause here before
+            interacting with it; manual takeover keeps page content private until the session
+            closes.
+          </p>
+          {capabilities && !capabilities.visibleWindowAvailable ? (
+            <p role="status" className="text-amber-200">
+              {capabilities.reason}
+            </p>
+          ) : null}
+          <button
+            disabled={
+              busy || !active || capabilities?.visibleWindowAvailable === false || !!state.error
+            }
+            onClick={() =>
+              void perform(() => client.browserControl(runId, state.active ? "focus" : "open"))
+            }
+            className="text-sky-300 disabled:opacity-40"
+          >
+            {state.active ? "Focus browser window" : "Open browser window"}
+          </button>
+        </div>
+      ) : null}
+      {state?.error ? (
+        <p role="alert" className="text-amber-200">
+          {state.error}
+        </p>
+      ) : null}
       {state?.active ? (
         <>
           <p className="break-all text-slate-400">
@@ -105,7 +173,7 @@ export function BrowserPanel({
           </p>
           <div className="flex gap-3">
             <button
-              disabled={busy || !active}
+              disabled={busy || !active || (state.paused && state.sensitive)}
               onClick={() =>
                 void perform(() => client.browserControl(runId, state.paused ? "resume" : "pause"))
               }
@@ -122,9 +190,11 @@ export function BrowserPanel({
             </button>
           </div>
           <p className="text-[10px] text-slate-500">
-            Takeover uses the managed session’s element references. It never attaches to your
-            personal browser. The run deadline still applies; an action already sent may finish.
-            Network writes still require approval.
+            {state.display === "window"
+              ? "After pausing, interact directly with the Chromium window or use the controls below."
+              : "Takeover uses the managed session’s element references."}{" "}
+            It never attaches to your personal browser. The run deadline still applies; an action
+            already sent may finish. Network writes still require approval.
           </p>
           {state.paused ? (
             <form

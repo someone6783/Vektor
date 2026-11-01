@@ -55,6 +55,9 @@ function ProfileEditor({
   const [browserSession, setBrowserSession] = useState<BrowserPermissions["session"]>(
     initialBrowser.session,
   );
+  const [browserDisplay, setBrowserDisplay] = useState<BrowserPermissions["display"]>(
+    initialBrowser.display,
+  );
   const [origins, setOrigins] = useState(initialBrowser.allowedOrigins.join("\n"));
   const [localOrigins, setLocalOrigins] = useState(initialBrowser.localOrigins.join("\n"));
   const [localAcknowledged, setLocalAcknowledged] = useState(
@@ -76,6 +79,7 @@ function ProfileEditor({
       const browser = browserPermissionsSchema.parse({
         mode: browserMode,
         session: browserSession,
+        display: browserDisplay,
         allowedOrigins: origins.split(/\s+/).filter(Boolean),
         localOrigins: localOrigins.split(/\s+/).filter(Boolean),
       });
@@ -270,6 +274,25 @@ function ProfileEditor({
               {browserSession === "default"
                 ? "Shares Vektor’s saved browser profile with other profiles that select Default. Only one run can use it at a time. Observation and interactive permissions still apply."
                 : "Fully separate from the default profile and other runs. Cookies and site storage are cleared when the session closes. Interactive actions still require approvals."}
+            </p>
+            <label className="block">
+              Browser window
+              <select
+                aria-label={`Browser window for ${profile.name}`}
+                value={browserDisplay}
+                onChange={(event) =>
+                  setBrowserDisplay(event.target.value as BrowserPermissions["display"])
+                }
+                className="ml-3 rounded border border-white/10 bg-slate-950 p-1"
+              >
+                <option value="headless">Headless · use the run panel</option>
+                <option value="window">Visible window · open on the backend desktop</option>
+              </select>
+            </label>
+            <p>
+              {browserDisplay === "window"
+                ? "Opens a Chromium window on the backend machine. Local desktop backends show it on that desktop; Docker needs a connected display. Use the run panel to open/focus the window, then pause before manual interaction. This applies to new runs."
+                : "Runs Chromium in the background. View snapshots and screenshots in the run panel."}
             </p>
             <label className="block">
               Allowed origins (one per line)

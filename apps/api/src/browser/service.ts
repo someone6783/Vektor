@@ -18,6 +18,7 @@ import {
 import type { AttachmentService } from "../attachments/service.js";
 import { RuntimeError } from "../runtime/terminal.js";
 import { DefaultBrowserProfileStore } from "./profile.js";
+import { browserDesktop, type BrowserDesktop } from "./desktop.js";
 import {
   PlaywrightBrowser,
   type BrowserController,
@@ -35,6 +36,8 @@ export class BrowserService {
   private changingDefault = false;
   private profileError: "save_failed" | null = null;
   private readonly disconnected = new Set<string>();
+  private readonly windowClosedRuns = new Set<string>();
+  private readonly closedWindows = new Map<string, BrowserState>();
   constructor(
     readonly options: {
       db: VektorDatabase;
@@ -45,6 +48,7 @@ export class BrowserService {
       protectedPort?: number;
       ttlDays?: number;
       factory?: (options: BrowserSessionOptions) => BrowserController;
+      desktop?: BrowserDesktop;
     },
   ) {
     if (options.secretsKey)
@@ -57,6 +61,15 @@ export class BrowserService {
   async initialize() {
     await rm(this.root, { recursive: true, force: true });
     await mkdir(this.root, { recursive: true, mode: 0o700 });
+  }
+  capabilities() {
+    return (this.options.desktop ?? browserDesktop()).capabilities;
+  }
+  async focus(runId: string) {
+    const controller = this.session(runId);
+    if (!controller.focus)
+      throw new RuntimeError("This session cannot show a visible window.", 409);
+    await controller.focus();
   }
   defaultProfileInfo() {
     return {
@@ -93,7 +106,8 @@ export class BrowserService {
   }
   state(runId: string): BrowserState {
     return (
-      this.sessions.get(runId)?.state() ?? {
+      this.sessions.get(runId)?.state() ??
+      this.closedWindows.get(runId) ?? {
         active: false,
         paused: false,
         sensitive: false,
@@ -115,6 +129,8 @@ export class BrowserService {
       signal: AbortSignal;
       permissions: () => BrowserPermissions;
       approve: BrowserSessionOptions["approve"];
+      onTakeover?: () => void;
+      onWindowClosed?: () => void;
     },
     human = false,
   ) {
@@ -123,8 +139,18 @@ export class BrowserService {
     const permissions = browserPermissionsSchema.parse(options.permissions());
     if (permissions.mode === "off")
       throw new RuntimeError("Browser access is disabled for this profile.", 403);
+    if (permissions.display === "window" && !this.capabilities().visibleWindowAvailable)
+      throw new RuntimeError(
+        this.capabilities().reason ?? "The backend has no desktop display.",
+        409,
+      );
     let controller = this.sessions.get(runId);
     if (!controller) {
+      if (this.windowClosedRuns.has(runId))
+        throw new RuntimeError(
+          "The browser window was closed. Start a new run to open another window.",
+          409,
+        );
       if (human) throw new RuntimeError("Start a browser session before takeover.", 409);
       if (this.sessions.size >= 2)
         throw new RuntimeError("Two managed browser sessions are already active.", 429);
@@ -145,6 +171,18 @@ export class BrowserService {
         this.options.factory ?? ((sessionOptions) => new PlaywrightBrowser(sessionOptions));
       controller = factory({
         ...options,
+        desktop: this.options.desktop,
+        onWindowClosed: () => {
+          this.windowClosedRuns.add(runId);
+          this.closedWindows.set(runId, {
+            ...controller!.state(),
+            mode: permissions.mode,
+            phase: "closed",
+            error: "The browser window was closed. Start a new run to open another window.",
+          });
+          options.onWindowClosed?.();
+          void this.close(runId);
+        },
         ...(saved
           ? {
               storageState,
@@ -232,6 +270,8 @@ export class BrowserService {
   }
   finish(runId: string) {
     this.disconnected.delete(runId);
+    this.windowClosedRuns.delete(runId);
+    this.closedWindows.delete(runId);
     return this.close(runId);
   }
   async stopAll() {

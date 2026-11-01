@@ -17,6 +17,7 @@ export function registerBrowserRoutes(
   db: VektorDatabase,
   manager: RunManager,
 ) {
+  app.get("/api/browser/capabilities", async () => manager.browserCapabilities());
   app.get("/api/browser/profile", async () => manager.defaultBrowserProfile());
   app.post("/api/browser/profile/control", async (request) => {
     const { action } = z
@@ -43,7 +44,7 @@ export function registerBrowserRoutes(
   app.post("/api/runs/:runId/browser/control", async (request) => {
     const { runId } = request.params as { runId: string };
     const { action } = z
-      .object({ action: z.enum(["pause", "resume", "close"]) })
+      .object({ action: z.enum(["pause", "resume", "close", "open", "focus"]) })
       .strict()
       .parse(request.body);
     await manager.browserControl(runId, action);

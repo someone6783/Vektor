@@ -51,6 +51,47 @@ directory, use `node api/node_modules/playwright/cli.js install --with-deps chro
 The desktop uses its connected backend's managed browser and requires no browser
 automation permissions for the user's personal desktop.
 
+## Visible windows and UI controls
+
+Settings → Profile → Browser window now chooses **Headless** or **Visible window**,
+independently of observation/interactive access and default/separate profile choice.
+Existing profiles stay headless. The choice applies to a new run. The agent opens
+Chromium lazily on its first browser tool request; the run timeline also offers
+Open browser window before that first request and Focus browser window afterward.
+The panel shows launch state, the selected session/display mode and display errors.
+
+A visible window opens on the **backend machine's desktop**. A local backend should
+be started from the user's desktop session so it inherits its display connection.
+Linux forwards only the X11/Wayland connection variables and, when present, the X11
+authority-file path. Backend/provider credentials are still excluded from Chromium's
+environment. The desktop app remains a client of that backend; its connection to a
+Docker backend does not make the browser appear on the client's own desktop.
+
+The stock Docker configuration has no desktop display, so Headless remains its normal
+mode. A visible Docker browser requires an explicitly connected display or remote
+desktop outside this feature. Vektor reports this in Settings and disables the run
+launch button when the backend reports no display. A failed headed launch never
+silently falls back to headless. This implementation's headed validation runs on
+Linux with an isolated Xvfb display; native macOS/Windows desktop behavior is not
+manually verified.
+
+Pause and take over in the run panel before manually interacting with the window.
+Visible takeover makes the session private: page text/screenshots are withheld and
+automation remains blocked until it is closed. A Chromium isolated-world event guard
+also detects trusted input in the managed page, pauses the agent and cancels pending
+approvals. Page JavaScript cannot invoke that isolated binding; typed characters
+are never included in its messages. Use the explicit pause control before entering
+secrets, especially in embedded frames or while an automated action is in flight.
+Network writes still pass the existing approval gate, and observation still blocks
+them. A visible window does not grant unrestricted agent or network access.
+
+The window closes with its run, cancellation, disconnect or emergency stop. Closing
+it directly does not cause the agent to reopen it automatically; start a new run.
+Visible default-profile sessions checkpoint changed cookies/site storage on page load
+and every two seconds while open. Closing the native window retains the most recent
+completed checkpoint; use Disconnect in Vektor for a final save of the latest state.
+Separate windows never save into the default profile.
+
 ## Session and network boundaries
 
 Each run launches a fresh Chromium process in a private temporary directory. With
@@ -59,7 +100,8 @@ session deletes its cookies/storage and temporary profile. Separate sessions are
 independent of the default profile and of other runs.
 
 With **Default profile**, authorized cookies, local storage and IndexedDB are loaded
-from Vektor's saved profile, then saved back when the session disconnects or closes.
+from Vektor's saved profile, then saved back when the session disconnects or closes. Visible windows also checkpoint
+changed state while open.
 The state is encrypted with the existing secrets key in SQLite, limited to 4 MiB,
 and included in normal data backups. Loading and saving use only origins/domains
 allowed by the current agent profile; state for other origins is preserved without
@@ -215,3 +257,9 @@ filtering, default-profile reuse in observation mode, separate-session cookie/st
 isolation, profile ownership through asynchronous close, reset without stale state
 revival, authenticated management endpoints and Settings profile selection. Storage
 reuse follows the [Playwright authentication state APIs](https://playwright.dev/docs/auth).
+
+Visible-window verification covers real window creation/focus on Xvfb, private native
+takeover, automatic-action compatibility, saved-profile checkpoints, native closure
+without relaunch, authenticated UI launch/focus, disabled permissions and no-display
+diagnostics. The guard uses Chromium's [isolated-world initialization](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-addScriptToEvaluateOnNewDocument)
+and [runtime bindings](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-addBinding).

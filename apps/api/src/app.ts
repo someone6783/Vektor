@@ -34,6 +34,7 @@ import { registerUpdateRoutes } from "./routes/updates.js";
 import { BrowserService } from "./browser/service.js";
 import { registerBrowserRoutes } from "./routes/browser.js";
 import type { BrowserController, BrowserSessionOptions } from "./browser/controller.js";
+import type { BrowserDesktop } from "./browser/desktop.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -44,6 +45,7 @@ export interface BuildAppOptions {
   startScheduler?: boolean;
   updateFetch?: typeof fetch;
   browserFactory?: (options: BrowserSessionOptions) => BrowserController;
+  browserDesktop?: BrowserDesktop;
 }
 
 declare module "fastify" {
@@ -62,6 +64,7 @@ export async function buildApp({
   startScheduler = true,
   updateFetch,
   browserFactory,
+  browserDesktop,
 }: BuildAppOptions): Promise<VektorApp> {
   const providerService = new ProviderService({
     db: storage.db,
@@ -150,6 +153,7 @@ export async function buildApp({
     protectedPort: config.port,
     ttlDays: config.browserArtifactDays,
     factory: browserFactory,
+    desktop: browserDesktop,
   });
   await browser.initialize();
   const runManager = new RunManager({

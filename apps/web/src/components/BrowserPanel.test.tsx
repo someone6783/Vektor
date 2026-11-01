@@ -19,6 +19,45 @@ const session: BrowserState = {
   snapshot: "UNTRUSTED PAGE DATA\ne1_0: input Name",
 };
 describe("managed browser UI", () => {
+  it("opens a configured visible window and offers focus after it starts", async () => {
+    const client = new ApiClient("test");
+    vi.spyOn(client, "browserCapabilities").mockResolvedValue({
+      visibleWindowAvailable: true,
+      reason: null,
+      windowLocation: "backend",
+    });
+    const load = vi.spyOn(client, "browserState").mockResolvedValue({
+      session: { ...session, active: false, phase: "idle", display: "window" },
+      artifacts: [],
+    });
+    const control = vi.spyOn(client, "browserControl").mockResolvedValue(undefined);
+    render(<BrowserPanel client={client} runId="run" active />);
+    const open = await screen.findByRole("button", { name: "Open browser window" });
+    load.mockResolvedValue({
+      session: { ...session, display: "window", phase: "active" },
+      artifacts: [],
+    });
+    fireEvent.click(open);
+    await screen.findByRole("button", { name: "Focus browser window" });
+    expect(control).toHaveBeenCalledWith("run", "open");
+    fireEvent.click(screen.getByRole("button", { name: "Focus browser window" }));
+    await waitFor(() => expect(control).toHaveBeenLastCalledWith("run", "focus"));
+  });
+  it("explains a backend with no display and disables visible launch", async () => {
+    const client = new ApiClient("test");
+    vi.spyOn(client, "browserCapabilities").mockResolvedValue({
+      visibleWindowAvailable: false,
+      reason: "The backend has no desktop display.",
+      windowLocation: "backend",
+    });
+    vi.spyOn(client, "browserState").mockResolvedValue({
+      session: { ...session, active: false, display: "window", phase: "idle" },
+      artifacts: [],
+    });
+    render(<BrowserPanel client={client} runId="run" active />);
+    await screen.findByRole("status");
+    expect(screen.getByRole("button", { name: "Open browser window" })).toBeDisabled();
+  });
   it("pauses for takeover, submits a scoped element action, clears the draft and resumes", async () => {
     const client = new ApiClient("test");
     const load = vi.spyOn(client, "browserState").mockResolvedValue({ session, artifacts: [] });

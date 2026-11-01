@@ -409,7 +409,26 @@ export class RunManager {
       }
   }
   browserState(runId: string) {
-    return this.options.browser?.state(runId);
+    const state = this.options.browser!.state(runId);
+    const active = this.active.get(runId);
+    if (!state.active && active && state.phase !== "failed" && !state.error) {
+      try {
+        const permissions = this.browserPolicy(active);
+        return {
+          ...state,
+          mode: permissions.mode,
+          session: permissions.session,
+          display: permissions.display,
+          phase: "idle" as const,
+        };
+      } catch {
+        return { ...state, mode: "off" as const, phase: "closed" as const };
+      }
+    }
+    return state;
+  }
+  browserCapabilities() {
+    return this.options.browser!.capabilities();
   }
   defaultBrowserProfile() {
     return this.options.browser!.defaultProfileInfo();
@@ -427,9 +446,48 @@ export class RunManager {
     appendAudit(this.options.db, `browser.default_profile_${action}`, id);
     return result;
   }
-  async browserControl(runId: string, action: "pause" | "resume" | "close") {
+  async browserControl(runId: string, action: "pause" | "resume" | "close" | "open" | "focus") {
     const active = this.active.get(runId);
     if (!active) throw new RuntimeError("This run is no longer active.", 409);
+    if (this.stopped) throw new RuntimeError("Emergency stop is active.", 423);
+    if (action === "focus") {
+      this.browserPolicy(active);
+      await this.options.browser!.focus(runId);
+      return;
+    }
+    if (action === "open") {
+      const permissions = this.browserPolicy(active);
+      if (permissions.mode === "off")
+        throw new RuntimeError("Browser access is disabled for this profile.", 403);
+      if (permissions.display !== "window")
+        throw new RuntimeError(
+          "Select Visible window in the profile’s browser settings before opening a window.",
+          409,
+        );
+      if (!active.browserWait)
+        active.browserWait = new Promise((resolve) => {
+          active.resumeBrowser = resolve;
+        });
+      try {
+        await this.browserExecute(active, { action: "tabs" });
+        await this.options.browser!.focus(runId);
+        appendAudit(this.options.db, "browser.window_opened", runId);
+      } catch (error) {
+        if (error instanceof RuntimeError)
+          throw new RuntimeError(error.message, error.statusCode === 503 ? 409 : error.statusCode);
+        throw new RuntimeError(
+          "The browser window could not be opened. Check the backend desktop or start a new run.",
+          409,
+        );
+      } finally {
+        if (!this.options.browser!.state(runId).paused) {
+          active.resumeBrowser?.();
+          delete active.browserWait;
+          delete active.resumeBrowser;
+        }
+      }
+      return;
+    }
     this.cancelBrowserApprovals(runId);
     if (action === "close") await this.options.browser?.close(runId);
     else this.options.browser?.pause(runId, action === "pause");
@@ -525,6 +583,23 @@ export class RunManager {
         signal: active.controller.signal,
         permissions: () => this.browserPolicy(active),
         approve: (description, valid) => this.browserApproval(active, description, valid),
+        onTakeover: () => {
+          if (active.finished) return;
+          this.cancelBrowserApprovals(active.run.id);
+          if (!active.browserWait)
+            active.browserWait = new Promise((resolve) => {
+              active.resumeBrowser = resolve;
+            });
+          appendAudit(this.options.db, "browser.window_takeover", active.run.id);
+        },
+        onWindowClosed: () => {
+          if (active.finished) return;
+          this.cancelBrowserApprovals(active.run.id);
+          active.resumeBrowser?.();
+          delete active.browserWait;
+          delete active.resumeBrowser;
+          appendAudit(this.options.db, "browser.window_closed", active.run.id);
+        },
       },
       human,
     );

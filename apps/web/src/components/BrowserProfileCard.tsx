@@ -1,11 +1,24 @@
-import { useState } from "react";
-import type { DefaultBrowserProfile } from "@vektor/shared";
+import { useEffect, useState } from "react";
+import type { DefaultBrowserProfile, BrowserCapabilities } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 
 export function BrowserProfileCard({ client }: { client: ApiClient }) {
   const [info, setInfo] = useState<DefaultBrowserProfile | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<BrowserCapabilities | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    void client
+      .browserCapabilities()
+      .then((value) => {
+        if (mounted) setCapabilities(value);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [client]);
   const act = async (action?: "disconnect" | "reset") => {
     if (
       action === "reset" &&
@@ -31,6 +44,13 @@ export function BrowserProfileCard({ client }: { client: ApiClient }) {
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-xs text-slate-400">
       <h2 className="text-sm font-medium text-slate-200">Default browser profile</h2>
+      {capabilities ? (
+        <p className="mt-2 text-xs">
+          {capabilities.visibleWindowAvailable
+            ? "Visible browser windows are available on the backend desktop."
+            : capabilities.reason}
+        </p>
+      ) : null}
       <p className="mt-2">
         A saved Vektor-managed profile for observation or interactive runs. Cookies and site storage
         are encrypted on the backend and included in data backups. Separate sessions start clean and
