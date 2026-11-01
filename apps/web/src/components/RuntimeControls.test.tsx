@@ -43,11 +43,21 @@ afterEach(() => {
 
 describe("runtime controls", () => {
   it("shows the exact command and container boundary before approving", async () => {
-    render(<RuntimeControls client={client} onStoppedChange={() => {}} onError={() => {}} />);
+    const counts = vi.fn();
+    render(
+      <RuntimeControls
+        client={client}
+        onStoppedChange={() => {}}
+        onActiveRunsChange={counts}
+        onError={() => {}}
+      />,
+    );
     expect(await screen.findByRole("region", { name: "Command approval" })).toHaveTextContent(
       "/data/test-marker",
     );
     expect(screen.getByText(/inside the backend container/)).toBeInTheDocument();
+    expect(counts).toHaveBeenLastCalledWith(0);
+    expect(screen.queryByText("0 active runs")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Approve command" }));
     await waitFor(() => expect(client.decideApproval).toHaveBeenCalledWith("approval", true));
     await waitFor(() =>

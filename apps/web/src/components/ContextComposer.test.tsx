@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Attachment, Channel, ContextEstimate, Profile } from "@vektor/shared";
 import { ApiClient } from "../lib/api";
@@ -97,9 +97,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup() {
+function setup(activeRunCount = 0) {
   return render(
     <ContextComposer
+      activeRunCount={activeRunCount}
       client={client}
       channel={channel}
       profile={profile}
@@ -115,6 +116,39 @@ function setup() {
 }
 
 describe("context composer", () => {
+  it("opens context details from the bottom bar and dismisses them without losing the draft", async () => {
+    setup(3);
+    const message = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(message, { target: { value: "Keep typing here" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
+    const footer = screen.getByRole("contentinfo", { name: "Conversation status" });
+    expect(within(footer).getByText("3 active runs")).toBeInTheDocument();
+    expect(within(footer).getByText("2 files")).toBeInTheDocument();
+    const context = within(footer).getByLabelText("Context usage");
+    const menu = context.closest("details")!;
+    expect(menu).not.toHaveAttribute("open");
+    fireEvent.click(context);
+    expect(menu).toHaveAttribute("open");
+    expect(within(footer).getByRole("meter", { name: "Context budget" })).toHaveValue(2068);
+    fireEvent.keyDown(context, { key: "Escape" });
+    expect(menu).not.toHaveAttribute("open");
+    expect(context).toHaveFocus();
+    fireEvent.click(context);
+    fireEvent.pointerDown(message);
+    expect(menu).not.toHaveAttribute("open");
+    expect(message).toHaveValue("Keep typing here");
+  });
+
+  it("opens the file picker from the accessible plus button", async () => {
+    setup();
+    await screen.findByRole("checkbox", { name: "Include pixel.png in context" });
+    const picker = vi.spyOn(screen.getByLabelText("Upload attachments"), "click");
+    const attach = screen.getByRole("button", { name: "Attach files" });
+    expect(attach).toHaveTextContent("");
+    fireEvent.click(attach);
+    expect(picker).toHaveBeenCalledOnce();
+  });
+
   it("excludes an image, previews extracted PDF text, and sends only the selected PDF", async () => {
     setup();
     await screen.findByRole("checkbox", { name: "Include pixel.png in context" });

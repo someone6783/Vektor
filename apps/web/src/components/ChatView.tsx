@@ -8,6 +8,7 @@ import { Markdown } from "./Markdown";
 import type { LiveRun } from "../lib/live";
 
 interface ChatViewProps {
+  activeRunCount?: number;
   emergencyStopped?: boolean;
   client: ApiClient;
   lastRun: Run | null;
@@ -67,6 +68,7 @@ function MessageRow({ message, client }: { message: Message; client: ApiClient }
 }
 
 export function ChatView({
+  activeRunCount = 0,
   emergencyStopped = false,
   client,
   lastRun,
@@ -229,8 +231,9 @@ export function ChatView({
         </p>
       ) : null}
 
-      <div className="border-t border-white/10 px-6 py-4">
+      <div className="shrink-0 border-t border-white/10 px-6 pt-3">
         <ContextComposer
+          activeRunCount={activeRunCount}
           key={channel.id}
           client={client}
           channel={channel}

@@ -126,6 +126,7 @@ function TokenGate({
 export default function App({ onConnection }: { onConnection?: () => void } = {}) {
   const [lastRun, setLastRun] = useState<Run | null>(null);
   const [emergencyStopped, setEmergencyStopped] = useState(false);
+  const [activeRunCount, setActiveRunCount] = useState(0);
   const [token, setToken] = useState(readStoredToken);
   const [tokenDraft, setTokenDraft] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
@@ -854,6 +855,13 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             </label>
           ) : null}
 
+          <RuntimeControls
+            client={client}
+            onStoppedChange={setEmergencyStopped}
+            onActiveRunsChange={setActiveRunCount}
+            onError={reportError}
+          />
+
           <button
             type="button"
             onClick={() => {
@@ -873,12 +881,6 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           </button>
         </div>
       </header>
-
-      <RuntimeControls
-        client={client}
-        onStoppedChange={setEmergencyStopped}
-        onError={reportError}
-      />
 
       {booting ? (
         <div className="flex flex-1 items-center justify-center">
@@ -920,6 +922,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             onArchive={archiveChannel}
           />
           <ChatView
+            activeRunCount={activeRunCount}
             emergencyStopped={emergencyStopped}
             client={client}
             lastRun={lastRun?.channelId === activeChannel?.id ? lastRun : null}

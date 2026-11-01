@@ -381,7 +381,7 @@ Exit criteria: create a job, restart the container, and see it fire on schedule 
 
 ## Phase 6 — Desktop packaging
 
-Status (2026-11-01): implemented and ready for sign-off. Linux native packaging and end-to-end verification are complete; macOS/Windows packaging and desktop-environment-specific tray/notification behavior have not been manually verified.
+Status (2026-11-01): implemented and signed off by the user's instruction to start Phase 7. Linux native packaging and end-to-end verification are complete; macOS/Windows packaging and desktop-environment-specific tray/notification behavior have not been manually verified. Follow-up composer/header refinements move context and run/file counts to a slim footer, replace attachment text with a plus button, and integrate emergency stop and runtime details into the main header. All 29 UI tests, lint, formatting, typecheck, web build and rebuilt Linux package pass after these refinements.
 
 - [x] Tauri 2 wraps the existing bundled React frontend, without a backend sidecar. Root desktop dev/build/check commands and Linux native CI compile/test checks are included.
 - [x] First-launch local backend URL setup, five-second health check, explicit save/open, saved-connection fallback while offline, URL validation, and credentials stored separately by backend origin. Native HTTP handles authenticated requests, multipart uploads, streaming SSE and cancellation without broadening API CORS. Redirects are disabled, and native HTTP capabilities allow only loopback hosts.
