@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AboutView } from "./AboutView";
 import type { ModelInfo, Profile, SettingsView, TerminalMode } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { HealthCard } from "./HealthCard";
@@ -524,6 +525,7 @@ export function SettingsView({
 
         <UsageView client={client} />
         <HealthCard />
+        <AboutView client={client} />
       </div>
     </div>
   );

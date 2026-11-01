@@ -1,4 +1,7 @@
 import {
+  updateCheckSchema,
+  type UpdateCheck,
+  type UpdatePreferences,
   apiErrorSchema,
   usageReportSchema,
   type UsageReport,
@@ -73,6 +76,19 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+
+  async updateCheck(force = false): Promise<UpdateCheck> {
+    return updateCheckSchema.parse(await this.request(`/api/update-check?force=${force}`));
+  }
+
+  async updatePreferences(patch: UpdatePreferences): Promise<UpdateCheck> {
+    return updateCheckSchema.parse(
+      await this.request("/api/update-check", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+    );
+  }
 
   async usageReport(
     from: string,

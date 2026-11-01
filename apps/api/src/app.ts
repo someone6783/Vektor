@@ -29,6 +29,8 @@ import { Scheduler } from "./scheduling/scheduler.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { createAppLogger } from "./logging.js";
 import { registerUsageRoutes } from "./routes/usage.js";
+import { UpdateService } from "./updates/service.js";
+import { registerUpdateRoutes } from "./routes/updates.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -37,6 +39,7 @@ export interface BuildAppOptions {
   provider?: ChatProvider;
   schedulerClock?: () => number;
   startScheduler?: boolean;
+  updateFetch?: typeof fetch;
 }
 
 declare module "fastify" {
@@ -53,6 +56,7 @@ export async function buildApp({
   provider: injectedProvider,
   schedulerClock,
   startScheduler = true,
+  updateFetch,
 }: BuildAppOptions): Promise<VektorApp> {
   const providerService = new ProviderService({
     db: storage.db,
@@ -61,12 +65,21 @@ export async function buildApp({
     baseUrl: config.openRouterBaseUrl,
     ...(injectedProvider ? { providerOverride: injectedProvider } : {}),
   });
+  const updates = new UpdateService({
+    db: storage.db,
+    secretsKey: storage.secretsKey,
+    currentVersion: config.version,
+    envEnabled: config.updateCheck,
+    envToken: config.githubToken,
+    fetchImpl: updateFetch,
+  });
   const redact = makeRedactor(() => [
     storage.accessToken,
     storage.secretsKey.toString("hex"),
     storage.secretsKey.toString("base64"),
     storage.secretsKey.toString("utf8"),
     providerService.getKey().key ?? "",
+    updates.credential.token ?? "",
   ]);
   const logging = logger ? createAppLogger(config, (text) => redact(text, false)) : null;
   const serverOptions: FastifyServerOptions = {
@@ -159,6 +172,11 @@ export async function buildApp({
   registerRunEventRoutes(app, storage.db, runManager, streams);
   registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
   registerUsageRoutes(app, storage.db);
+  registerUpdateRoutes(app, updates);
+  if (config.nodeEnv !== "test")
+    app.addHook("onReady", async () => {
+      updates.start();
+    });
 
   if (config.enableDevStream) {
     registerDevStreamRoutes(app, config.devStreamDelayMs, streams);
@@ -176,6 +194,7 @@ export async function buildApp({
   );
 
   app.addHook("preClose", async () => {
+    await updates.stop();
     await scheduler.stop();
     await runManager.shutdown();
     scheduler.reconcile();

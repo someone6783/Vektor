@@ -15,6 +15,7 @@
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-http": "^2.8.3",
     "@tauri-apps/plugin-notification": "^2.8.0",
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "@vektor/shared": "workspace:*",
     "highlight.js": "^11.12.0",
     "react": "^19.1.0",

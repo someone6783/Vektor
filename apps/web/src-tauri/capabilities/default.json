@@ -7,6 +7,10 @@
     "core:default",
     "notification:default",
     {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://github.com/someone6783/Vektor/releases/tag/*" }]
+    },
+    {
       "identifier": "http:default",
       "allow": [
         { "url": "http://127.0.0.1:*/*" },

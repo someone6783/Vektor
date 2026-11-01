@@ -189,7 +189,7 @@ delete the migration journal, or run an older build against an upgraded volume.
 Rollback means using the old image with a verified **pre-upgrade backup restored into
 a fresh volume**. It is not a reverse migration. Changes made after that backup are not
 in the restored data. Preserve the upgraded volume separately while investigating.
-Automatic update notifications and release publication are Phase 8 work.
+Release packaging and update notifications are documented in [RELEASING.md](RELEASING.md). They never install updates automatically.
 
 On process death, startup marks interrupted runs failed, retains persisted partial
 assistant output and received usage, cancels pending tools/approvals, reconciles job
@@ -224,3 +224,26 @@ restarts it and retries the failed run, then removes its own resources. It uses 
 deterministic provider; encrypted synthetic credentials are cleared before any run.
 The automated API crash test separately kills the API with streaming, an approved
 process group and a pending approval active, then verifies cleanup and recovery.
+
+## Release notifications
+
+Settings → About shows the app/backend versions, last check, and a manual Check now
+action. The header shows a release link when a newer stable version is available.
+Checks run on the backend, cache success and failure for 24 hours in SQLite, and
+use a five-second timeout per attempt with at most one retry. A background check
+never delays startup or a run. HTTP 403/429 and 404 do not retry. Redirects are
+refused and only the fixed api.github.com release endpoint is queried.
+
+This repository is private, so checks start disabled. Enable them in About and
+provide a fine-grained token scoped to this repository with Contents: read. The
+token is encrypted in the data directory, write-only through the API, and sent
+only as GitHub authorization. It is distinct from the Vektor access token and
+provider keys. Public builds omit GitHub authorization entirely. Workspace files,
+instance identifiers, usage, and provider credentials are never sent.
+
+`VEKTOR_UPDATE_CHECK=0` disables checks even when forced and locks the About switch.
+`1` supplies an initial opt-in; saved preferences can still disable it. Leaving it
+unset allows the switch and the compiled repository-visibility default. An optional
+`VEKTOR_GITHUB_TOKEN` overrides stored credentials and makes token controls managed
+by the backend. The release compose file forwards these variables only when set.
+Token-only configuration does not opt a private repository into checks.

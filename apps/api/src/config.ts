@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { APP_VERSION } from "@vektor/shared";
 
-export const VERSION = "0.1.0";
+export const VERSION = APP_VERSION;
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -25,6 +26,13 @@ const envSchema = z.object({
     .default(10 * 1024 * 1024),
   VEKTOR_LOG_RETAINED_FILES: z.coerce.number().int().min(1).max(20).default(5),
   VEKTOR_OPENROUTER_KEY: z.string().min(1).optional(),
+  VEKTOR_UPDATE_CHECK: z.enum(["0", "1"]).optional(),
+  VEKTOR_GITHUB_TOKEN: z
+    .string()
+    .min(8)
+    .max(500)
+    .regex(/^[\x21-\x7e]+$/)
+    .optional(),
   VEKTOR_OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   VEKTOR_OPENROUTER_MODEL: z.string().min(1).default("openrouter/auto"),
   VEKTOR_MAX_FILE_BYTES: z.coerce
@@ -58,6 +66,8 @@ export interface AppConfig {
   logMaxBytes?: number;
   logRetainedFiles?: number;
   version: string;
+  updateCheck?: boolean;
+  githubToken?: string;
   openRouterKey?: string;
   openRouterBaseUrl: string;
   openRouterModel: string;
@@ -96,6 +106,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ? resolve(parsed.VEKTOR_WEB_DIST)
       : fileURLToPath(new URL("../../web/dist", import.meta.url)),
     version: VERSION,
+    updateCheck:
+      parsed.VEKTOR_UPDATE_CHECK === undefined ? undefined : parsed.VEKTOR_UPDATE_CHECK === "1",
+    githubToken: parsed.VEKTOR_GITHUB_TOKEN,
     openRouterKey: parsed.VEKTOR_OPENROUTER_KEY,
     openRouterBaseUrl: parsed.VEKTOR_OPENROUTER_BASE_URL,
     openRouterModel: parsed.VEKTOR_OPENROUTER_MODEL,

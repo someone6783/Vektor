@@ -10,6 +10,7 @@ import { ChatView } from "./components/ChatView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
 import { RuntimeControls } from "./components/RuntimeControls";
+import { UpdateIndicator } from "./components/UpdateIndicator";
 import { AuditView } from "./components/AuditView";
 import { SchedulesView } from "./components/SchedulesView";
 import { ApiClient, ApiError } from "./lib/api";
@@ -855,6 +856,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             </label>
           ) : null}
 
+          <UpdateIndicator client={client} />
           <RuntimeControls
             client={client}
             onStoppedChange={setEmergencyStopped}

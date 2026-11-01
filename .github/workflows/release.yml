@@ -1,0 +1,177 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize releases so stable aliases cannot race.
+concurrency:
+  group: vektor-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:validate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: docker build -t vektor:phase7-check --build-arg VCS_REF="$GITHUB_SHA" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
+      - run: python3 scripts/verify-phase7.py
+      - run: pnpm release:pack
+      - run: pnpm release:verify
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server-web
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm release:validate
+      - run: pnpm build:packages
+      - run: cargo fmt --manifest-path apps/web/src-tauri/Cargo.toml --check
+      - run: pnpm desktop:check
+      - run: pnpm --filter @vektor/web exec tauri build --bundles deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux-x64
+          path: apps/web/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: [verify, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - id: metadata
+        run: pnpm release:validate
+      - name: Prevent an older stable release from replacing image aliases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' > /tmp/vektor-released-tags
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import { gt, valid, prerelease } from 'semver';
+          import { metadata } from './scripts/version.mjs';
+          const {version} = metadata();
+          const tags = readFileSync('/tmp/vektor-released-tags', 'utf8').trim().split('\n');
+          if (!prerelease(version) && tags.some(tag => valid(tag.replace(/^v/, '')) && gt(tag.replace(/^v/, ''), version))) throw new Error('A newer stable release exists; refusing to move image aliases backwards.');
+          JS
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: server-web
+          path: release-artifacts
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-linux-x64
+          path: release-artifacts
+      - run: node scripts/release.mjs checksums release-artifacts
+      - name: Reserve a draft release before pushing images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > /tmp/vektor-release-draft; then
+            test "$(cat /tmp/vektor-release-draft)" = true || { echo 'Release already published; refusing to overwrite it.'; exit 1; }
+          else
+            args=()
+            if [ '${{ steps.metadata.outputs.prerelease }}' = true ]; then args+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes "${args[@]}"
+          fi
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        id: image
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.metadata.outputs.tags }}
+          provenance: mode=max
+          build-args: |
+            VCS_REF=${{ steps.metadata.outputs.revision }}
+            BUILD_DATE=${{ steps.metadata.outputs.date }}
+      - name: Add image reference and upgrade steps to release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_IMAGE: ${{ steps.metadata.outputs.image }}
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          gh release view "$RELEASE_TAG" --json body --jq '.body' > /tmp/vektor-release-notes
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          const {RELEASE_IMAGE:image, RELEASE_VERSION:version, IMAGE_DIGEST:digest} = process.env;
+          appendFileSync('/tmp/vektor-release-notes', `\n\nImage: \`${image}:${version}\` (linux/amd64 and linux/arm64).\n\nPinned reference: \`${image}@${digest}\`. BuildKit build provenance is attached to the OCI image index.\n\nBack up your data first. Save the attached compose.yaml in the existing Vektor project directory, preserve the project name and vektor-data volume, then run:\n\n\`\`\`sh\nexport VEKTOR_IMAGE=${image}:${version}\ndocker compose pull && docker compose up -d\n\`\`\`\n\nPrivate GHCR images require docker login ghcr.io with read:packages access. Do not run docker compose down -v. Verify /healthz after upgrading.\n\nThe API archive requires Linux x64 and Node 22: extract it, set VEKTOR_DATA_DIR and VEKTOR_WEB_DIST to absolute paths (web assets are in web/dist), then run node api/dist/server.js. The desktop .deb is Linux x64 and connects to a separately managed backend. There is no silent installer. Verify assets with SHA256SUMS.\n`);
+          JS
+          gh release edit "$RELEASE_TAG" --notes-file /tmp/vektor-release-notes
+          gh release upload "$RELEASE_TAG" release-artifacts/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

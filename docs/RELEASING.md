@@ -1,0 +1,126 @@
+# Release operations
+
+Phase 8 implements release automation and update checks. No image or release has
+been published as part of local implementation. Remote multiarchitecture execution
+and the first live update notification still need a real release demonstration.
+
+## Version and repository metadata
+
+Edit only the root `package.json` version, then run `pnpm version:sync`. Commit the
+generated shared constants, workspace package versions, Rust package/lock version,
+Docker version/source labels and release locations. Tauri reads the root package
+version directly. Versions must be canonical semver usable as Docker tags; use a
+prerelease suffix for previews and omit build metadata (`+...`). The repository URL
+and explicit `vektor.releaseRepositoryPrivate` flag also live at the root. The
+generator keeps the desktop release-link capability and compose image aligned.
+
+`pnpm version:check` is read-only and fails on stale metadata. Release validation
+also requires a clean tracked checkout, a tag exactly equal to `v<root version>`,
+that tag pointing at HEAD, and the expected GitHub repository. Only published stable
+versions can be advertised by update checks; a newer prerelease never appears as an
+available update. Prerelease images receive only their full version tag. Stable
+images receive full version, major.minor, and latest aliases. The workflow refuses
+to move stable aliases backwards when a newer stable GitHub Release exists.
+
+## Prepare and publish
+
+Before creating a tag, complete and commit these checks:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm version:check
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm desktop:check
+pnpm --filter @vektor/web exec tauri build --bundles deb
+pnpm release:pack
+pnpm release:verify
+docker build -t vektor:release-check .
+python3 scripts/verify-phase7.py --image vektor:release-check
+```
+
+The API archive must be built on Linux x64 with Node 22 because it contains native
+SQLite dependencies. `release:verify` extracts it into a temporary directory, starts
+the production server with fresh data, checks health/version, web assets, API bearer
+auth and update opt-out, verifies checksums, then shuts down and removes its data.
+Use `--sudo` on the Docker verification script when required locally. The desktop
+package requires the Linux prerequisites in the README; release signing and native
+macOS/Windows packaging are separate work.
+
+When publication is intended, create and push the version tag on the verified
+commit. For example, with version 0.1.0:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Alternatively dispatch the Release workflow with an existing version tag. CI runs
+on pushes and pull requests; release jobs independently repeat verification before
+the publish job receives write access. The publish job reserves a draft release,
+builds amd64 and arm64 with QEMU/Buildx, pushes to GHCR using the workflow's ephemeral
+GITHUB_TOKEN, and embeds BuildKit `mode=max` provenance in the OCI index. Version,
+source, checked-out revision and UTC creation date are image labels. No credentials
+are passed as build arguments. This is BuildKit provenance, not a separately signed
+GitHub attestation claim. The registry and repository stay private unless an owner
+changes their visibility independently.
+
+API/web archives, compose.yaml, release metadata, a Linux x64 desktop `.deb` and
+SHA256SUMS become release assets. Notes include the image digest and upgrade steps.
+The release becomes visible only after assets are uploaded. Failed publication can
+leave a draft release or pushed image tags; dispatch the same tag to retry a draft.
+Published releases cannot be overwritten by this workflow. There is no atomic
+transaction across GHCR and GitHub Releases.
+
+The workflow needs repository Actions enabled and GITHUB_TOKEN permissions to write
+repository contents and GHCR packages. An existing GHCR package may require granting
+this repository Actions access. No personal publisher token is required by the code.
+
+## Install and upgrade
+
+Download compose.yaml from the intended release into the existing Vektor project
+directory, preserving the compose project name and all existing environment/resource
+overrides. The release compose file uses a prebuilt image; the source compose file
+continues to build the local checkout. A private image needs Docker authentication
+with `read:packages` access. Authenticate using Docker's normal credential workflow.
+Back up the stopped backend as described in [OPERATIONS.md](OPERATIONS.md), then:
+
+```sh
+export VEKTOR_IMAGE=ghcr.io/someone6783/vektor:0.1.0
+docker compose pull && docker compose up -d
+```
+
+This preserves the existing `vektor-data` volume in the same compose project. Do not
+run `docker compose down -v`. Verify `/healthz`, the reported version, saved files,
+profiles and a short run before explicitly resuming schedules. Keep the previous
+image and verified pre-upgrade backup. Rollback uses a fresh volume restored from
+that backup, not an older binary against migrated data.
+
+To run the API archive, verify SHA256SUMS, extract it, set absolute
+`VEKTOR_DATA_DIR` and `VEKTOR_WEB_DIST` (the latter points to extracted `web/dist`),
+then run `node api/dist/server.js` with Node 22 on Linux x64. Desktop users install
+the `.deb` and manage the backend separately. Neither desktop nor Docker silently
+downloads or installs updates. The release link opens in the system browser from
+the desktop, limited to this repository's release tag URLs.
+
+## First publication demonstration
+
+After an authorized real tag push, verify both platform manifests and attached
+provenance using `docker buildx imagetools inspect` on the published digest. Pull
+and run the image, compare `/healthz`, About, desktop package and OCI version labels
+to the tag, and download/verify the release assets. Confirm fresh-volume backup and
+restore on the published image.
+
+An older instance with checking enabled and a read-only release token should show
+the newer stable version, release link and last-check timestamp after Check now or
+within the 24-hour cache window. Remove network access and confirm startup/chat/runs
+continue with a quiet unable-to-check state. The offline, timeout, cache and older
+instance behavior is locally covered with deterministic fixtures; this final
+published end-to-end demonstration has not yet been run.
+
+Implementation references: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
+[Docker build-push action](https://github.com/docker/build-push-action), and
+[Tauri opener scopes](https://v2.tauri.app/plugin/opener/).

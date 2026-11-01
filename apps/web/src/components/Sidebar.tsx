@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Channel } from "@vektor/shared";
+import { APP_VERSION, type Channel } from "@vektor/shared";
 
 interface SidebarProps {
   channels: Channel[];
@@ -253,7 +253,7 @@ export function Sidebar({
         </form>
       ) : (
         <p className="border-t border-white/5 px-4 py-3 text-[10px] leading-4 text-slate-600">
-          Channels and DMs share the same flat timeline. Threads arrive later.
+          Vektor v{APP_VERSION}
         </p>
       )}
     </aside>

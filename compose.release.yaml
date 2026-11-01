@@ -1,0 +1,20 @@
+# Save this release asset as compose.yaml in the existing Vektor project directory.
+services:
+  vektor:
+    image: ${VEKTOR_IMAGE:-ghcr.io/someone6783/vektor:latest}
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      - VEKTOR_UPDATE_CHECK
+      - VEKTOR_GITHUB_TOKEN
+    volumes:
+      - vektor-data:/data
+    restart: unless-stopped
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  vektor-data:

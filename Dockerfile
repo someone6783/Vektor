@@ -1,6 +1,8 @@
 FROM node:22-bookworm-slim AS build
 
 ENV CI=true
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@10.34.9
 WORKDIR /app
 
@@ -13,10 +15,19 @@ COPY packages/shared/package.json packages/shared/package.json
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm build \
+RUN node scripts/version.mjs --check && pnpm build \
   && pnpm --config.inject-workspace-packages=true --filter @vektor/api deploy --prod /prod
 
 FROM node:22-bookworm-slim AS runtime
+
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+# BEGIN GENERATED RELEASE LABELS
+LABEL org.opencontainers.image.version="0.1.0" \
+      org.opencontainers.image.source="https://github.com/someone6783/Vektor"
+# END GENERATED RELEASE LABELS
+LABEL org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \

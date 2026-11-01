@@ -1,6 +1,13 @@
 {
   "name": "vektor",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/someone6783/Vektor.git"
+  },
+  "vektor": {
+    "releaseRepositoryPrivate": true
+  },
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.9",
@@ -8,20 +15,25 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "build": "pnpm -r build",
+    "version:sync": "node scripts/version.mjs",
+    "version:check": "node scripts/version.mjs --check",
+    "release:validate": "node scripts/release.mjs validate",
+    "release:pack": "node scripts/release.mjs pack",
+    "release:verify": "node scripts/verify-release.mjs",
+    "build": "pnpm version:sync && pnpm -r build",
     "backup": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts backup",
     "backup:verify": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts verify",
     "restore": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts restore",
     "desktop:dev": "pnpm build:packages && pnpm --filter @vektor/web exec tauri dev",
     "desktop:build": "pnpm build:packages && pnpm --filter @vektor/web exec tauri build",
     "desktop:check": "cargo test --locked --manifest-path apps/web/src-tauri/Cargo.toml",
-    "build:packages": "pnpm --filter @vektor/shared build && pnpm --filter @vektor/db build",
+    "build:packages": "pnpm version:sync && pnpm --filter @vektor/shared build && pnpm --filter @vektor/db build",
     "dev": "pnpm build:packages && concurrently -k -n shared,db,api,web -c blue,green,yellow,magenta \"pnpm --filter @vektor/shared dev\" \"pnpm --filter @vektor/db dev\" \"pnpm --filter @vektor/api dev\" \"pnpm --filter @vektor/web dev\"",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
-    "test": "pnpm build:packages && pnpm -r test",
+    "test": "pnpm build:packages && node --test scripts/release.test.mjs && pnpm -r test",
     "clean": "pnpm -r --if-present clean"
   },
   "devDependencies": {
@@ -31,6 +43,7 @@
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.5.0",
     "prettier": "^3.7.4",
+    "semver": "^7.8.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.52.0"
   }

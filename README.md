@@ -276,8 +276,9 @@ Linux package use `pnpm desktop:build --bundles deb`. Artifacts are placed under
 the normal lint/typecheck/test/build scripts continue to verify the shared web/API
 code. CI also compiles the native Linux app. On macOS/Windows install the platform's
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), then select `--bundles app`
-or `--bundles nsis` respectively. Signing and automated release publication remain
-Phase 8 work. This phase's native validation is performed on Linux.
+or `--bundles nsis` respectively. The release workflow builds Linux packages and multiarchitecture Docker images;
+see [release operations](docs/RELEASING.md). Native validation is performed on Linux;
+macOS/Windows packaging and signing remain unverified.
 
 | Command             | What it does                                                   |
 | ------------------- | -------------------------------------------------------------- |
@@ -369,3 +370,20 @@ estimate and provider usage. Existing databases migrate automatically on startup
 - The provider key is encrypted at rest and never returned by the API.
 - There are no user accounts. Multi-user is explicitly deferred.
 - Basic terminal mode is a restricted-command guardrail, not a hardened sandbox.
+
+## Release builds and notifications
+
+The root `package.json` owns the app version and release repository metadata.
+`pnpm version:sync` updates shared API/web constants, workspace and desktop versions,
+image labels and release locations; commit those generated changes with a version bump.
+`pnpm version:check` refuses stale metadata.
+
+Settings → About offers optional cached update checks, last checked time, a manual
+refresh and upgrade instructions. The header links to newer stable releases. This
+repository is private: checking defaults off and requires an optional read-only GitHub
+token, stored encrypted or supplied to the backend. There is no automatic installer.
+
+The `Release` workflow verifies existing `v*` tags before building API/web archives,
+a Linux desktop `.deb`, checksums and an amd64/arm64 GHCR image with BuildKit
+provenance. [RELEASING.md](docs/RELEASING.md) covers publication, private registry
+access, upgrades with the existing data volume, and the pending first-release demonstration.
