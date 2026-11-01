@@ -301,7 +301,7 @@ function ProfileEditor({
                 value={origins}
                 onChange={(event) => setOrigins(event.target.value)}
                 rows={2}
-                placeholder="https://example.com"
+                placeholder="* (all websites; also used when empty)"
                 className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
               />
             </label>

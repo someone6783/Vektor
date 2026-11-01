@@ -14,12 +14,15 @@ const stateSchema = z.object({
 const MAX_BYTES = 4 * 1024 * 1024;
 function scope(permissions: BrowserPermissions) {
   const origins = new Set([...permissions.allowedOrigins, ...permissions.localOrigins]);
-  const hosts = [...origins].map((value) => new URL(value).hostname);
+  const allOrigins = permissions.allowedOrigins.length === 0 || origins.has("*");
+  const hosts = [...origins]
+    .filter((value) => value !== "*")
+    .map((value) => new URL(value).hostname);
   return {
-    origin: (value: string) => origins.has(value),
+    origin: (value: string) => allOrigins || origins.has(value),
     cookie: (domain: string) => {
       const name = domain.replace(/^\./, "").toLowerCase();
-      return hosts.some((host) => host === name || host.endsWith(`.${name}`));
+      return allOrigins || hosts.some((host) => host === name || host.endsWith(`.${name}`));
     },
   };
 }

@@ -50,6 +50,25 @@ afterEach(() => {
 });
 
 describe("saved default browser profile", () => {
+  it.each([{ allowedOrigins: [] }, { allowedOrigins: ["*"] }])(
+    "saves and restores all website sessions for origins %j",
+    ({ allowedOrigins }) => {
+      const profile = new DefaultBrowserProfileStore(storage.db, storage.secretsKey);
+      const permissions = browserPermissionsSchema.parse({ ...a, allowedOrigins });
+      profile.save(state("a.example"), a);
+      profile.save(state("b.example"), b);
+      const combined = {
+        cookies: [...state("a.example").cookies, ...state("b.example").cookies],
+        origins: [...state("a.example").origins, ...state("b.example").origins],
+      };
+      expect(profile.load(permissions)).toEqual(combined);
+      profile.save(combined, permissions);
+      expect(profile.load(permissions)).toEqual(combined);
+      expect(profile.load(a)).toEqual(state("a.example"));
+      profile.save({ cookies: [], origins: [] }, permissions);
+      expect(profile.load(permissions)).toEqual({ cookies: [], origins: [] });
+    },
+  );
   it("encrypts profile state, reopens it and reveals only authorized origins", () => {
     const profile = new DefaultBrowserProfileStore(storage.db, storage.secretsKey);
     profile.save(state("a.example"), a);

@@ -27,7 +27,9 @@ export function browserUrl(value: string, permissions: BrowserPermissions): URL 
     !["http:", "https:"].includes(url.protocol) ||
     url.username ||
     url.password ||
-    ![...permissions.allowedOrigins, ...permissions.localOrigins].includes(url.origin)
+    (permissions.allowedOrigins.length > 0 &&
+      !permissions.allowedOrigins.includes("*") &&
+      ![...permissions.allowedOrigins, ...permissions.localOrigins].includes(url.origin))
   )
     throw new RuntimeError("Browser URL is outside this profile's exact allowed origins.", 403);
   return url;

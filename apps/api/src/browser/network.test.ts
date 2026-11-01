@@ -8,6 +8,38 @@ describe("browser network boundary", () => {
     expect(browserPermissionsSchema.safeParse({ allowedOrigins: ["invalid"] }).success).toBe(false);
     expect(browserPermissionsSchema.safeParse({ localOrigins: ["invalid"] }).success).toBe(false);
   });
+  it.each([{}, { allowedOrigins: [] }, { allowedOrigins: ["*"] }])(
+    "allows any website origin for empty or wildcard settings: %j",
+    (input) => {
+      const permissions = browserPermissionsSchema.parse(input);
+      expect(permissions.allowedOrigins).toEqual(["*"]);
+      for (const url of [
+        "https://example.com/path",
+        "https://other.example:444/",
+        "http://example.org",
+      ])
+        expect(browserUrl(url, permissions).href).toBe(new URL(url).href);
+      for (const url of [
+        "file:///etc/passwd",
+        "data:text/html,secret",
+        "https://user:pass@example.com",
+      ])
+        expect(() => browserUrl(url, permissions)).toThrow();
+    },
+  );
+  it("keeps private-network restrictions with wildcard origins", async () => {
+    const network = new BrowserNetwork({
+      permissions: () => browserPermissionsSchema.parse({ allowedOrigins: [] }),
+      signal: new AbortController().signal,
+      redact: (value) => value,
+      resolve: async () => [{ address: "8.8.8.8", family: 4 }],
+    });
+    expect(await network.address(new URL("https://any.example"))).toEqual({
+      address: "8.8.8.8",
+      family: 4,
+    });
+    await expect(network.address(new URL("http://127.0.0.1"))).rejects.toThrow(/private/);
+  });
   it("pins hostname connections to the validated address instead of resolving twice", async () => {
     const server = createServer((_request, response) => response.end("pinned"));
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));

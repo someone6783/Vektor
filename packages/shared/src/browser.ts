@@ -22,7 +22,11 @@ export const browserPermissionsSchema = z
     mode: z.enum(["off", "observe", "interactive"]).default("off"),
     session: z.enum(["default", "separate"]).default("separate"),
     display: z.enum(["headless", "window"]).default("headless"),
-    allowedOrigins: z.array(originSchema).max(20).default([]),
+    allowedOrigins: z
+      .array(z.union([z.literal("*"), originSchema]))
+      .max(20)
+      .default([])
+      .transform((origins) => (origins.length ? origins : ["*"])),
     localOrigins: z
       .array(
         originSchema.refine(
