@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { OverflowMenu } from "./OverflowMenu";
 import { createPortal } from "react-dom";
@@ -7,6 +7,7 @@ import type { ApiClient } from "../lib/api";
 import { AttachmentPreview } from "./Attachments";
 
 interface Props {
+  modelControls?: ReactNode;
   contextTarget?: HTMLElement | null;
   activeRunCount?: number;
   executionStopped?: boolean;
@@ -23,6 +24,7 @@ interface Props {
 }
 
 export function ContextComposer({
+  modelControls,
   contextTarget = null,
   activeRunCount = 0,
   executionStopped = false,
@@ -53,18 +55,8 @@ export function ContextComposer({
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const contextMenu = useRef<HTMLDetailsElement>(null);
   const operation = useRef(false);
   const mounted = useRef(true);
-
-  useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (contextMenu.current && !contextMenu.current.contains(event.target as Node))
-        contextMenu.current.open = false;
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, []);
 
   const includedFiles = files.filter((file) => file.included).length;
   const contextPercent = estimate
@@ -94,7 +86,6 @@ export function ContextComposer({
 
   useEffect(() => {
     let active = true;
-    setEstimate(null);
     setAllowTruncation(false);
     if (!loaded) return;
     const timer = setTimeout(() => {
@@ -102,10 +93,13 @@ export function ContextComposer({
         .estimateContext(channel.id, {
           content: draft.trim(),
           profileId: profile.id,
+          model: profile.model,
           attachmentIds: files.filter((file) => file.included).map((file) => file.id),
         })
         .then((result) => {
-          if (active) setEstimate(result);
+          if (active) {
+            setEstimate(result);
+          }
         })
         .catch((error) => {
           if (active) setError(error.message);
@@ -161,18 +155,9 @@ export function ContextComposer({
     }
   };
 
-  const canSend =
-    !executionStopped &&
-    !busy &&
-    !sending &&
-    !working &&
-    (!!draft.trim() || files.some((file) => file.included)) &&
-    !!estimate &&
-    !estimate.exceedsBudget &&
-    (!estimate.requiresTruncation || allowTruncation);
+  const canSend = !!draft.trim() || files.some((file) => file.included);
   const submit = async () => {
-    if (!canSend || operation.current) return;
-    operation.current = true;
+    if (!canSend) return;
     setSending(true);
     setError(null);
     try {
@@ -185,7 +170,6 @@ export function ContextComposer({
     } catch (error) {
       if (mounted.current) setError(error instanceof Error ? error.message : "Send failed.");
     } finally {
-      operation.current = false;
       if (mounted.current) setSending(false);
     }
   };
@@ -308,7 +292,7 @@ export function ContextComposer({
         ) : null}
         {executionStopped ? (
           <p className="mb-2 text-xs text-rose-300">
-            Execution is stopped. Resume from the runtime controls to send a message.
+            Execution is stopped. Messages will wait in the queue until you resume.
           </p>
         ) : null}
         {error ? (
@@ -354,13 +338,15 @@ export function ContextComposer({
                 </button>
               </OverflowMenu>
             ) : null}
+            {modelControls}
             <button
               type="button"
               disabled={!canSend}
+              title={busy ? "Queue this message until the current run finishes" : "Send message"}
               onClick={() => void submit()}
               className="rounded-lg bg-accent-400 px-4 py-1.5 text-xs font-semibold text-slate-950 disabled:opacity-40"
             >
-              {sending ? "Sending…" : "Send"}
+              {busy ? "Queue" : "Send"}
               <Icon name="arrow" />
             </button>
           </div>
@@ -370,103 +356,33 @@ export function ContextComposer({
         aria-label="Conversation status"
         className="composer-status relative flex items-center text-slate-400"
       >
-        <details
-          ref={contextMenu}
-          className="group"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.currentTarget.open = false;
-              event.currentTarget.querySelector("summary")?.focus();
-            }
-          }}
+        <span
+          aria-label="Context usage"
+          className={`flex items-center gap-1.5 rounded px-[5px] py-1 ${estimate?.exceedsBudget ? "text-rose-300" : estimate?.requiresTruncation ? "text-amber-200" : ""}`}
         >
-          <summary
-            aria-label="Context usage"
-            className={`flex cursor-pointer list-none items-center gap-1.5 rounded py-1 outline-none hover:text-slate-200 focus-visible:ring-1 focus-visible:ring-accent-400 [&::-webkit-details-marker]:hidden ${estimate?.exceedsBudget ? "text-rose-300" : estimate?.requiresTruncation ? "text-amber-200" : ""}`}
-          >
-            <svg
-              aria-hidden="true"
-              width="12"
-              height="12"
-              viewBox="0 0 16 16"
-              className="-rotate-90"
-            >
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                fill="none"
-                stroke="currentColor"
-                strokeOpacity=".2"
-                strokeWidth="2"
-              />
-              <circle
-                cx="8"
-                cy="8"
-                r="6"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                pathLength="100"
-                strokeDasharray={`${Math.min(contextPercent ?? 0, 100)} 100`}
-              />
-            </svg>
-            Context {contextPercent === null ? "…" : `${contextPercent}%`}
-            <svg
-              aria-hidden="true"
-              width="10"
-              height="10"
-              viewBox="0 0 16 16"
+          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" className="-rotate-90">
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="m4 10 4-4 4 4" />
-            </svg>
-          </summary>
-          <div className="context-popover absolute bottom-full left-0 z-30 mb-2 max-h-72 w-80 max-w-[calc(100vw-3rem)] overflow-y-auto rounded-xl border border-white/10 bg-slate-900 p-4 text-xs text-slate-400 shadow-xl">
-            <h2 className="mb-3 font-medium text-slate-100">Context usage</h2>
-            {estimate ? (
-              <>
-                <p>
-                  Estimated input: {estimate.inputTokens.toLocaleString()} tokens +{" "}
-                  {estimate.reservedOutputTokens.toLocaleString()} output /{" "}
-                  {estimate.contextWindow.toLocaleString()} context
-                </p>
-                <meter
-                  aria-label="Context budget"
-                  min={0}
-                  max={estimate.contextWindow}
-                  value={Math.min(
-                    estimate.contextWindow,
-                    estimate.inputTokens + estimate.reservedOutputTokens,
-                  )}
-                  className="my-3 h-1 w-full"
-                />
-                <p>
-                  {estimate.selectedAttachments} files ·{" "}
-                  {estimate.attachmentTokens.toLocaleString()} file tokens
-                </p>
-                {estimate.warnings.map((warning) => (
-                  <p key={warning} className="mt-2 text-[11px]">
-                    {warning}
-                  </p>
-                ))}
-              </>
-            ) : (
-              <p>{loaded ? "Estimating context…" : "Loading attachments…"}</p>
-            )}
-            {lastRun?.context ? (
-              <p className="mt-3 border-t border-white/10 pt-3 text-[11px]">
-                Last run: {lastRun.context.inputTokens.toLocaleString()} estimated input tokens
-                {lastRun.usage
-                  ? ` · Actual usage: ${lastRun.usage.promptTokens.toLocaleString()} input + ${lastRun.usage.completionTokens.toLocaleString()} output${lastRun.usage.costUsd !== undefined ? ` · $${lastRun.usage.costUsd.toFixed(4)}` : ""}`
-                  : " · Provider usage unavailable"}
-              </p>
-            ) : null}
-          </div>
-        </details>
+              strokeOpacity=".2"
+              strokeWidth="2"
+            />
+            <circle
+              cx="8"
+              cy="8"
+              r="6"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              pathLength="100"
+              strokeDasharray={`${Math.min(contextPercent ?? 0, 100)} 100`}
+            />
+          </svg>
+          Context {contextPercent === null ? "…" : `${contextPercent}%`}
+        </span>
         <span
           title="Active runs across all channels"
           className="flex items-center gap-1.5 whitespace-nowrap"
@@ -493,18 +409,14 @@ export function ContextComposer({
                 {files.length ? (
                   attachmentList
                 ) : (
-                  <p>
-                    {loaded
-                      ? "No files attached. Use the + button to add context."
-                      : "Loading attachments…"}
-                  </p>
+                  <p>{loaded ? "No files attached." : "Loading attachments…"}</p>
                 )}
               </section>
               <section className="context-section">
                 <h3>Context budget</h3>
+                <p>Estimated next request</p>
                 {estimate ? (
                   <>
-                    <p>{estimate.model}</p>
                     <meter
                       aria-label="Inspector context budget"
                       min={0}
@@ -519,8 +431,8 @@ export function ContextComposer({
                       {estimate.contextWindow.toLocaleString()} tokens
                     </p>
                     <p>
-                      Includes {estimate.reservedOutputTokens.toLocaleString()} tokens reserved for
-                      the response.
+                      {estimate.inputTokens.toLocaleString()} input +{" "}
+                      {estimate.reservedOutputTokens.toLocaleString()} reserved output
                     </p>
                     {estimate.warnings.map((warning) => (
                       <p key={warning}>{warning}</p>
@@ -530,30 +442,20 @@ export function ContextComposer({
                   <p>Estimating context…</p>
                 )}
               </section>
-              <section className="context-section">
-                <h3>Execution</h3>
-                <p>
-                  {profile.terminalMode === "no-terminal"
-                    ? "Terminal access is disabled."
-                    : profile.terminalMode === "full-access"
-                      ? "Full access · Each command needs approval."
-                      : "Basic · Workspace commands only."}
-                </p>
-                <p>
-                  {activeRunCount} active {activeRunCount === 1 ? "run" : "runs"} across all
-                  channels.
-                </p>
-                {executionStopped ? (
-                  <p className="text-rose-300">Execution stopped. Resume from runtime controls.</p>
-                ) : null}
-              </section>
               {lastRun?.usage ? (
                 <section className="context-section">
                   <h3>Last run usage</h3>
                   <p>
+                    Total across{" "}
+                    {lastRun.usage.rounds !== undefined
+                      ? `${lastRun.usage.rounds} model ${lastRun.usage.rounds === 1 ? "call" : "calls"}`
+                      : "model calls"}
+                  </p>
+                  <p>
                     {lastRun.usage.promptTokens.toLocaleString()} input +{" "}
                     {lastRun.usage.completionTokens.toLocaleString()} output tokens
                   </p>
+                  <p>Input can be counted again after each tool call.</p>
                 </section>
               ) : null}
             </>,

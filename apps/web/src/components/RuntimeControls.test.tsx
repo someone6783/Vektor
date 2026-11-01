@@ -42,6 +42,26 @@ afterEach(() => {
 });
 
 describe("runtime controls", () => {
+  it("shares one menu for workspace actions and runtime approvals", async () => {
+    const settings = vi.fn();
+    render(
+      <RuntimeControls client={client} onStoppedChange={() => {}} onError={() => {}}>
+        <button type="button" onClick={settings}>
+          Settings
+        </button>
+      </RuntimeControls>,
+    );
+    await screen.findByRole("region", { name: "Command approval" });
+    const trigger = screen.getByLabelText("Workspace actions");
+    const menu = trigger.closest("details")!;
+    await waitFor(() => expect(menu).toHaveAttribute("open"));
+    expect(screen.queryByLabelText("Runtime details")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(settings).toHaveBeenCalledOnce();
+    expect(menu).not.toHaveAttribute("open");
+    expect(trigger).toHaveFocus();
+  });
+
   it("shows the exact command and container boundary before approving", async () => {
     const counts = vi.fn();
     render(

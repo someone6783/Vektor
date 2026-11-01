@@ -105,7 +105,7 @@ export class BrowserNetwork {
     if (this.options.redact(raw) !== raw)
       throw new RuntimeError("Browser requests cannot contain backend credentials.", 403);
     const address = await this.address(url);
-    const signal = AbortSignal.any([this.options.signal, AbortSignal.timeout(8000)]);
+    const signal = AbortSignal.any([this.options.signal, AbortSignal.timeout(15_000)]);
     return new Promise((resolve, reject) => {
       const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(
         url,

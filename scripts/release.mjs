@@ -91,6 +91,19 @@ function pack() {
       resolve(stage, "api"),
     ]);
     cpSync(resolve(projectRoot, "apps/web/dist"), resolve(stage, "web/dist"), { recursive: true });
+    cpSync(
+      resolve(projectRoot, "scripts/install-docker-helper.py"),
+      resolve(directory, "install-docker-helper.py"),
+    );
+    cpSync(
+      resolve(projectRoot, "scripts/docker-updater.py"),
+      resolve(directory, "docker-updater.py"),
+    );
+    cpSync(
+      resolve(projectRoot, "compose.updates.yaml"),
+      resolve(directory, "compose.updates.yaml"),
+    );
+    cpSync(resolve(projectRoot, "docs/UPDATES.md"), resolve(directory, "UPDATES.md"));
     cpSync(resolve(projectRoot, "docs/OPERATIONS.md"), resolve(stage, "OPERATIONS.md"));
     cpSync(resolve(projectRoot, "docs/RELEASING.md"), resolve(stage, "RELEASING.md"));
     cpSync(resolve(projectRoot, "docs/BROWSER.md"), resolve(stage, "BROWSER.md"));

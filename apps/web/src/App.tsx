@@ -1,3 +1,9 @@
+import { ChoicePicker } from "./components/ChoicePicker";
+import { reasoningEffortSchema, type ReasoningEffort } from "@vektor/shared";
+import { useMessageQueue } from "./lib/useMessageQueue";
+import { MessageQueue } from "./components/MessageQueue";
+import { Modal } from "./components/Modal";
+import { ConversationSettings } from "./components/ConversationSettings";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Channel,
@@ -12,7 +18,6 @@ import { Sidebar } from "./components/Sidebar";
 import { RuntimeControls } from "./components/RuntimeControls";
 import { UpdateIndicator } from "./components/UpdateIndicator";
 import { Icon } from "./components/Icon";
-import { OverflowMenu } from "./components/OverflowMenu";
 import { ThemePicker } from "./components/ThemePicker";
 import { AuditView } from "./components/AuditView";
 import { SchedulesView } from "./components/SchedulesView";
@@ -173,7 +178,52 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     [channels, activeChannelId],
   );
 
-  const activeProfile = useMemo(() => {
+  const [modelOverrides, setModelOverrides] = useState<Record<string, string>>(() => {
+    try {
+      const stored: unknown = JSON.parse(
+        localStorage.getItem(`${tokenStorageKey()}.models`) ?? "{}",
+      );
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+      return Object.fromEntries(
+        Object.entries(stored).filter(([, value]) => typeof value === "string" && value.length > 0),
+      );
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${tokenStorageKey()}.models`, JSON.stringify(modelOverrides));
+    } catch {
+      /* Storage may be disabled. */
+    }
+  }, [modelOverrides]);
+  const [reasoningOverrides, setReasoningOverrides] = useState<Record<string, ReasoningEffort>>(
+    () => {
+      try {
+        const stored: unknown = JSON.parse(
+          localStorage.getItem(`${tokenStorageKey()}.reasoning`) ?? "{}",
+        );
+        if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+        return Object.fromEntries(
+          Object.entries(stored).filter(
+            ([, value]) => reasoningEffortSchema.safeParse(value).success,
+          ),
+        ) as Record<string, ReasoningEffort>;
+      } catch {
+        return {};
+      }
+    },
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${tokenStorageKey()}.reasoning`, JSON.stringify(reasoningOverrides));
+    } catch {
+      /* Storage may be disabled. */
+    }
+  }, [reasoningOverrides]);
+  const [executionSection, setExecutionSection] = useState<"terminal" | "browser" | null>(null);
+  const baseProfile = useMemo(() => {
     if (activeChannel?.profileId) {
       const match = profiles.find((profile) => profile.id === activeChannel.profileId);
       if (match) {
@@ -183,6 +233,27 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
 
     return profiles[0] ?? null;
   }, [activeChannel, profiles]);
+
+  const activeProfile = useMemo(
+    () =>
+      baseProfile && {
+        ...baseProfile,
+        ...activeChannel?.execution,
+        tools:
+          activeChannel?.execution?.terminalMode === undefined
+            ? baseProfile.tools
+            : [
+                ...baseProfile.tools.filter((tool) => tool !== "terminal"),
+                ...(activeChannel.execution.terminalMode === "no-terminal" ? [] : ["terminal"]),
+              ],
+        model: (activeChannelId && modelOverrides[activeChannelId]) || baseProfile.model,
+      },
+    [baseProfile, activeChannel, activeChannelId, modelOverrides],
+  );
+
+  const openExecutionSettings = (section: "terminal" | "browser") => {
+    setExecutionSection(section);
+  };
 
   const bootedRef = useRef<string | null>(null);
   const activeChannelIdRef = useRef<string | null>(null);
@@ -228,7 +299,11 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
 
     void (async () => {
       try {
-        const page = await current.listMessages(channelId);
+        const [page, updatedChannels] = await Promise.all([
+          current.listMessages(channelId),
+          current.listChannels(true),
+        ]);
+        setChannels(updatedChannels);
         if (activeChannelIdRef.current !== channelId) {
           return;
         }
@@ -344,7 +419,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
         const [nextSettings, nextProfiles, loadedChannels] = await Promise.all([
           client.getSettings(),
           client.listProfiles(),
-          client.listChannels(),
+          client.listChannels(true),
         ]);
 
         if (bootedRef.current !== token) {
@@ -370,7 +445,10 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
         setChannels(nextChannels);
         const stored = readStoredChannel();
         const nextActive =
-          nextChannels.find((channel) => channel.id === stored)?.id ?? nextChannels[0]?.id ?? null;
+          nextChannels.find((channel) => channel.id === stored)?.id ??
+          nextChannels.find((channel) => !channel.archivedAt)?.id ??
+          nextChannels[0]?.id ??
+          null;
         setActiveChannelId(nextActive);
         writeStoredChannel(nextActive);
         setAuthError(null);
@@ -518,53 +596,34 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     };
   }, [client, activeChannelId, view, subscribe, reportError]);
 
-  const sendMessage = useCallback(
-    async (content: string, attachmentIds: string[], allowTruncation: boolean) => {
-      if (!client || !activeChannelId) {
-        return;
-      }
-
-      setError(null);
-      sendingRef.current = true;
-      const optimisticId = `optimistic-${Date.now()}`;
-      const optimistic: Message = {
-        id: optimisticId,
-        channelId: activeChannelId,
-        role: "user",
-        content,
-        status: "complete",
-        runId: null,
-        createdAt: new Date().toISOString(),
-        attachments: [],
-      };
-
-      setMessages((value) => [...value, optimistic]);
-
-      try {
-        const response = await client.sendMessage(
-          activeChannelId,
-          content,
-          activeChannel?.profileId ?? activeProfile?.id,
-          attachmentIds,
-          allowTruncation,
-        );
-
-        setMessages((value) =>
-          value.map((message) => (message.id === optimisticId ? response.message : message)),
-        );
-        setLive(startLiveRun(response.run.id));
-        setLastRun(response.run);
-        subscribe(response.run.id, activeChannelId, 0);
-      } catch (nextError) {
-        setMessages((value) => value.filter((message) => message.id !== optimisticId));
-        reportError(nextError);
-        throw nextError;
-      } finally {
-        sendingRef.current = false;
-      }
-    },
-    [client, activeChannelId, activeChannel, activeProfile, subscribe, reportError],
-  );
+  const messageQueue = useMessageQueue(client, emergencyStopped, (item, response) => {
+    if (activeChannelIdRef.current !== item.channelId) return;
+    setMessages((value) =>
+      value.some((message) => message.id === response.message.id)
+        ? value
+        : [...value, response.message],
+    );
+    setLive(startLiveRun(response.run.id));
+    setLastRun(response.run);
+    subscribe(response.run.id, item.channelId, 0);
+  });
+  sendingRef.current = messageQueue.sendingId !== null;
+  const sendMessage = async (
+    content: string,
+    attachmentIds: string[],
+    allowTruncation: boolean,
+  ) => {
+    if (!client || !activeChannelId) throw new Error("Select a conversation before sending.");
+    messageQueue.enqueue({
+      channelId: activeChannelId,
+      content,
+      attachmentIds,
+      allowTruncation,
+      profileId: activeChannel?.profileId ?? activeProfile?.id,
+      model: activeProfile?.model,
+      reasoning: reasoningOverrides[activeChannelId] ?? "auto",
+    });
+  };
 
   const stopRun = useCallback(() => {
     if (!client || !live || live.status !== "running") {
@@ -686,21 +745,37 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
 
       try {
         await client.archiveChannel(channelId);
-        const remaining = channels.filter((channel) => channel.id !== channelId);
-        setChannels(remaining);
-
+        const updated = await client.listChannels(true);
+        setChannels(updated);
         if (activeChannelId === channelId) {
-          const fallback = remaining[0]?.id ?? null;
+          const fallback = updated.find((channel) => !channel.archivedAt)?.id ?? channelId;
           setActiveChannelId(fallback);
           writeStoredChannel(fallback);
-          stopStream();
-          setLive(null);
+          if (fallback !== channelId) {
+            stopStream();
+            setLive(null);
+          }
         }
       } catch (nextError) {
         reportError(nextError);
       }
     },
     [client, channels, activeChannelId, stopStream, reportError],
+  );
+
+  const restoreChannel = useCallback(
+    async (channelId: string) => {
+      if (!client) return;
+      try {
+        const restored = await client.updateChannel(channelId, { archived: false });
+        setChannels((value) =>
+          value.map((channel) => (channel.id === channelId ? restored : channel)),
+        );
+      } catch (nextError) {
+        reportError(nextError);
+      }
+    },
+    [client, reportError],
   );
 
   const switchProfile = useCallback(
@@ -729,7 +804,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     try {
       const [nextProfiles, nextChannels, nextSettings] = await Promise.all([
         client.listProfiles(),
-        client.listChannels(),
+        client.listChannels(true),
         client.getSettings(),
       ]);
 
@@ -738,7 +813,8 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
       setSettings(nextSettings);
 
       if (activeChannelId && !nextChannels.some((channel) => channel.id === activeChannelId)) {
-        const fallback = nextChannels[0]?.id ?? null;
+        const fallback =
+          nextChannels.find((channel) => !channel.archivedAt)?.id ?? nextChannels[0]?.id ?? null;
         setActiveChannelId(fallback);
         writeStoredChannel(fallback);
       }
@@ -824,9 +900,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             onStoppedChange={setEmergencyStopped}
             onActiveRunsChange={setActiveRunCount}
             onError={reportError}
-          />
-
-          <OverflowMenu label="Workspace actions">
+          >
             <div className="menu-label">Workspace</div>
             <button type="button" onClick={() => setView("chat")}>
               <Icon name="chat" /> Chat
@@ -848,24 +922,25 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
               </button>
             ) : null}
             {view === "chat" && profiles.length > 0 ? (
-              <label className="flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1">
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: `var(--profile-${activeProfile?.color ?? "emerald"})` }}
-                />
-                <select
-                  value={activeProfile?.id ?? ""}
-                  onChange={(event) => void switchProfile(event.target.value)}
-                  className="max-w-40 truncate bg-transparent text-xs text-slate-200 outline-none"
-                  aria-label="Active profile"
-                >
-                  {profiles.map((profile) => (
-                    <option key={profile.id} value={profile.id} className="bg-slate-900">
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ChoicePicker
+                label="Active profile"
+                className="workspace-profile-picker"
+                title="Assistant profile for this conversation"
+                value={activeProfile?.id ?? ""}
+                options={profiles.map((profile) => ({ value: profile.id, label: profile.name }))}
+                onChange={(value) => void switchProfile(value)}
+                prefix={
+                  <>
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor: `var(--profile-${activeProfile?.color ?? "emerald"})`,
+                      }}
+                    />
+                    <span className="choice-prefix">Profile</span>
+                  </>
+                }
+              />
             ) : null}
 
             <button
@@ -885,7 +960,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             >
               <Icon name="lock" /> Lock workspace
             </button>
-          </OverflowMenu>
+          </RuntimeControls>
         </div>
       </header>
 
@@ -895,28 +970,6 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             <span className="h-2 w-2 animate-pulse rounded-full bg-accent-400" />
             Loading workspace…
           </div>
-        </div>
-      ) : view === "schedules" ? (
-        <SchedulesView
-          client={client}
-          profiles={profiles}
-          channels={channels}
-          onOpenChannel={selectChannel}
-        />
-      ) : view === "audit" ? (
-        <AuditView client={client} />
-      ) : view === "settings" && settings ? (
-        <SettingsView
-          client={client}
-          settings={settings}
-          profiles={profiles}
-          onSettingsChange={setSettings}
-          onProfilesChange={refreshProfiles}
-          onError={(message) => setError(message)}
-        />
-      ) : view === "settings" ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
-          Settings are unavailable. Check the API connection.
         </div>
       ) : (
         <div className="workspace-body flex min-h-0 flex-1" data-sidebar-open={sidebarOpen}>
@@ -933,8 +986,20 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             }}
             onRename={renameChannel}
             onArchive={archiveChannel}
+            onRestore={restoreChannel}
           />
           <ChatView
+            reasoning={activeChannelId ? (reasoningOverrides[activeChannelId] ?? "auto") : "auto"}
+            onReasoningChange={(reasoning) =>
+              activeChannelId &&
+              setReasoningOverrides((value) => ({ ...value, [activeChannelId]: reasoning }))
+            }
+            models={settings?.models ?? []}
+            onModelChange={(model) =>
+              activeChannelId &&
+              setModelOverrides((value) => ({ ...value, [activeChannelId]: model }))
+            }
+            onExecutionSettings={openExecutionSettings}
             activeRunCount={activeRunCount}
             emergencyStopped={emergencyStopped}
             client={client}
@@ -947,6 +1012,9 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             loadingMore={loadingMore}
             hasMore={nextBefore !== null}
             error={error}
+            queuedMessages={
+              <MessageQueue queue={messageQueue} channels={channels} paused={emergencyStopped} />
+            }
             onSend={sendMessage}
             onStop={stopRun}
             onRetry={retryRun}
@@ -954,6 +1022,52 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           />
         </div>
       )}
+      {view === "schedules" ? (
+        <Modal title="Schedules" onClose={() => setView("chat")}>
+          <SchedulesView
+            client={client}
+            profiles={profiles}
+            channels={channels.filter((channel) => !channel.archivedAt)}
+            onOpenChannel={selectChannel}
+          />
+        </Modal>
+      ) : null}
+      {view === "audit" ? (
+        <Modal title="Audit log" onClose={() => setView("chat")}>
+          <AuditView client={client} />
+        </Modal>
+      ) : null}
+      {view === "settings" ? (
+        <Modal title="Settings" onClose={() => setView("chat")}>
+          {settings ? (
+            <SettingsView
+              client={client}
+              settings={settings}
+              profiles={profiles}
+              onSettingsChange={setSettings}
+              onProfilesChange={refreshProfiles}
+              onError={setError}
+            />
+          ) : (
+            <p>Settings unavailable.</p>
+          )}
+        </Modal>
+      ) : null}
+      {executionSection && activeChannel && activeProfile ? (
+        <ConversationSettings
+          key={`${activeChannel.id}-${executionSection}`}
+          channel={activeChannel}
+          profile={activeProfile}
+          section={executionSection}
+          onClose={() => setExecutionSection(null)}
+          onSave={async (execution) => {
+            const updated = await client.updateChannel(activeChannel.id, { execution });
+            setChannels((value) =>
+              value.map((channel) => (channel.id === updated.id ? updated : channel)),
+            );
+          }}
+        />
+      ) : null}
     </div>
   );
 }

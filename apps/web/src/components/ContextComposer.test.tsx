@@ -97,14 +97,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup(activeRunCount = 0) {
+function setup(activeRunCount = 0, busy = false) {
   return render(
     <ContextComposer
       activeRunCount={activeRunCount}
       client={client}
       channel={channel}
       profile={profile}
-      busy={false}
+      busy={busy}
       historyVersion={0}
       lastRun={null}
       onSend={onSend}
@@ -116,6 +116,70 @@ function setup(activeRunCount = 0) {
 }
 
 describe("context composer", () => {
+  it("accepts a message while another run is active without waiting for a context estimate", async () => {
+    setup(1, true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+      target: { value: "Do this next" },
+    });
+    expect(screen.getByRole("button", { name: "Queue" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Do this next", [], false));
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  });
+
+  it("keeps the previous context budget visible while refreshing and accepts a message immediately", async () => {
+    const inspector = document.createElement("div");
+    document.body.append(inspector);
+    try {
+      render(
+        <ContextComposer
+          contextTarget={inspector}
+          client={client}
+          channel={channel}
+          profile={profile}
+          busy={false}
+          historyVersion={0}
+          lastRun={null}
+          onSend={onSend}
+          onStop={() => {}}
+          onRetry={() => {}}
+          canRetry={false}
+        />,
+      );
+      const meter = await within(inspector).findByRole("meter", {
+        name: "Inspector context budget",
+      });
+      expect(meter).toHaveValue(2068);
+      const usage = screen.getByLabelText("Context usage");
+      const previousUsage = usage.textContent;
+      let resolveRefresh!: (value: ContextEstimate) => void;
+      vi.mocked(client.estimateContext).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+      fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+        target: { value: "A new draft" },
+      });
+      expect(meter).toHaveValue(2068);
+      expect(usage.textContent).toBe(previousUsage);
+      expect(within(inspector).queryByText("Estimating context…")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+      await waitFor(() => expect(resolveRefresh).toBeTypeOf("function"));
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), { key: "Enter" });
+      await waitFor(() =>
+        expect(onSend).toHaveBeenCalledWith("A new draft", ["pdf", "image"], false),
+      );
+      await act(async () => resolveRefresh({ ...estimate, inputTokens: 120 }));
+      expect(meter).toHaveValue(2168);
+    } finally {
+      cleanup();
+      inspector.remove();
+    }
+  });
+
   it("edits shared file context in the inspector without losing the composer draft", async () => {
     const inspector = document.createElement("div");
     document.body.append(inspector);
@@ -145,7 +209,7 @@ describe("context composer", () => {
       await waitFor(() => expect(client.updateAttachment).toHaveBeenCalledWith("image", false));
       await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
       expect(
-        within(inspector).getByRole("meter", { name: "Inspector context budget" }),
+        await within(inspector).findByRole("meter", { name: "Inspector context budget" }),
       ).toHaveValue(2068);
       expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Use only the PDF");
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -156,7 +220,7 @@ describe("context composer", () => {
     }
   });
 
-  it("opens context details from the bottom bar and dismisses them without losing the draft", async () => {
+  it("shows context usage as a plain status without a duplicate menu", async () => {
     setup(3);
     const message = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(message, { target: { value: "Keep typing here" } });
@@ -165,17 +229,11 @@ describe("context composer", () => {
     expect(within(footer).getByText("3 active runs")).toBeInTheDocument();
     expect(within(footer).getByText("2 files")).toBeInTheDocument();
     const context = within(footer).getByLabelText("Context usage");
-    const menu = context.closest("details")!;
-    expect(menu).not.toHaveAttribute("open");
+    expect(context.closest("details")).toBeNull();
+    expect(context).not.toHaveAttribute("tabindex");
+    expect(within(footer).queryByRole("meter")).not.toBeInTheDocument();
     fireEvent.click(context);
-    expect(menu).toHaveAttribute("open");
-    expect(within(footer).getByRole("meter", { name: "Context budget" })).toHaveValue(2068);
-    fireEvent.keyDown(context, { key: "Escape" });
-    expect(menu).not.toHaveAttribute("open");
-    expect(context).toHaveFocus();
-    fireEvent.click(context);
-    fireEvent.pointerDown(message);
-    expect(menu).not.toHaveAttribute("open");
+    expect(screen.queryByText("Estimated input:", { exact: false })).not.toBeInTheDocument();
     expect(message).toHaveValue("Keep typing here");
   });
 
@@ -204,10 +262,6 @@ describe("context composer", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Summarize", ["pdf"], false));
-    expect(client.estimateContext).toHaveBeenLastCalledWith(
-      "channel",
-      expect.objectContaining({ content: "Summarize", attachmentIds: ["pdf"] }),
-    );
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(""));
   });
 
@@ -230,7 +284,7 @@ describe("context composer", () => {
     expect(client.uploadAttachment).toHaveBeenCalledTimes(3);
   });
 
-  it("requires confirmation when history will be omitted and prevents over-budget sends", async () => {
+  it("passes explicit truncation consent to the queue and allows queuing over-budget drafts", async () => {
     vi.mocked(client.estimateContext).mockResolvedValue({
       ...estimate,
       requiresTruncation: true,
@@ -241,7 +295,7 @@ describe("context composer", () => {
     const confirmation = await screen.findByRole("checkbox", {
       name: "Omit 2 oldest messages for this run",
     });
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     fireEvent.click(confirmation);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("Question", ["pdf", "image"], true));
@@ -250,7 +304,11 @@ describe("context composer", () => {
     setup();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Too much context" } });
     await screen.findByText(/Context is too large/);
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(onSend).toHaveBeenLastCalledWith("Too much context", ["pdf", "image"], false),
+    );
   });
 
   it("preserves the draft on send failure and revokes image preview URLs", async () => {

@@ -16,6 +16,10 @@ export const messageDeltaEventSchema = runEventBaseSchema.extend({
   type: z.literal("message.delta"),
   text: z.string(),
 });
+export const reasoningDeltaEventSchema = runEventBaseSchema.extend({
+  type: z.literal("reasoning.delta"),
+  text: z.string(),
+});
 
 export const toolRequestedEventSchema = runEventBaseSchema.extend({
   type: z.literal("tool.requested"),
@@ -65,6 +69,7 @@ export const runCancelledEventSchema = runEventBaseSchema.extend({
 export const runEventSchema = z.discriminatedUnion("type", [
   runStartedEventSchema,
   messageDeltaEventSchema,
+  reasoningDeltaEventSchema,
   toolRequestedEventSchema,
   toolOutputEventSchema,
   approvalRequestedEventSchema,
@@ -80,6 +85,7 @@ export type RunEventType = RunEvent["type"];
 export const RUN_EVENT_TYPES = [
   "run.started",
   "message.delta",
+  "reasoning.delta",
   "tool.requested",
   "tool.output",
   "approval.requested",

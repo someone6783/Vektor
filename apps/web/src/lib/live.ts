@@ -3,7 +3,9 @@ import type { RunEvent, RunStatus, RunUsage } from "@vektor/shared";
 export interface LiveToolCall {
   id: string;
   name: string;
-  input: unknown;
+  input?: unknown;
+  status: string;
+  output?: string;
 }
 
 export interface LiveRun {
@@ -13,6 +15,10 @@ export interface LiveRun {
   usage: RunUsage | null;
   tools: LiveToolCall[];
   lastSeq: number;
+  phase: "thinking" | "responding" | "tools";
+  blocks: Array<
+    { type: "text" | "thinking"; id: string; text: string } | { type: "tool"; id: string }
+  >;
 }
 
 export function startLiveRun(runId: string): LiveRun {
@@ -23,6 +29,8 @@ export function startLiveRun(runId: string): LiveRun {
     usage: null,
     tools: [],
     lastSeq: 0,
+    phase: "thinking",
+    blocks: [],
   };
 }
 
@@ -37,12 +45,51 @@ export function applyRunEvent(live: LiveRun, event: RunEvent): LiveRun {
     case "run.started":
       return { ...next, status: "running" };
     case "message.delta":
-      return { ...next, text: live.text + event.text };
+    case "reasoning.delta": {
+      const type: "text" | "thinking" = event.type === "message.delta" ? "text" : "thinking";
+      const last = live.blocks.at(-1);
+      const blocks =
+        last?.type === type
+          ? [...live.blocks.slice(0, -1), { ...last, text: last.text + event.text }]
+          : [...live.blocks, { type, id: `${type}-${event.seq}`, text: event.text }];
+      return {
+        ...next,
+        text: type === "text" ? live.text + event.text : live.text,
+        phase: type === "text" ? "responding" : "thinking",
+        blocks,
+      };
+    }
     case "tool.requested":
       return {
         ...next,
-        tools: [...live.tools, { id: event.toolCallId, name: event.name, input: event.input }],
+        phase: "tools",
+        blocks: [...live.blocks, { type: "tool", id: event.toolCallId }],
+        tools: [
+          ...live.tools,
+          { id: event.toolCallId, name: event.name, input: event.input, status: "running" },
+        ],
       };
+    case "approval.requested":
+      return {
+        ...next,
+        tools: live.tools.map((tool) =>
+          tool.id === event.toolCallId ? { ...tool, status: "waiting" } : tool,
+        ),
+      };
+    case "tool.output": {
+      const tools = live.tools.map((tool) =>
+        tool.id === event.toolCallId
+          ? { ...tool, status: event.isError ? "failed" : "completed", output: event.output }
+          : tool,
+      );
+      return {
+        ...next,
+        tools,
+        phase: tools.some((tool) => ["running", "waiting"].includes(tool.status))
+          ? "tools"
+          : "thinking",
+      };
+    }
     case "usage":
       return {
         ...next,

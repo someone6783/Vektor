@@ -1,6 +1,6 @@
 # Release operations
 
-Phase 8 implements release automation and update checks. No image or release has
+Release automation includes update checks and click-to-install desktop/Docker updates. See [UPDATES.md](UPDATES.md) for installation and host helper setup. No image or release has
 been published as part of local implementation. Remote multiarchitecture execution
 and the first live update notification still need a real release demonstration.
 
@@ -48,9 +48,8 @@ The API archive must be built on Linux x64 with Node 22 because it contains nati
 SQLite dependencies. `release:verify` extracts it into a temporary directory, starts
 the production server with fresh data, checks health/version, web assets, API bearer
 auth and update opt-out, verifies checksums, then shuts down and removes its data.
-Use `--sudo` on the Docker verification script when required locally. The desktop
-package requires the Linux prerequisites in the README; release signing and native
-macOS/Windows packaging are separate work.
+Use `--sudo` on the Docker verification script when required locally. The desktop packages require the Linux prerequisites in the README. Release CI signs
+the AppImage using `TAURI_SIGNING_PRIVATE_KEY`; Windows x64 NSIS installers are built on Windows runners; macOS packaging remains separate work.
 
 When publication is intended, create and push the version tag on the verified
 commit. For example, with version 0.1.0:
@@ -70,7 +69,7 @@ are passed as build arguments. This is BuildKit provenance, not a separately sig
 GitHub attestation claim. The registry and repository stay private unless an owner
 changes their visibility independently.
 
-API/web archives, compose.yaml, release metadata, a Linux x64 desktop `.deb` and
+API/web archives, compose.yaml, release metadata, Windows x64 signed setup installers, Linux x64 desktop `.deb`, signed AppImage and host updater/installer files, plus
 SHA256SUMS become release assets. Notes include the image digest and upgrade steps.
 The release becomes visible only after assets are uploaded. Failed publication can
 leave a draft release or pushed image tags; dispatch the same tag to retry a draft.
@@ -104,8 +103,8 @@ that backup, not an older binary against migrated data.
 To run the API archive, verify SHA256SUMS, extract it, set absolute
 `VEKTOR_DATA_DIR` and `VEKTOR_WEB_DIST` (the latter points to extracted `web/dist`),
 then run `node api/dist/server.js` with Node 22 on Linux x64. Desktop users install
-the `.deb` and manage the backend separately. Neither desktop nor Docker silently
-downloads or installs updates. The release link opens in the system browser from
+the `.deb` and manage the backend separately. Updates are checked automatically and installed when clicked; see [UPDATES.md](UPDATES.md).
+Neither desktop nor Docker silently installs updates. The release link opens in the system browser from
 the desktop, limited to this repository's release tag URLs.
 
 ## First publication demonstration

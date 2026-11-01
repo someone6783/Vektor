@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { setChunkedStreaming, useChunkedStreaming } from "../lib/streamingPreference";
 import { AboutView } from "./AboutView";
 import { BrowserProfileCard } from "./BrowserProfileCard";
 import {
@@ -182,6 +183,7 @@ function ProfileEditor({
               setTerminalTool(event.target.value !== "no-terminal");
               setFullAccessAcknowledged(false);
             }}
+            id={`terminal-${profile.id}`}
             aria-label={`Terminal mode for ${profile.name}`}
             className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-accent-400/50"
           >
@@ -233,6 +235,7 @@ function ProfileEditor({
         <label className="block">
           Browser access
           <select
+            id={`browser-${profile.id}`}
             aria-label={`Browser access for ${profile.name}`}
             value={browserMode}
             onChange={(event) => {
@@ -405,6 +408,7 @@ export function SettingsView({
   onProfilesChange,
   onError,
 }: SettingsViewProps) {
+  const chunkedStreaming = useChunkedStreaming();
   const [keyDraft, setKeyDraft] = useState("");
   const [defaultModel, setDefaultModel] = useState(settings.defaultModel);
   const [newName, setNewName] = useState("");
@@ -510,6 +514,22 @@ export function SettingsView({
           </p>
           <h1 className="mt-2 text-2xl font-semibold">Providers, models, and profiles</h1>
         </div>
+
+        <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+          <h2 className="text-sm font-medium text-slate-200">Preferences</h2>
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={chunkedStreaming}
+              onChange={(event) => setChunkedStreaming(event.target.checked)}
+            />
+            Stream replies by paragraph
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Show complete paragraphs instead of word by word. Tool calls and the end of a turn
+            reveal any remaining text. Saved on this device.
+          </p>
+        </section>
 
         {formError ? (
           <p className="rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">

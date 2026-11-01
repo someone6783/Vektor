@@ -14,11 +14,10 @@ describe("workspace appearance", () => {
   it("restores a saved theme and persists the next selection", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "beacon");
     render(<ThemePicker />);
-    expect(screen.getByRole("combobox", { name: "Colour theme" })).toHaveValue("beacon");
+    expect(screen.getByLabelText("Colour theme")).toHaveTextContent("Beacon · Amber");
     expect(document.documentElement).toHaveAttribute("data-theme", "beacon");
-    fireEvent.change(screen.getByRole("combobox", { name: "Colour theme" }), {
-      target: { value: "orbit" },
-    });
+    fireEvent.click(screen.getByLabelText("Colour theme"));
+    fireEvent.click(screen.getByRole("option", { name: "Orbit · Navy" }));
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("orbit");
     expect(document.documentElement).toHaveAttribute("data-theme", "orbit");
   });
@@ -37,9 +36,8 @@ describe("workspace appearance", () => {
       throw new Error("Blocked");
     });
     render(<ThemePicker />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Colour theme" }), {
-      target: { value: "beacon" },
-    });
+    fireEvent.click(screen.getByLabelText("Colour theme"));
+    fireEvent.click(screen.getByRole("option", { name: "Beacon · Amber" }));
     expect(document.documentElement).toHaveAttribute("data-theme", "beacon");
   });
 });

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   chromium,
+  errors,
   type BrowserContext,
   type ElementHandle,
   type Page,
@@ -166,7 +167,7 @@ export class PlaywrightBrowser implements BrowserController {
         throw new RuntimeError("Browser session cancelled.");
       }
       context.setDefaultTimeout(5000);
-      context.setDefaultNavigationTimeout(8000);
+      context.setDefaultNavigationTimeout(20_000);
       await context.routeWebSocket("**/*", (socket) => socket.close());
       await context.route("**/*", (route) =>
         this.route(route.request())
@@ -239,7 +240,9 @@ export class PlaywrightBrowser implements BrowserController {
       this.epoch++;
       this.activity++;
       if (this.nativeTakeover) void this.guardMode(page, false, true).catch(() => {});
-      if (frame.url() !== "about:blank") {
+      // Chromium uses an internal error document after a failed navigation.
+      // Keep the window open so the next navigation can recover.
+      if (frame.url() !== "about:blank" && frame.url() !== "chrome-error://chromewebdata/") {
         try {
           browserUrl(frame.url(), this.policy());
         } catch {
@@ -338,35 +341,38 @@ export class PlaywrightBrowser implements BrowserController {
     if (!["GET", "HEAD"].includes(request.method())) {
       if (permissions.mode !== "interactive")
         throw new RuntimeError("Observation mode blocks network mutations.", 403);
-      const source = request.frame().page();
-      if (source !== this.page)
-        throw new RuntimeError("Background tabs cannot write to the network.", 403);
-      const url = source.url();
-      const epoch = this.epoch;
-      const activity = this.activity;
-      const hash = digest(body ?? "");
-      const approved = await this.options.approve(
-        `Browser network write: ${request.method()} ${this.visibleUrl(request.url())}\nTarget SHA-256 ${digest(request.url())}\nFrom ${this.visibleUrl(url)}\nPayload SHA-256 ${hash}; ${body?.length ?? 0} bytes. Page content cannot approve this request.`,
-        async () =>
-          !this.closed &&
-          (!this.paused || this.humanActing || this.nativeTakeover) &&
-          this.epoch === epoch &&
-          this.activity === activity &&
-          this.page === source &&
-          source.url() === url &&
-          this.policy().mode === "interactive",
-      );
-      if (
-        !approved ||
-        this.closed ||
-        (this.paused && !this.humanActing && !this.nativeTakeover) ||
-        this.epoch !== epoch ||
-        this.activity !== activity ||
-        this.page !== source ||
-        source.url() !== url
-      )
-        throw new RuntimeError("Browser request denied or approval expired.", 403);
-      this.policy();
+      // Visible interactive windows allow page network requests without per-request approval.
+      if (permissions.display !== "window") {
+        const source = request.frame().page();
+        if (source !== this.page)
+          throw new RuntimeError("Background tabs cannot write to the network.", 403);
+        const url = source.url();
+        const epoch = this.epoch;
+        const activity = this.activity;
+        const hash = digest(body ?? "");
+        const approved = await this.options.approve(
+          `Browser network write: ${request.method()} ${this.visibleUrl(request.url())}\nTarget SHA-256 ${digest(request.url())}\nFrom ${this.visibleUrl(url)}\nPayload SHA-256 ${hash}; ${body?.length ?? 0} bytes. Page content cannot approve this request.`,
+          async () =>
+            !this.closed &&
+            (!this.paused || this.humanActing || this.nativeTakeover) &&
+            this.epoch === epoch &&
+            this.activity === activity &&
+            this.page === source &&
+            source.url() === url &&
+            this.policy().mode === "interactive",
+        );
+        if (
+          !approved ||
+          this.closed ||
+          (this.paused && !this.humanActing && !this.nativeTakeover) ||
+          this.epoch !== epoch ||
+          this.activity !== activity ||
+          this.page !== source ||
+          source.url() !== url
+        )
+          throw new RuntimeError("Browser request denied or approval expired.", 403);
+        this.policy();
+      }
     }
     const result = await this.network.request(
       request.url(),
@@ -462,8 +468,32 @@ export class PlaywrightBrowser implements BrowserController {
           this.page = await this.context!.newPage();
           await this.guards.get(this.page);
         }
-        // A human takeover may navigate, but page scripts still cannot write without approval.
-        await this.page!.goto(input.url, { waitUntil: "domcontentloaded" });
+        // Network writes in headless sessions still require approval during human takeover.
+        try {
+          await this.page!.goto(input.url, { waitUntil: "domcontentloaded" });
+        } catch (error) {
+          if (!(error instanceof errors.TimeoutError)) {
+            // A failed request rejects goto before Chromium commits its error document.
+            // Let that commit finish so it cannot interrupt the next explicit navigation.
+            if (!this.closed && !this.options.signal.aborted)
+              await this.page
+                ?.waitForURL("chrome-error://chromewebdata/", {
+                  waitUntil: "commit",
+                  timeout: 1000,
+                })
+                .catch(() => {});
+            throw error;
+          }
+          // A slow document may already be usable. Inspect it without replaying navigation.
+          if (!this.page || this.page.isClosed() || this.page.url() === "about:blank") throw error;
+          browserUrl(this.page.url(), this.policy());
+          return {
+            untrusted: true,
+            ...this.state(),
+            snapshot: "",
+            note: "Navigation timed out while waiting for the document. The window is still open; take a snapshot to inspect the current page before retrying.",
+          };
+        }
       } else if (input.action === "select_tab" || input.action === "close_tab") {
         const selected = this.pages.get(input.tabId);
         if (!selected) throw new RuntimeError("Browser tab not found.", 404);

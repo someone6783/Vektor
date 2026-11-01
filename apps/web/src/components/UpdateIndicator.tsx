@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { UpdateCheck } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
+import { InstallUpdates } from "./InstallUpdates";
 import { ReleaseLink } from "./ReleaseLink";
 
 export function UpdateIndicator({ client }: { client: ApiClient }) {
@@ -22,9 +23,22 @@ export function UpdateIndicator({ client }: { client: ApiClient }) {
       clearInterval(timer);
     };
   }, [client]);
-  return info?.updateAvailable && info.releaseUrl ? (
-    <span className="rounded-full border border-emerald-400/20 px-2 py-1 text-[11px]">
-      <ReleaseLink href={info.releaseUrl}>v{info.latestVersion} available</ReleaseLink>
-    </span>
-  ) : null;
+  return (
+    <>
+      {info?.enabled ? (
+        <InstallUpdates
+          compact
+          client={client}
+          enabled={info.enabled}
+          backendAvailable={info.updateAvailable}
+          refreshKey={info.checkedAt}
+        />
+      ) : null}
+      {info?.updateAvailable && info.releaseUrl ? (
+        <span className="rounded-full border border-emerald-400/20 px-2 py-1 text-[11px]">
+          <ReleaseLink href={info.releaseUrl}>v{info.latestVersion} available</ReleaseLink>
+        </span>
+      ) : null}
+    </>
+  );
 }

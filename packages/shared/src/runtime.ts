@@ -59,6 +59,7 @@ export const backendInfoSchema = z.object({
 });
 export type BackendInfo = z.infer<typeof backendInfoSchema>;
 export const runDetailsSchema = z.object({
+  transcript: z.array(runEventSchema).optional(),
   browser: browserStateSchema.optional(),
   run: runSchema,
   tools: z.array(toolCallSchema),

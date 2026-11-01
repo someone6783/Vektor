@@ -394,6 +394,14 @@ describe("channels", () => {
     expect(channelSchema.array().parse(empty.json().channels)).toEqual([]);
 
     const channel = await createChannel("Research");
+    const sent = await app.inject({
+      method: "POST",
+      url: `/api/channels/${channel.id}/messages`,
+      headers: authHeaders,
+      payload: { content: "Keep this conversation history." },
+    });
+    expect(sent.statusCode).toBe(201);
+    const savedMessageId = sent.json().message.id;
 
     const renamed = await app.inject({
       method: "PATCH",
@@ -426,6 +434,43 @@ describe("channels", () => {
       headers: authHeaders,
     });
     expect(channelSchema.array().parse(withArchived.json().channels)).toHaveLength(1);
+    const settledHistory = await app.inject({
+      method: "GET",
+      url: `/api/channels/${channel.id}/messages`,
+      headers: authHeaders,
+    });
+    expect(settledHistory.statusCode).toBe(200);
+    expect(settledHistory.json().messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: savedMessageId, content: "Keep this conversation history." }),
+      ]),
+    );
+    const restored = await app.inject({
+      method: "PATCH",
+      url: `/api/channels/${channel.id}`,
+      headers: authHeaders,
+      payload: { archived: false },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json().channel.archivedAt).toBeNull();
+    expect(restored.json().channel.name).toBe("Deep research");
+    const activeAgain = await app.inject({
+      method: "GET",
+      url: "/api/channels",
+      headers: authHeaders,
+    });
+    expect(activeAgain.json().channels.map((item: { id: string }) => item.id)).toContain(
+      channel.id,
+    );
+    const history = await app.inject({
+      method: "GET",
+      url: `/api/channels/${channel.id}/messages`,
+      headers: authHeaders,
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json().messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: savedMessageId })]),
+    );
   });
 
   it("rejects an unknown profile", async () => {
@@ -617,4 +662,36 @@ describe("messages and runs", () => {
       rmSync(cancelDir, { recursive: true, force: true });
     }
   });
+});
+
+it("loads the complete model catalog without requiring a connection test or API key", async () => {
+  await app.close();
+  const models = [
+    { id: "provider/one", name: "One", contextLength: 10000 },
+    { id: "provider/two", name: "Two", contextLength: 20000 },
+  ];
+  let calls = 0;
+  app = await buildApp({
+    config: testConfig(dataDir),
+    storage: bootstrapStorage(testConfig(dataDir)),
+    logger: false,
+    provider: {
+      async listModels() {
+        calls++;
+        return models;
+      },
+      async *streamChat() {
+        yield { type: "finish", reason: "stop" };
+      },
+    },
+  });
+  const headers = { authorization: `Bearer ${ACCESS_TOKEN}` };
+  const response = await app.inject({ method: "GET", url: "/api/models", headers });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().models).toEqual(models);
+  await app.inject({ method: "GET", url: "/api/models", headers });
+  expect(calls).toBe(1);
+  expect(
+    (await app.inject({ method: "GET", url: "/api/settings", headers })).json().models,
+  ).toEqual(models);
 });

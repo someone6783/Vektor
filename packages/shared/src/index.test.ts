@@ -18,6 +18,7 @@ const samples: RunEvent[] = [
     runner: "native",
   },
   { seq: 2, runId: "run-1", type: "message.delta", text: "Hello" },
+  { seq: 2, runId: "run-1", type: "reasoning.delta", text: "A reasoning summary" },
   {
     seq: 3,
     runId: "run-1",

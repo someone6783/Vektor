@@ -1,4 +1,9 @@
 const paths = {
+  star: "m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z",
+  back: "M19 12H5m6-6-6 6 6 6",
+  stop: "m8 3-5 5v8l5 5h8l5-5V8l-5-5ZM9 9l6 6M15 9l-6 6",
+  terminal: "m4 6 6 6-6 6M13 18h7",
+  browser: "M3 7h18M7 4v3M11 4v3M3 4h18v16H3Z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   chat: "M21 11a8 8 0 0 1-8 8H7l-4 3V11a9 9 0 0 1 18 0Z",
   settings: "M4 7h16M4 17h16M9 4v6M15 14v6",

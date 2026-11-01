@@ -1,3 +1,4 @@
+import { reasoningEffortSchema } from "./reasoning.js";
 import { z } from "zod";
 
 export const attachmentSchema = z.object({
@@ -17,6 +18,7 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 
 export const contextEstimateSchema = z.object({
   model: z.string(),
+  reasoning: reasoningEffortSchema.optional(),
   contextWindow: z.number(),
   windowSource: z.enum(["model", "fallback"]),
   originalInputTokens: z.number(),
@@ -37,6 +39,7 @@ export const contextRequestSchema = z
     content: z.string().max(100_000).default(""),
     profileId: z.string().min(1).optional(),
     model: z.string().min(1).max(200).optional(),
+    reasoning: reasoningEffortSchema.optional(),
     attachmentIds: z.array(z.string().uuid()).max(50).optional(),
   })
   .strict();

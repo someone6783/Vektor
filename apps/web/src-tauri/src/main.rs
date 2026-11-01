@@ -9,6 +9,7 @@ use tauri::{
 };
 use tauri_plugin_http::reqwest::{self, Client, Url};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Clone, Default)]
 struct Connection {
@@ -187,6 +188,81 @@ async fn monitor(app: tauri::AppHandle, client: Client) {
     }
 }
 
+// Only the configured loopback backend receives the workspace token. It proxies signed
+// release assets, so private GitHub credentials never enter the desktop webview.
+fn desktop_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    if cfg!(target_os = "linux") && std::env::var_os("APPIMAGE").is_none() {
+        return Err("Install the AppImage release to enable desktop updates. Debian packages are upgraded with the package manager.".into());
+    }
+    let connection = connection(app).ok_or("Unlock the workspace before checking for updates.")?;
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => "windows-x86_64",
+        ("linux", "x86_64") => "linux-x86_64",
+        _ => return Err("Desktop updates are unavailable for this platform.".into()),
+    };
+    let endpoint = format!(
+        "{}/api/desktop-update/{}/{}",
+        connection.base_url,
+        target,
+        app.package_info().version
+    );
+    app.updater_builder()
+        .endpoints(vec![
+            Url::parse(&endpoint).map_err(|_| "Invalid update endpoint.")?
+        ])
+        .map_err(|_| "Invalid update endpoint.")?
+        .header("Authorization", format!("Bearer {}", connection.token))
+        .map_err(|_| "Invalid workspace token.")?
+        .header("X-Vektor-Backend", connection.base_url)
+        .map_err(|_| "Invalid backend origin.")?
+        .timeout(Duration::from_secs(120))
+        .version_comparator(|current, release| {
+            release.version > current && release.version.pre.is_empty()
+        })
+        .build()
+        .map_err(|_| "Desktop updater is unavailable.".into())
+}
+
+#[tauri::command]
+async fn check_desktop_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let update = desktop_updater(&app)?
+        .check()
+        .await
+        .map_err(|_| "Unable to check desktop updates. Check release settings and connectivity.")?;
+    Ok(update.map(|update| update.version))
+}
+
+#[derive(Default)]
+struct InstallState(std::sync::atomic::AtomicBool);
+
+#[tauri::command]
+async fn install_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    if app.state::<InstallState>().0.swap(true, Ordering::SeqCst) {
+        return Err("A desktop update is already installing.".into());
+    }
+    let result = async {
+        let update = desktop_updater(&app)?
+            .check()
+            .await
+            .map_err(|_| "Unable to check desktop updates.")?
+            .ok_or("No newer desktop update is available.")?;
+        update
+            .download_and_install(|_, _| {}, || {})
+            .await
+            .map_err(|_| {
+                "Desktop update failed. The download or signature could not be verified."
+            })?;
+        Ok::<(), String>(())
+    }
+    .await;
+    app.state::<InstallState>().0.store(false, Ordering::SeqCst);
+    if result.is_ok() {
+        app.restart();
+    }
+    result
+}
+
 fn main() {
     let client = Client::builder()
         .timeout(Duration::from_secs(8))
@@ -195,12 +271,16 @@ fn main() {
         .expect("HTTP client");
     tauri::Builder::default()
         .manage(DesktopState::default())
+        .manage(InstallState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             configure_connection,
-            clear_connection
+            clear_connection,
+            check_desktop_update,
+            install_desktop_update
         ])
         .setup(move |app| {
             let show_item = MenuItem::with_id(app, "show", "Open Vektor", true, None::<&str>)?;

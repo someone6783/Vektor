@@ -1,6 +1,6 @@
 # Vektor Product Plan
 
-Status: v0.6 · 2026-10-31
+Status: v0.7 · 2026-11-01
 Approval: Scope and Phase 0 accepted on 2026-10-31. Implementation may begin with Phase 1. OCR remains deferred, and v1 uses a single local access token.
 
 ## Product summary
@@ -17,7 +17,7 @@ Vektor is a single-user, local-first AI workspace. It combines:
 
 Non-goals for v1 are listed under [Explicitly deferred](#explicitly-deferred).
 
-After the first release, the roadmap adds browser use (Phase 9), computer use (Phase 10), and Codex harness integration (Phase 11). These are planned capabilities with their own exit criteria, not requirements for the first usable release.
+After the first release, the roadmap adds browser use (Phase 9), computer use (Phase 10), Codex harness integration (Phase 11), and MCP plugin support (Phase 12). These are planned capabilities with their own exit criteria, not requirements for the first usable release.
 
 ## Approval gate
 
@@ -137,11 +137,11 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 ### Run lifecycle
 
 1. Client posts a message; the API stores it and creates a run.
-2. The runner assembles context: profile prompt, recent conversation history, selected attachments, tool definitions.
+2. The runner assembles context: profile prompt, recent conversation history, selected attachments, tool definitions, and explicitly granted MCP tools.
 3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the Codex harness adapter arrives in Phase 11 after v1.
 4. Tool calls pause the run if they need approval; the UI resolves the approval and the run resumes.
 5. On completion the assistant message, usage, and final status are persisted; the event stream closes.
-6. Cancel sets the run to `cancelled`, aborts the provider request, and kills any child process group.
+6. Cancel sets the run to `cancelled`, aborts the provider request, and kills any child process group, including MCP stdio servers.
 
 ### Data model (draft)
 
@@ -158,6 +158,8 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 | `scheduled_jobs` | Recurring jobs              | `schedule`, `timezone`, `profile_id`, `channel_id`, `prompt`, `next_run_at`              |
 | `job_runs`       | Scheduled execution history | `job_id`, `scheduled_for`, `status`, `run_id?`, `error`                                  |
 | `approvals`      | Pending decisions           | `run_id`, `tool_call_id`, `command`, `status`                                            |
+| `mcp_servers`    | MCP plugin configuration    | `name`, `transport`, `config_json`, `secrets_json`, `enabled`, `protocol_version`        |
+| `mcp_grants`     | Per-profile MCP permissions | `profile_id`, `server_id`, `tool_name`, `policy`, `created_at`                           |
 | `audit_log`      | Security-relevant actions   | `actor`, `action`, `target`, `detail_json`, `created_at`                                 |
 
 ## Phase 1 — Foundation
@@ -418,6 +420,8 @@ Exit criteria: restore a backup into a clean volume and resume work; an interrup
 
 Status (2026-11-01): implementation and local verification are complete. Publication is pending: no tag, registry push, or GitHub Release has been created. The first real release must demonstrate the remote multiarchitecture build, attached provenance, and an older instance’s live update notification before this phase’s publication exit criteria can be signed off.
 
+Update follow-up (2026-11-01): automatic checks and click-to-install updates now cover signed Linux x64 desktop AppImages and Docker API/Web UI installations through an optional host updater. Public repository metadata enables checks by default. CI retains API/Web UI and Linux desktop packages; Release CI signs and verifies AppImages, and both workflows exercise the Docker updater using disposable resources. See [UPDATES.md](UPDATES.md) for initial installation, host setup and recovery. Publication remains pending.
+
 Goal: GitHub Actions produces the release, and a running Vektor can tell the user when a newer release exists without leaking local data or interrupting work.
 
 - [x] Version has one source of truth: the root package metadata, injected into the API and web build. `/healthz`, the About panel, the Docker image label, and the release tag all report the same value.
@@ -505,6 +509,30 @@ Integration proposal: prefer a locally managed Codex app-server connection over 
 
 Exit criteria: the same Vektor workspace can run a native conversation and a Codex-backed task with clearly labelled runner/model/auth state, streamed progress, reviewable file/tool actions, durable history, and working cancel/emergency stop. Unsupported permission combinations are rejected before execution; Codex disconnect or unavailability leaves the native runner usable without automatically resubmitting the task.
 
+## Phase 12 — MCP plugin support (late plan, after v1)
+
+Goal: let users attach MCP servers as optional, explicitly enabled plugins that contribute tools, resources, and prompts to native and Codex runs without bypassing Vektor's permissions, approvals, audit trail, or isolation boundaries.
+
+Dependencies: Phases 4 and 7 (approval, stop, audit, and recovery), Phase 9 (untrusted external content and network boundaries), and Phases 10–11 (capability adapters and the runner interface). This phase adds a user-configured MCP client; it does not add a marketplace, automatic plugin installation, or make Vektor itself an MCP server.
+
+Design note: treat every MCP server as third-party code and every response as untrusted data. Server tool annotations and descriptions are hints, not authorization. Vektor owns discovery, allowlisting, approval, timeouts, output limits, and redaction. Re-check the [MCP specification](https://modelcontextprotocol.io/specification) and supported transports before implementation starts.
+
+- [ ] Add a versioned MCP client interface with protocol/capability negotiation and explicit support for local stdio servers and remote Streamable HTTP servers, adding legacy SSE only if still required. Pin supported protocol versions and reject unsupported capabilities instead of silently degrading.
+- [ ] Add a plugin registry and settings UI to add, edit, test, enable/disable, reconnect, and remove MCP servers. Store name, transport, command or URL, arguments, working directory, environment/headers, and per-profile tool grants. Secrets stay write-only, encrypted at rest, redacted, and never returned by the API.
+- [ ] Discover tools, resources, resource templates, and prompts per server; namespace names to prevent collisions; validate schemas; and bound tool output, resource size, prompt size, and pagination. Surface discovery failures and unsupported features in the UI.
+- [ ] Map MCP tools into the existing tool contract and timeline, including JSON-schema validation, cancellation, progress notifications, structured results, and bounded time/output. An MCP server cannot call another tool, widen its own permissions, or approve its own request.
+- [ ] Add per-profile least-privilege grants: off by default, per-server and per-tool allowlists, and separate read-only/mutating policy. Require Vektor approval for consequential or unknown-effect tools even when a server labels them safe; never auto-approve from tool metadata.
+- [ ] Treat resources and prompts as untrusted context. Require explicit user or profile selection before inclusion, apply size/type limits and previews, and keep server content out of system instructions, permission decisions, and other servers' scopes. Text in results cannot grant capabilities or approve actions.
+- [ ] Run local stdio servers as supervised child process groups with an allowlisted environment, scoped working directory, resource limits, and no inherited backend secrets. Apply Phase 9's network rules to remote servers, including private, loopback, and metadata targets plus redirects. Document Docker packaging and require explicit opt-in for host binaries.
+- [ ] Add lifecycle and failure isolation: bounded startup/discovery, health checks, reconnect with backoff, concurrency limits, crash containment, and clear unavailable states. One server's failure must not fail the run, block native tools, or replay work automatically after restart.
+- [ ] Bridge stop/cancel to in-flight MCP requests and stdio child cleanup, and resolve pending approvals as cancelled. Emergency stop keeps its existing latch and must not restart MCP servers or replay calls until explicit resume.
+- [ ] Record server identity, tool, redacted arguments/results, duration, approval, and errors in run events and the audit log; store large results as controlled artifacts. Keep MCP activity distinguishable from native, terminal, and browser calls.
+- [ ] For scheduled jobs, require declared MCP capabilities and pause on approval instead of assuming unattended access. For the Codex runner, expose only explicitly granted MCP tools through a capability-checked adapter; a server configured in Vektor must not appear in Codex merely because Codex supports MCP.
+- [ ] Add protocol fixtures and fake servers for discovery, schema mismatch, duplicate or invalid names, timeouts, cancellation, crashes, reconnect, protocol-version drift, approval/denial, secret redaction, resource limits, restart, and unavailable servers.
+- [ ] Test a local stdio server and a remote server end to end, including denial, stop, audit, scheduled pauses, Docker/host packaging, and native-runner fallback. Verify that no secret or excluded context reaches a server.
+
+Exit criteria: a user can add and test local and remote MCP servers, review their declared capabilities, grant one tool to a profile, and use it in a streamed run; a consequential call pauses for approval, denial prevents execution, and the request appears in the timeline and audit log. Disabling or crashing a server leaves native chat usable, emergency stop cancels its work, excluded data and secrets are not sent, and no MCP capability is available without an explicit grant.
+
 ## After v1 — External service integrations
 
 Planned, not part of the first usable release. Vektor should support adding optional integrations with third-party services such as Spotify, Gmail, and Apple Calendar.
@@ -522,16 +550,17 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 - Browser use/automation until Phase 9 (planned after v1).
 - Computer use and desktop automation until Phase 10 (planned after v1).
 - Codex harness and hybrid-runner integration until Phase 11 (late plan, after v1).
+- MCP plugin support until Phase 12 (late plan, after v1).
 - Multi-user accounts and collaboration.
 - Visual workflow builder.
 - Distributed microservices.
 - Large-scale worker autoscaling.
 - Native video understanding.
 - External service integrations, including Spotify, Gmail, and Apple Calendar.
-- Marketplace/plugin ecosystem.
+- Marketplace/plugin ecosystem, including automatic discovery, installation, and distribution of third-party plugins.
 - Complex multi-agent planning graphs.
 
-Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, and the Codex harness are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
+Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, the Codex harness, and explicitly configured MCP servers are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
 
 ## Definition of the first usable release
 
@@ -564,6 +593,7 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 - **Browser boundaries.** Pages can redirect, contact private services, expose session cookies, or contain instructions aimed at the agent. Network/action grants, separate sessions, scoped approvals, and artifact controls must be enforced outside the model.
 - **Computer control.** Stale coordinates, focus changes, sensitive screenshots, and held input can affect the wrong application. Begin with isolated sessions; host control requires explicit OS grants, visible takeover, and tested stop behavior.
 - **Harness policy mismatch.** Codex permissions, authentication, event schemas, and compaction may differ from Vektor's. Verify effective restrictions, pin supported interfaces, and reject unsupported configurations instead of widening access or silently changing runners.
+- **MCP trust boundary.** MCP servers are third-party code and their responses are untrusted data. Tool annotations, prompts, and resources can attempt to expand access or inject instructions. Keep plugins off by default, scope grants per profile and tool, enforce approvals and output limits outside the server, redact secrets, and contain stdio processes.
 - **Update checks.** GitHub's API is rate-limited and may be unreachable; checks must be cached, optional, and must never block startup or reveal local data.
 
 ## Decision log
@@ -581,3 +611,4 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 | 2026-10-31 | Auth: single local access token, no accounts                                                                                                              | Accepted |
 | 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist                                                                         | Accepted |
 | 2026-10-31 | Plan v0.6: add post-v1 browser use (Phase 9), computer use (Phase 10), and late Codex harness/hybrid runners (Phase 11); preserve the first-release scope | Planned  |
+| 2026-11-01 | Plan v0.7: add Phase 12 MCP plugin support for explicitly configured, permissioned MCP servers; no marketplace or automatic plugin installation           | Planned  |

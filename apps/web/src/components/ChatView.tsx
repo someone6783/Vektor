@@ -1,14 +1,24 @@
-import { useEffect, useRef, useState } from "react";
-import type { Channel, Message, Profile, Run } from "@vektor/shared";
+import { ModelPicker } from "./ModelPicker";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useChunkedStreaming } from "../lib/streamingPreference";
+import { useStreamedText } from "../lib/useStreamedText";
+import type { Channel, Message, ModelInfo, Profile, Run, ReasoningEffort } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { ContextComposer } from "./ContextComposer";
 import { MessageAttachments } from "./Attachments";
 import { RunTimeline } from "./RunTimeline";
 import { Icon } from "./Icon";
 import { Markdown } from "./Markdown";
+import { MessageActivity, RunContent } from "./MessageActivity";
 import type { LiveRun } from "../lib/live";
 
 interface ChatViewProps {
+  queuedMessages?: ReactNode;
+  reasoning?: ReasoningEffort;
+  onReasoningChange?: (value: ReasoningEffort) => void;
+  models?: ModelInfo[];
+  onModelChange?: (model: string) => void;
+  onExecutionSettings?: (section: "terminal" | "browser") => void;
   activeRunCount?: number;
   emergencyStopped?: boolean;
   client: ApiClient;
@@ -46,11 +56,14 @@ function MessageRow({ message, client }: { message: Message; client: ApiClient }
           <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
         ) : (
           <>
-            {message.content ? (
+            {message.runId ? (
+              <MessageActivity client={client} runId={message.runId} content={message.content} />
+            ) : message.content ? (
               <Markdown>{message.content}</Markdown>
-            ) : (
+            ) : null}
+            {!message.content && !message.runId ? (
               <p className="text-sm italic text-slate-500">No output.</p>
-            )}
+            ) : null}
             {message.status !== "complete" ? (
               <p className="mt-2 text-[10px] uppercase tracking-wide text-rose-300">
                 {statusLabel[message.status] ?? message.status}
@@ -67,6 +80,12 @@ function MessageRow({ message, client }: { message: Message; client: ApiClient }
 }
 
 export function ChatView({
+  queuedMessages,
+  reasoning = "auto",
+  onReasoningChange,
+  models = [],
+  onModelChange,
+  onExecutionSettings,
   activeRunCount = 0,
   emergencyStopped = false,
   client,
@@ -90,12 +109,13 @@ export function ChatView({
     () =>
       typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1101px)").matches,
   );
-  const liveText = live?.text ?? "";
+  const chunkedStreaming = useChunkedStreaming();
+  const liveText = useStreamedText(live, chunkedStreaming);
   const liveLength = live?.tools.length ?? 0;
 
   useEffect(() => {
     scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight, behavior: "auto" });
-  }, [messages.length, liveText.length, liveLength]);
+  }, [messages.length, liveText.length, liveLength, live?.phase]);
 
   if (!channel || !profile) {
     return (
@@ -135,15 +155,30 @@ export function ChatView({
             style={{ backgroundColor: `var(--profile-${profile.color})` }}
           />
           {profile.name}
-          <span className="text-slate-500">· {profile.terminalMode}</span>
-          <span className="text-slate-600">·</span>
-          <span className="truncate font-mono text-[11px]" title={profile.model}>
-            {profile.model}
-          </span>
         </div>
         <button
           type="button"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-slate-300 hover:bg-white/5"
+          className="header-control"
+          onClick={() => onExecutionSettings?.("terminal")}
+          aria-label="Terminal settings"
+          title="Terminal settings"
+        >
+          <Icon name="terminal" />
+          <span className="header-control-label">Terminal</span>
+        </button>
+        <button
+          type="button"
+          className="header-control"
+          onClick={() => onExecutionSettings?.("browser")}
+          aria-label="Browser settings"
+          title="Browser settings"
+        >
+          <Icon name="browser" />
+          <span className="header-control-label">Browser</span>
+        </button>
+        <button
+          type="button"
+          className="header-control"
           aria-label={contextOpen ? "Hide context" : "Show context"}
           aria-controls="workspace-context"
           aria-expanded={contextOpen}
@@ -177,10 +212,6 @@ export function ChatView({
             ) : messages.length === 0 && !live ? (
               <div className="mx-auto mt-16 max-w-md text-center">
                 <p className="text-sm font-medium text-slate-300">Start the conversation.</p>
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Messages stream from the provider and are persisted as ordered run events. Reload
-                  mid-stream and the same run replays.
-                </p>
               </div>
             ) : (
               <div className="chat-column flex flex-col gap-6">
@@ -193,31 +224,20 @@ export function ChatView({
                     <div className="message-assistant rounded-2xl px-4 py-3">
                       <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wide text-accent-300/80">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent-400" />
-                        {live.status === "running" ? "Streaming" : live.status}
-                        <span className="text-slate-600">seq {live.lastSeq}</span>
+                        <span role="status">
+                          {live.status === "running"
+                            ? live.phase === "thinking"
+                              ? "Thinking…"
+                              : live.phase === "tools"
+                                ? "Using tools…"
+                                : "Responding…"
+                            : live.status}
+                        </span>
                       </div>
 
-                      {live.text ? (
-                        <Markdown>{live.text}</Markdown>
-                      ) : (
-                        <div className="flex gap-1 py-2">
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400/60" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400/40 [animation-delay:100ms]" />
-                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-accent-400/20 [animation-delay:200ms]" />
-                        </div>
-                      )}
-
-                      {live.tools.length > 0 ? (
-                        <ul className="mt-3 space-y-1">
-                          {live.tools.map((tool) => (
-                            <li
-                              key={tool.id}
-                              className="rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1 font-mono text-[10px] text-amber-200/80"
-                            >
-                              tool: {tool.name}
-                            </li>
-                          ))}
-                        </ul>
+                      <RunContent live={live} chunked={chunkedStreaming} />
+                      {!liveText && !live.blocks.length && live.status === "running" ? (
+                        <p className="py-2 text-xs text-slate-500">Preparing response…</p>
                       ) : null}
 
                       {live.usage ? (
@@ -236,13 +256,29 @@ export function ChatView({
           </div>
 
           {error ? (
-            <p className="mx-6 mb-2 rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
-              {error}
-            </p>
+            <div className="chat-notice">
+              <p
+                role="alert"
+                className="chat-column break-words rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200"
+              >
+                {error}
+              </p>
+            </div>
           ) : null}
 
           <div className="chat-composer">
+            {queuedMessages}
             <ContextComposer
+              modelControls={
+                <ModelPicker
+                  client={client}
+                  model={profile.model}
+                  models={models}
+                  onChange={onModelChange}
+                  reasoning={reasoning}
+                  onReasoningChange={onReasoningChange}
+                />
+              }
               contextTarget={contextTarget}
               activeRunCount={activeRunCount}
               key={channel.id}

@@ -36,5 +36,11 @@
     ],
     "category": "Productivity",
     "shortDescription": "A local AI workspace"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMyMTQ5QjVFMzI4OTVEMEUKUldRT1hZa3lYcHNVd3F5MEc4UExDb3Z6d29abjZoRUVPYlZWSTVZK1h1dmJYOGRENS9PWVNRNk8K",
+      "dangerousInsecureTransportProtocol": true
+    }
   }
 }

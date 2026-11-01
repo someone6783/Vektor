@@ -98,3 +98,30 @@ describe("OpenRouter normalizer", () => {
     expect(events.filter((event) => event.type === "text.delta")).toHaveLength(2);
   });
 });
+
+it("normalizes reasoning without duplicate structured copies or encrypted details", async () => {
+  const events = await collect([
+    `data: ${JSON.stringify({ choices: [{ delta: { reasoning: "First thought. ", reasoning_details: [{ type: "reasoning.text", text: "First thought. " }] } }] })}\n\n`,
+    `data: ${JSON.stringify({
+      choices: [
+        {
+          delta: {
+            reasoning_details: [
+              { type: "reasoning.summary", summary: "Summary. " },
+              { type: "reasoning.text", text: "Next thought." },
+              { type: "reasoning.encrypted", data: "private-signature" },
+            ],
+          },
+        },
+      ],
+    })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "Answer" }, finish_reason: "stop" }] })}\n\n`,
+    "data: [DONE]\n\n",
+  ]);
+  expect(events.filter((event) => event.type !== "reasoning.details")).toEqual([
+    { type: "reasoning.delta", text: "First thought. " },
+    { type: "reasoning.delta", text: "Summary. Next thought." },
+    { type: "text.delta", text: "Answer" },
+    { type: "finish", reason: "stop" },
+  ]);
+});

@@ -34,6 +34,7 @@ function describeEvent(event: RunEvent): string {
   switch (event.type) {
     case "run.started":
       return `runner: ${event.runner}`;
+    case "reasoning.delta":
     case "message.delta":
       return JSON.stringify(event.text);
     case "tool.requested":

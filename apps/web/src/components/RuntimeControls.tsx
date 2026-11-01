@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useAnchoredMenu } from "../lib/useAnchoredMenu";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Icon } from "./Icon";
 import type { RuntimeState } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 
@@ -7,16 +9,19 @@ export function RuntimeControls({
   onStoppedChange,
   onActiveRunsChange,
   onError,
+  children,
 }: {
   client: ApiClient;
   onStoppedChange: (stopped: boolean) => void;
   onActiveRunsChange?: (count: number) => void;
   onError: (error: unknown) => void;
+  children?: ReactNode;
 }) {
   const [state, setState] = useState<RuntimeState | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menu = useRef<HTMLDetailsElement>(null);
+  useAnchoredMenu(menu);
   const pendingApprovals = state?.approvals.map((approval) => approval.id).join(",") ?? "";
   useEffect(() => {
     if (menu.current && (pendingApprovals || state?.emergencyStopped || error))
@@ -90,22 +95,13 @@ export function RuntimeControls({
         onClick={() => void action(() => client.emergencyStop())}
         className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[10px] transition focus-visible:outline focus-visible:outline-rose-300 disabled:opacity-50 ${state?.emergencyStopped ? "bg-rose-400/10 text-rose-200" : "text-slate-500 hover:bg-rose-400/10 hover:text-rose-200"}`}
       >
-        <svg
-          aria-hidden="true"
-          width="12"
-          height="12"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-        >
-          <rect x="3" y="3" width="10" height="10" rx="2" />
-        </svg>
+        <Icon name="stop" />
         <span className="hidden xl:inline">
           {state?.emergencyStopped ? "Stopped" : "Emergency stop"}
         </span>
       </button>
       <details
+        className="action-menu"
         ref={menu}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
@@ -116,9 +112,13 @@ export function RuntimeControls({
         }}
       >
         <summary
-          aria-label="Runtime details"
-          title="Runtime details and command approvals"
-          className="flex h-7 cursor-pointer list-none items-center gap-1 rounded-md px-1 text-slate-500 outline-none hover:bg-white/5 hover:text-slate-200 focus-visible:ring-1 focus-visible:ring-emerald-400 [&::-webkit-details-marker]:hidden"
+          aria-label={children ? "Workspace actions" : "Runtime details"}
+          title={
+            children
+              ? "Workspace actions and runtime details"
+              : "Runtime details and command approvals"
+          }
+          className="relative cursor-pointer outline-none"
         >
           <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <circle cx="3" cy="8" r="1" />
@@ -126,12 +126,26 @@ export function RuntimeControls({
             <circle cx="13" cy="8" r="1" />
           </svg>
           {state?.approvals.length ? (
-            <span className="rounded bg-amber-300/10 px-1 text-amber-200">
+            <span className="absolute -right-1 -top-1 rounded bg-amber-300 px-1 text-[10px] text-slate-950">
               {state.approvals.length}
             </span>
           ) : null}
         </summary>
         <div className="absolute right-0 top-full z-50 mt-3 max-h-[calc(100dvh-5rem)] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-white/10 bg-slate-900 p-4 text-xs text-slate-300 shadow-xl">
+          {children ? (
+            <div
+              className="action-menu-content runtime-workspace-actions"
+              onClick={(event) => {
+                const button = (event.target as HTMLElement).closest("button");
+                if (button && !button.disabled && menu.current) {
+                  menu.current.open = false;
+                  menu.current.querySelector("summary")?.focus();
+                }
+              }}
+            >
+              {children}
+            </div>
+          ) : null}
           <h2 className="mb-3 font-medium text-slate-100">Runtime</h2>
           {error ? (
             <p role="alert" className="mb-2 text-rose-300">

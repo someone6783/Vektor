@@ -21,6 +21,7 @@ import {
   messagesResponseSchema,
   sendMessageSchema,
   contextRequestSchema,
+  contextReasoning,
   type SendMessageResponse,
 } from "@vektor/shared";
 import type { RunManager } from "../runs/run-manager.js";
@@ -155,12 +156,12 @@ export function registerMessageRoutes(
       userMessageId: message.id,
       model,
       context: prepared.estimate,
-      terminalMode: profile.terminalMode,
+      terminalMode: prepared.profile.terminalMode,
     });
 
     runManager.start({
       run,
-      profile,
+      profile: prepared.profile,
       messages: chatMessages,
     });
 
@@ -214,6 +215,7 @@ export function registerMessageRoutes(
       content: userMessage.content,
       profileId: profile.id,
       model: previous.model,
+      reasoning: contextReasoning(previous.context),
       attachmentIds: listMessageAttachments(db, userMessage.id)
         .filter((file) => file.included)
         .map((file) => file.id),
@@ -243,12 +245,12 @@ export function registerMessageRoutes(
       includeHistory: previous.includeHistory,
       jobId: previous.jobId,
       context: prepared.estimate,
-      terminalMode: profile.terminalMode,
+      terminalMode: prepared.profile.terminalMode,
     });
 
     runManager.start({
       run,
-      profile,
+      profile: prepared.profile,
       messages: chatMessages,
     });
 
@@ -271,6 +273,7 @@ export function registerMessageRoutes(
         content: message.content,
         profileId: run.profileId,
         model: run.model,
+        reasoning: contextReasoning(run.context),
         attachmentIds: listMessageAttachments(db, message.id)
           .filter((file) => file.included)
           .map((file) => file.id),

@@ -127,16 +127,16 @@ export class ProviderService {
     return { fetchedAt: 0, models: [] };
   }
 
-  async refreshModels(): Promise<ModelInfo[]> {
+  async refreshModels(requireKey = true): Promise<ModelInfo[]> {
     const { key } = this.getKey();
-    if (!key) {
+    if (requireKey && !key) {
       throw new MissingProviderKeyError();
     }
 
     const provider =
       this.providerOverride && this.providerOverride.listModels
         ? this.providerOverride
-        : new OpenRouterProvider({ apiKey: key, baseUrl: this.baseUrl });
+        : new OpenRouterProvider({ apiKey: key ?? "", baseUrl: this.baseUrl });
 
     if (!provider.listModels) {
       throw new Error("The configured provider does not support model listing.");

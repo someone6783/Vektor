@@ -1,6 +1,6 @@
 import { normalizeOpenRouterStream } from "./openrouter.js";
 import type { ChatProvider, ChatRequest, ProviderEvent } from "./types.js";
-import type { ModelInfo } from "@vektor/shared";
+import { reasoningEffortSchema, type ModelInfo } from "@vektor/shared";
 
 export interface OpenRouterProviderOptions {
   apiKey: string;
@@ -40,8 +40,9 @@ export class OpenRouterProvider implements ChatProvider {
 
   async listModels(): Promise<ModelInfo[]> {
     const response = await this.fetchImpl(`${this.baseUrl}/models`, {
+      signal: AbortSignal.timeout(15_000),
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         "HTTP-Referer": "http://localhost:8787",
         "X-Title": "Vektor",
       },
@@ -60,6 +61,8 @@ export class OpenRouterProvider implements ChatProvider {
         name?: string;
         context_length?: number;
         architecture?: { input_modalities?: string[] };
+        supported_parameters?: string[];
+        reasoning?: { supported_efforts?: string[] | null; mandatory?: boolean };
       }>;
     };
 
@@ -72,11 +75,37 @@ export class OpenRouterProvider implements ChatProvider {
           name?: string;
           context_length?: number;
           architecture?: { input_modalities?: string[] };
+          supported_parameters?: string[];
+          reasoning?: { supported_efforts?: string[] | null; mandatory?: boolean };
         } => typeof model.id === "string" && model.id.length > 0,
       )
       .map((model) => ({
         id: model.id,
         name: model.name ?? model.id,
+        ...(model.reasoning || model.supported_parameters
+          ? {
+              supportsReasoning:
+                !!model.reasoning || model.supported_parameters?.includes("reasoning") === true,
+              reasoningMandatory: model.reasoning?.mandatory ?? false,
+              ...(model.reasoning?.supported_efforts !== undefined
+                ? {
+                    reasoningEfforts: (
+                      model.reasoning.supported_efforts ?? [
+                        "none",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                      ]
+                    ).filter(
+                      (effort) => reasoningEffortSchema.safeParse(effort).success,
+                    ) as ModelInfo["reasoningEfforts"],
+                  }
+                : {}),
+            }
+          : {}),
         ...(model.architecture?.input_modalities
           ? { supportsImages: model.architecture.input_modalities.includes("image") }
           : {}),
@@ -106,6 +135,16 @@ export class OpenRouterProvider implements ChatProvider {
           ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
           ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
           usage: { include: true },
+          ...(request.reasoning && request.reasoning !== "auto"
+            ? {
+                reasoning:
+                  request.reasoning === "on"
+                    ? { enabled: true, exclude: false }
+                    : request.reasoning === "none"
+                      ? { enabled: false }
+                      : { effort: request.reasoning, exclude: false },
+              }
+            : {}),
           ...(request.tools?.length ? { tools: request.tools, tool_choice: "auto" } : {}),
         }),
         signal: request.signal,

@@ -4,6 +4,14 @@ interface OpenRouterChunk {
   choices?: Array<{
     delta?: {
       content?: string | null;
+      reasoning?: string | null;
+      reasoning_details?: Array<{
+        type?: string;
+        text?: string;
+        summary?: string;
+        index?: number;
+        [key: string]: unknown;
+      }>;
       tool_calls?: Array<{
         index?: number;
         id?: string;
@@ -46,6 +54,7 @@ export async function* normalizeOpenRouterStream(
   let finishReason: FinishReason | undefined;
   let usage: Extract<ProviderEvent, { type: "usage" }> | undefined;
   let streamError: string | undefined;
+  const reasoningDetails = new Map<number, Record<string, unknown>>();
   const toolCalls = new Map<number, { id: string; name: string; argumentsJson: string }>();
 
   const processLine = (rawLine: string): ProviderEvent[] => {
@@ -78,6 +87,30 @@ export async function* normalizeOpenRouterStream(
     const events: ProviderEvent[] = [];
     const choice = parsed.choices?.[0];
     const text = choice?.delta?.content;
+    for (const [position, detail] of (choice?.delta?.reasoning_details ?? []).entries()) {
+      const index = detail.index ?? position;
+      const previous = reasoningDetails.get(index) ?? {};
+      const merged = { ...previous, ...detail };
+      for (const field of ["text", "summary", "data", "signature"]) {
+        if (typeof previous[field] === "string" && typeof detail[field] === "string")
+          merged[field] = previous[field] + detail[field];
+      }
+      reasoningDetails.set(index, merged);
+    }
+
+    // The legacy field and structured details can contain the same text; emit it once.
+    const reasoning =
+      choice?.delta?.reasoning ||
+      (choice?.delta?.reasoning_details ?? [])
+        .map((detail) =>
+          detail.type === "reasoning.text"
+            ? (detail.text ?? "")
+            : detail.type === "reasoning.summary"
+              ? (detail.summary ?? "")
+              : "",
+        )
+        .join("");
+    if (reasoning) events.push({ type: "reasoning.delta", text: reasoning });
 
     if (typeof text === "string" && text.length > 0) {
       events.push({ type: "text.delta", text });
@@ -152,6 +185,18 @@ export async function* normalizeOpenRouterStream(
     yield { type: "error", message: "Provider stream ended before completion." };
     yield { type: "finish", reason: "error" };
     return;
+  }
+
+  if (reasoningDetails.size) {
+    const details = [...reasoningDetails.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, value]) => value);
+    if (JSON.stringify(details).length > 1_000_000) {
+      yield { type: "error", message: "Provider reasoning metadata exceeded its size limit." };
+      yield { type: "finish", reason: "error" };
+      return;
+    }
+    yield { type: "reasoning.details", details };
   }
 
   const orderedCalls = [...toolCalls.entries()].sort(([left], [right]) => left - right);

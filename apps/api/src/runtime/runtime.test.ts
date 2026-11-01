@@ -5,6 +5,9 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRun,
+  getChannel,
+  getProfile,
+  updateChannel,
   listApprovals,
   listAudit,
   listMessages,
@@ -103,6 +106,113 @@ async function completed(id: string) {
 }
 
 describe("permissioned runtime API", () => {
+  it("applies saved conversation permissions without changing the shared profile", async () => {
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/channels/${channelId}`,
+      headers,
+      payload: {
+        execution: {
+          terminalMode: "basic",
+          browser: { mode: "observe", allowedOrigins: ["https://example.com"] },
+        },
+      },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().channel.execution.terminalMode).toBe("basic");
+    expect(getProfile(storage.db, profileId)?.terminalMode).toBe("no-terminal");
+    const channels = (await app.inject({ method: "GET", url: "/api/channels", headers })).json()
+      .channels;
+    expect(
+      channels.find((channel: { id: string }) => channel.id === channelId).execution.browser.mode,
+    ).toBe("observe");
+    const { run } = (await send()).json();
+    await completed(run.id);
+    expect(getRun(storage.db, run.id)?.status).toBe("completed");
+    expect(getRun(storage.db, run.id)?.terminalMode).toBe("basic");
+    expect(requests[0]?.tools?.map((tool) => tool.function.name)).toEqual(["terminal", "browser"]);
+    const other = (
+      await app.inject({
+        method: "POST",
+        url: "/api/channels",
+        headers,
+        payload: { name: "Other", profileId },
+      })
+    ).json().channel;
+    expect(other.execution).toEqual({});
+    const reset = await app.inject({
+      method: "PATCH",
+      url: `/api/channels/${channelId}`,
+      headers,
+      payload: { execution: null },
+    });
+    expect(reset.json().channel.execution).toEqual({});
+  });
+  it("cancels active work when conversation permissions change", async () => {
+    await app.inject({
+      method: "PATCH",
+      url: `/api/channels/${channelId}`,
+      headers,
+      payload: { execution: { terminalMode: "full-access" } },
+    });
+    const { run } = (await send()).json();
+    await vi.waitFor(() => expect(listApprovals(storage.db, run.id)).toHaveLength(1));
+    await app.inject({
+      method: "PATCH",
+      url: `/api/channels/${channelId}`,
+      headers,
+      payload: { execution: { terminalMode: "no-terminal" } },
+    });
+    expect(getRun(storage.db, run.id)?.status).toBe("cancelled");
+  });
+
+  it.each(["success", "failure", "manual rename"])(
+    "names a temporary DM after its reply: %s",
+    async (scenario) => {
+      await app.close();
+      provider = {
+        async *streamChat(request) {
+          requests.push(request);
+          if (request.maxTokens === 64) {
+            if (scenario === "manual rename")
+              updateChannel(storage.db, channelId, { name: "My chosen name" });
+            if (scenario === "failure") throw new Error("Title generation unavailable");
+            yield { type: "text.delta", text: '"Working with files"' };
+          } else yield { type: "text.delta", text: "Here is the reply." };
+          yield { type: "usage", promptTokens: 10, completionTokens: 5, totalTokens: 15 };
+          yield { type: "finish", reason: "stop" };
+        },
+      };
+      await open();
+      channelId = (
+        await app.inject({
+          method: "POST",
+          url: "/api/channels",
+          headers,
+          payload: { name: "New conversation 1", kind: "dm", profileId },
+        })
+      ).json().channel.id;
+      const { run } = (await send()).json();
+      await completed(run.id);
+      expect(getRun(storage.db, run.id)?.status).toBe("completed");
+      expect(getChannel(storage.db, channelId)?.name).toBe(
+        scenario === "success"
+          ? "Working with files"
+          : scenario === "manual rename"
+            ? "My chosen name"
+            : "New conversation 1",
+      );
+      expect(
+        listMessages(storage.db, channelId).messages.filter(
+          (message) => message.role === "assistant",
+        ),
+      ).toEqual([expect.objectContaining({ content: "Here is the reply." })]);
+      expect(requests).toHaveLength(2);
+      expect(getRun(storage.db, run.id)?.providerCalls).toBe(2);
+      if (scenario !== "failure") expect(getRun(storage.db, run.id)?.usage?.totalTokens).toBe(30);
+    },
+  );
+
   it("rolls back a failed completion as one unit before persisting a failed run", async () => {
     await mode("basic");
     storage.sqlite.exec(
@@ -225,6 +335,68 @@ describe("permissioned runtime API", () => {
     expect(listAudit(storage.db).some((row) => row.action === "tool.denied")).toBe(true);
   });
 
+  it("redacts and persists reasoning separately from the answer", async () => {
+    provider.streamChat = async function* () {
+      yield { type: "reasoning.delta", text: "Consider runtime-test-" };
+      yield { type: "reasoning.delta", text: "access-token before answering." };
+      yield { type: "text.delta", text: "The answer." };
+      yield { type: "finish", reason: "stop" };
+    };
+    const { run } = (await send()).json();
+    await completed(run.id);
+    const events = listRunEvents(storage.db, run.id).map((event) => JSON.parse(event.payloadJson));
+    const reasoning = events
+      .filter((event) => event.type === "reasoning.delta")
+      .map((event) => event.text)
+      .join("");
+    expect(reasoning).toContain("Consider");
+    expect(reasoning).not.toContain("runtime-test-access-token");
+    const saved = listMessages(storage.db, channelId).messages.find(
+      (message) => message.runId === run.id,
+    );
+    expect(saved?.content).toBe("The answer.");
+    const result = await app.inject({ url: `/api/runs/${run.id}/details?transcript=1`, headers });
+    expect(result.json().transcript.map((event: { type: string }) => event.type)).toEqual([
+      "reasoning.delta",
+      "message.delta",
+    ]);
+  });
+
+  it("keeps reasoning settings through tool calls and retries while retaining opaque provider metadata only internally", async () => {
+    await mode("basic");
+    const original = provider.streamChat.bind(provider);
+    const details = [{ type: "reasoning.encrypted", data: "opaque-provider-data", index: 0 }];
+    provider.streamChat = async function* (request) {
+      if (request.messages.at(-1)?.role !== "tool") {
+        yield { type: "reasoning.delta", text: "Check the workspace." };
+        yield { type: "reasoning.details", details };
+      }
+      yield* original(request);
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/channels/${channelId}/messages`,
+      headers,
+      payload: { content: "Check", reasoning: "high" },
+    });
+    expect(response.statusCode).toBe(201);
+    const run = response.json().run;
+    await completed(run.id);
+    expect(getRun(storage.db, run.id)?.context).toMatchObject({ reasoning: "high" });
+    expect(requests.map((request) => request.reasoning)).toEqual(["high", "high"]);
+    expect(requests[1]?.messages.at(-2)?.reasoning_details).toEqual(details);
+    expect(JSON.stringify(listRunEvents(storage.db, run.id))).not.toContain("opaque-provider-data");
+    const retry = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/retry`,
+      headers,
+      payload: {},
+    });
+    expect(retry.statusCode).toBe(201);
+    await completed(retry.json().run.id);
+    expect(requests.every((request) => request.reasoning === "high")).toBe(true);
+  });
+
   it("executes basic commands and sends tool results with matching call IDs back to the model", async () => {
     await mode("basic");
     const { run } = (await send()).json();
@@ -246,6 +418,37 @@ describe("permissioned runtime API", () => {
       headers,
     });
     expect(details.json().tools[0].status).toBe("completed");
+    const transcript = await app.inject({
+      method: "GET",
+      url: `/api/runs/${run.id}/details?transcript=1`,
+      headers,
+    });
+    const fullEvents = listRunEvents(storage.db, run.id).map((event) =>
+      JSON.parse(event.payloadJson),
+    );
+    expect(
+      transcript
+        .json()
+        .transcript.filter((event: { type: string }) => event.type === "tool.requested")
+        .map((event: { toolCallId: string }) => event.toolCallId),
+    ).toEqual(
+      fullEvents
+        .filter((event) => event.type === "tool.requested")
+        .map((event) => event.toolCallId),
+    );
+    expect(
+      transcript
+        .json()
+        .transcript.filter((event: { type: string }) => event.type === "message.delta")
+        .map((event: { text: string }) => event.text)
+        .join(""),
+    ).toBe(
+      fullEvents
+        .filter((event) => event.type === "message.delta")
+        .map((event) => event.text)
+        .join(""),
+    );
+
     expect(details.json().events.map((event: { type: string }) => event.type)).toContain(
       "tool.output",
     );
@@ -279,29 +482,42 @@ describe("permissioned runtime API", () => {
     finish();
   });
 
-  it("runs Full Unrestricted shell commands outside the workspace without approvals", async () => {
-    const response = await mode("full-unrestricted");
-    expect(response.statusCode).toBe(200);
-    const target = join(directory, "unrestricted-marker.txt");
-    writeFileSync(target, "Remove without approval");
-    commands = [{ command: "sh", args: ["-c", "rm unrestricted-marker.txt"], cwd: directory }];
-    const { run } = (await send()).json();
-    await completed(run.id);
-    expect(getRun(storage.db, run.id)).toMatchObject({
-      status: "completed",
-      terminalMode: "full-unrestricted",
-    });
-    expect(existsSync(target)).toBe(false);
-    expect(listToolCalls(storage.db, run.id)[0]?.status).toBe("completed");
-    expect(listApprovals(storage.db, run.id)).toHaveLength(0);
-    expect(
-      listRunEvents(storage.db, run.id).some((event) => event.type === "approval.requested"),
-    ).toBe(false);
-    expect(
-      requests[0]?.tools?.find((tool) => tool.function.name === "terminal")?.function.description,
-    ).toContain("without user approval");
-    expect(requests[0]?.messages[0]?.content).toContain("without user approval");
-  });
+  it.each(["profile", "conversation"])(
+    "runs Full Unrestricted shell commands outside the workspace without approvals via %s settings",
+    async (source) => {
+      const response =
+        source === "profile"
+          ? await mode("full-unrestricted")
+          : await app.inject({
+              method: "PATCH",
+              url: `/api/channels/${channelId}`,
+              headers,
+              payload: { execution: { terminalMode: "full-unrestricted" } },
+            });
+      expect(response.statusCode).toBe(200);
+      const target = join(directory, "unrestricted-marker.txt");
+      writeFileSync(target, "Remove without approval");
+      commands = [{ command: "sh", args: ["-c", "rm unrestricted-marker.txt"], cwd: directory }];
+      const { run } = (await send()).json();
+      await completed(run.id);
+      expect(getRun(storage.db, run.id)).toMatchObject({
+        status: "completed",
+        terminalMode: "full-unrestricted",
+      });
+      expect(existsSync(target)).toBe(false);
+      expect(listToolCalls(storage.db, run.id)[0]?.status).toBe("completed");
+      expect(listApprovals(storage.db, run.id)).toHaveLength(0);
+      expect(
+        listRunEvents(storage.db, run.id).some((event) => event.type === "approval.requested"),
+      ).toBe(false);
+      expect(
+        requests[0]?.tools?.find((tool) => tool.function.name === "terminal")?.function.description,
+      ).toContain("without user approval");
+      expect(requests[0]?.messages[0]?.content).toContain("without user approval");
+      if (source === "conversation")
+        expect(getProfile(storage.db, profileId)?.terminalMode).toBe("no-terminal");
+    },
+  );
 
   it("requires approval before a full-access destructive command and accepts each approval once", async () => {
     await mode("full-access");

@@ -24,6 +24,20 @@ export function registerSettingsRoutes(
   providerService: ProviderService,
   redact: (text: string) => string,
 ): void {
+  app.get("/api/models", async (request, reply) => {
+    const cache = providerService.getCachedModels();
+    if (cache.models.length > 1 && Date.now() - cache.fetchedAt < 3_600_000)
+      return { models: cache.models };
+    try {
+      return { models: await providerService.refreshModels(false) };
+    } catch {
+      if (cache.models.length > 1) return { models: cache.models };
+      return reply
+        .code(502)
+        .send(makeApiError("models_unavailable", "Unable to load models. Try again."));
+    }
+  });
+
   app.get("/api/settings", async () => toSettingsView(providerService));
 
   app.put("/api/settings", async (request) => {

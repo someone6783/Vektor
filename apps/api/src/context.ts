@@ -1,3 +1,4 @@
+import { conversationProfile } from "./conversation-execution.js";
 import { getProfile, listAttachments, listContextHistory, type VektorDatabase } from "@vektor/db";
 import type { ContextEstimate, ContextRequest } from "@vektor/shared";
 import type { ProviderService } from "./providers/service.js";
@@ -21,9 +22,10 @@ export class ContextService {
     beforeMessageId?: string,
     includeHistory = true,
   ) {
-    const profile = getProfile(this.db, input.profileId ?? defaultProfileId ?? "");
-    if (!profile || profile.archivedAt !== null)
+    const baseProfile = getProfile(this.db, input.profileId ?? defaultProfileId ?? "");
+    if (!baseProfile || baseProfile.archivedAt !== null)
       throw new AttachmentError("The selected profile is not available.");
+    const profile = conversationProfile(this.db, channelId, baseProfile);
     const model = input.model ?? profile.model;
     const metadata = this.provider.getCachedModels().models.find((item) => item.id === model);
     const contextWindow = metadata?.contextLength ?? 8192;
@@ -67,14 +69,8 @@ export class ContextService {
       inputTokens -= messageTokens(history.shift()!);
       droppedMessages++;
     }
-    const warnings = [
-      "Text tokens are estimated with cl100k_base; the provider's actual usage may differ.",
-      "Context uses up to 100 recent completed messages. Excluded files can still be quoted in earlier chat messages.",
-    ];
-    if (!metadata?.contextLength)
-      warnings.push(
-        "Model context window is unknown; using a conservative 8,192-token limit. Refresh the model list in Settings.",
-      );
+    const warnings: string[] = [];
+    if (!metadata?.contextLength) warnings.push("Context limit unknown; using 8,192 tokens.");
     if (images.length)
       warnings.push(
         "Images reserve 4,096 tokens each for planning. Actual image tokens depend on the model and resolution.",
@@ -87,7 +83,20 @@ export class ContextService {
       warnings.push(
         `${droppedMessages} oldest history messages will be omitted. Saved conversation history is preserved.`,
       );
+    if (input.reasoning && !["auto"].includes(input.reasoning)) {
+      if (metadata?.supportsReasoning === false)
+        throw new AttachmentError("This model does not support reasoning controls.");
+      if (input.reasoning === "none" && metadata?.reasoningMandatory)
+        throw new AttachmentError("Reasoning cannot be disabled for this model.");
+      if (
+        !["on", "none"].includes(input.reasoning) &&
+        metadata?.reasoningEfforts &&
+        !metadata.reasoningEfforts.includes(input.reasoning)
+      )
+        throw new AttachmentError("This reasoning effort is not supported by the selected model.");
+    }
     const estimate: ContextEstimate = {
+      ...(input.reasoning ? { reasoning: input.reasoning } : {}),
       model,
       contextWindow,
       windowSource: metadata?.contextLength ? "model" : "fallback",

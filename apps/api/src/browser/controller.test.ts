@@ -77,6 +77,15 @@ beforeEach(async () => {
       return;
     }
     response.setHeader("Content-Type", "text/html");
+    if (request.url === "/connection-error") {
+      request.socket.destroy();
+      return;
+    }
+    if (request.url === "/slow-script") return;
+    if (request.url === "/slow-page") {
+      response.end('<h1>Slow page</h1><script src="/slow-script"></script>');
+      return;
+    }
     if (request.url === "/redirect") {
       response.writeHead(302, { Location: `${outsideOrigin}/private` });
       response.end();
@@ -177,6 +186,54 @@ describe("real isolated Chromium controller", () => {
       await display.stop();
     }
   }, 30_000);
+  it("allows page POST requests in an interactive window without approval", async () => {
+    const display = await testDisplay();
+    permissions.display = "window";
+    approval = async () => false;
+    const value = browser({ desktop: browserDesktop({ DISPLAY: display.display }, "linux") });
+    try {
+      await value.execute({ action: "navigate", url: `${origin}/resources` });
+      await vi.waitFor(() => expect(posts).toBe(1));
+      expect(descriptions).toEqual([]);
+      const context = (value as unknown as { context: BrowserContext }).context;
+      const result = await context.pages()[0]!.evaluate(async () => {
+        const response = await fetch("/submit", { method: "POST", body: "another request" });
+        return response.ok;
+      });
+      expect(result).toBe(true);
+      expect(posts).toBe(2);
+      expect(descriptions).toEqual([]);
+    } finally {
+      await value.close();
+      await display.stop();
+    }
+  }, 30_000);
+
+  it("keeps a visible window usable after navigation timeouts and connection failures", async () => {
+    const display = await testDisplay();
+    permissions.display = "window";
+    const value = browser({ desktop: browserDesktop({ DISPLAY: display.display }, "linux") });
+    try {
+      await value.execute({ action: "navigate", url: origin });
+      const context = (value as unknown as { context: BrowserContext }).context;
+      context.setDefaultNavigationTimeout(200);
+      const slow = await value.execute({ action: "navigate", url: `${origin}/slow-page` });
+      expect(slow.note).toContain("Navigation timed out");
+      expect(slow.active).toBe(true);
+      context.setDefaultNavigationTimeout(5000);
+      await expect(
+        value.execute({ action: "navigate", url: `${origin}/connection-error` }),
+      ).rejects.toThrow();
+      expect(context.pages()[0]!.isClosed()).toBe(false);
+      const recovered = await value.execute({ action: "navigate", url: origin });
+      expect(recovered.snapshot).toContain("Fixture form");
+      expect(recovered.active).toBe(true);
+    } finally {
+      await value.close();
+      await display.stop();
+    }
+  }, 30_000);
+
   it("reports an unavailable desktop instead of silently launching headless", async () => {
     permissions.display = "window";
     const value = browser({ desktop: browserDesktop({}, "linux") });

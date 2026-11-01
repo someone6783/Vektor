@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { compactTranscript } from "../runs/transcript.js";
 import {
   getRun,
   listApprovals,
@@ -61,10 +62,13 @@ export function registerRuntimeRoutes(
     };
   });
   app.get("/api/runs/:runId/details", async (request) => {
+    const query = z.object({ transcript: z.literal("1").optional() }).parse(request.query);
     const { runId } = request.params as { runId: string };
     const run = getRun(db, runId);
     if (!run) throw new RuntimeError("Run not found.", 404);
+    const events = listRunEvents(db, runId);
     return {
+      ...(query.transcript ? { transcript: compactTranscript(events) } : {}),
       browser: manager.browserState(runId),
       run: toRun(run),
       tools: listToolCalls(db, runId).map((tool) =>
@@ -76,8 +80,8 @@ export function registerRuntimeRoutes(
         }),
       ),
       approvals: listApprovals(db, runId).map(approvalView),
-      events: listRunEvents(db, runId)
-        .filter((event) => event.type !== "message.delta")
+      events: events
+        .filter((event) => event.type !== "message.delta" && event.type !== "reasoning.delta")
         .slice(-200)
         .map((event) => runEventSchema.parse(JSON.parse(event.payloadJson))),
     };

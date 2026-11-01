@@ -82,8 +82,9 @@ also detects trusted input in the managed page, pauses the agent and cancels pen
 approvals. Page JavaScript cannot invoke that isolated binding; typed characters
 are never included in its messages. Use the explicit pause control before entering
 secrets, especially in embedded frames or while an automated action is in flight.
-Network writes still pass the existing approval gate, and observation still blocks
-them. A visible window does not grant unrestricted agent or network access.
+Network requests in visible interactive windows proceed automatically, including
+background page requests. Observation still blocks writes. Origin, address,
+credential and size checks continue to apply.
 
 The window closes with its run, cancellation, disconnect or emergency stop. Closing
 it directly does not cause the agent to reopen it automatically; start a new run.
@@ -158,10 +159,11 @@ Interactive profiles add filling, clicking and scoped file transfers. Every clic
 requires an approval bound to the page URL, navigation generation, connected element,
 element/form markup and current form field values. The prompt includes an untrusted
 target label and a SHA-256 fingerprint, not private field values. A subsequent
-non-GET/HEAD request requires a separate approval bound to method, URL, payload hash,
+non-GET/HEAD request in a headless session requires a separate approval bound to method, URL, payload hash,
 source page and session generation. Denial prevents the action/request. Approval is
 single-use, expires after 30 seconds, and is invalidated by pause, page/target change,
-permission change, shutdown or emergency stop. Background tabs cannot make writes.
+permission change, shutdown or emergency stop. Headless background tabs cannot make writes.
+Visible interactive windows allow network writes without request approvals.
 Scheduled jobs have a separate browser declaration, default off, that can only reduce
 the profile's capability. Interactive scheduled jobs wait for the same human approvals.
 They never infer unattended consent from the schedule or page content.
@@ -176,7 +178,7 @@ Open Managed browser in the run timeline to pause and take over using the page's
 element references. The agent waits while paused; reference changes require a new
 snapshot. The original run deadline continues to apply. Already dispatched actions
 cannot be undone, while later requests/actions are blocked or require fresh approval.
-User clicks during takeover are explicit actions; network writes still prompt.
+User clicks during takeover are explicit actions; headless network writes still prompt.
 Model access to password/payment/one-time-code/secret fields is refused. Takeover
 typing is private by default, with an explicit Private input toggle for public text.
 Private input suppresses subsequent DOM previews and screenshots, hides URL paths
@@ -196,7 +198,7 @@ a 2 MiB limit. HTML, scripts and executables are refused; normal document/image
 extraction and channel quotas also apply. Downloads become excluded channel
 attachments with previews. They are not silently added to model context or executed.
 Automatic browser downloads are cancelled. Automatic page uploads/network writes
-cannot bypass the request approval gate.
+in headless sessions cannot bypass the request approval gate.
 
 Screenshots mask all form fields and editable regions. Private sessions produce no
 new screenshots. Authenticated artifact routes serve JPEG bytes with no-store and
@@ -211,8 +213,9 @@ shrinking after deletion.
 
 At most two sessions, four tabs per session, 50 actions and 200 HTTP requests per
 session are allowed. Transfers/responses are capped at 2 MiB; browser actions have
-five-second timeouts, navigation eight seconds, startup 15 seconds and waits at most
-two seconds. The existing run deadline, tool-loop/context/output budgets and global
+five-second timeouts, navigation 20 seconds, HTTP requests 15 seconds, startup 15 seconds and waits at most
+two seconds. Navigation timeouts leave the window open for inspection; failed navigation
+error pages remain open so a later explicit navigation can recover. The existing run deadline, tool-loop/context/output budgets and global
 stop controls still apply. Cancellation closes Chromium and aborts pending HTTP
 requests; shutdown waits for session cleanup. Chromium's debugging pipe closes when
 the API dies, ending its process. Restart marks interrupted runs failed, cancels

@@ -6,7 +6,7 @@
     "url": "https://github.com/someone6783/Vektor.git"
   },
   "vektor": {
-    "releaseRepositoryPrivate": true
+    "releaseRepositoryPrivate": false
   },
   "private": true,
   "type": "module",
@@ -34,7 +34,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
-    "test": "pnpm build:packages && node --test scripts/release.test.mjs && pnpm -r test",
+    "test": "pnpm build:packages && node --test scripts/release.test.mjs && python3 scripts/docker-updater.test.py && python3 scripts/install-docker-helper.test.py && pnpm -r test",
     "clean": "pnpm -r --if-present clean"
   },
   "devDependencies": {

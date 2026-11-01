@@ -13,3 +13,6 @@ data/
 apps/web/src-tauri/target/
 apps/web/src-tauri/gen/
 release-artifacts/
+
+# Python host-updater bytecode
+__pycache__/

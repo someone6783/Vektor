@@ -12,4 +12,9 @@ export const countMessageTokens = (message: ChatMessage) =>
         0,
       )) +
   (message.tool_calls ? countTokens(JSON.stringify(message.tool_calls)) : 0) +
-  (message.tool_call_id ? countTokens(message.tool_call_id) : 0);
+  (message.tool_call_id ? countTokens(message.tool_call_id) : 0) +
+  (message.reasoning_details
+    ? countTokens(JSON.stringify(message.reasoning_details))
+    : message.reasoning
+      ? countTokens(message.reasoning)
+      : 0);

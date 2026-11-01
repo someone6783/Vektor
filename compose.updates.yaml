@@ -1,0 +1,9 @@
+# Optional overlay for the host updater. Preserve your existing Compose project name.
+services:
+  vektor:
+    environment:
+      VEKTOR_UPDATE_DIR: /run/vektor-updates
+    volumes:
+      - type: bind
+        source: ${VEKTOR_UPDATE_HOST_DIR:?Set VEKTOR_UPDATE_HOST_DIR to the host updater queue directory}
+        target: /run/vektor-updates

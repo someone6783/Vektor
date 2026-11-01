@@ -1,6 +1,8 @@
-import type { ModelInfo } from "@vektor/shared";
+import type { ModelInfo, ReasoningEffort } from "@vektor/shared";
 
 export interface ChatMessage {
+  reasoning?: string;
+  reasoning_details?: Record<string, unknown>[];
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -21,6 +23,7 @@ export interface ChatRequest {
   messages: ChatMessage[];
   signal?: AbortSignal;
   maxTokens?: number;
+  reasoning?: ReasoningEffort;
   temperature?: number;
   tools?: Array<{
     type: "function";
@@ -30,6 +33,8 @@ export interface ChatRequest {
 
 export type ProviderEvent =
   | { type: "text.delta"; text: string }
+  | { type: "reasoning.delta"; text: string }
+  | { type: "reasoning.details"; details: Record<string, unknown>[] }
   | { type: "tool_call"; id: string; name: string; argumentsJson: string }
   | {
       type: "usage";

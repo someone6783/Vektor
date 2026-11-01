@@ -5,6 +5,7 @@ import {
   browserArtifactSchema,
   type BrowserInput,
   updateCheckSchema,
+  updateInstallSchema,
   type UpdateCheck,
   type UpdatePreferences,
   apiErrorSchema,
@@ -30,12 +31,14 @@ import {
   runSchema,
   sendMessageResponseSchema,
   settingsSchema,
+  modelInfoSchema,
   type Channel,
   type CreateChannelInput,
   type CreateProfileInput,
   type Message,
   type MessagesResponse,
   type ModelInfo,
+  type ReasoningEffort,
   type Profile,
   type Run,
   type RunEvent,
@@ -127,6 +130,14 @@ export class ApiClient {
     await this.request(`/api/runs/${runId}/browser/artifacts`, { method: "DELETE" });
   }
 
+  async updateInstallState() {
+    return updateInstallSchema.parse(await this.request("/api/update-install"));
+  }
+  async installBackendUpdate() {
+    return updateInstallSchema.parse(
+      await this.request("/api/update-install", { method: "POST", body: "{}" }),
+    );
+  }
   async updateCheck(force = false): Promise<UpdateCheck> {
     return updateCheckSchema.parse(await this.request(`/api/update-check?force=${force}`));
   }
@@ -239,8 +250,10 @@ export class ApiClient {
     );
     return { runs: runSchema.array().parse(result.runs), nextBefore: result.nextBefore };
   }
-  async runDetails(id: string): Promise<RunDetails> {
-    return runDetailsSchema.parse(await this.request(`/api/runs/${id}/details`));
+  async runDetails(id: string, transcript = false): Promise<RunDetails> {
+    return runDetailsSchema.parse(
+      await this.request(`/api/runs/${id}/details${transcript ? "?transcript=1" : ""}`),
+    );
   }
   async audit(before?: number): Promise<{ entries: AuditEntry[]; nextBefore: number | null }> {
     const result = await this.request<{ entries: unknown; nextBefore: number | null }>(
@@ -287,6 +300,11 @@ export class ApiClient {
     );
   }
 
+  async listModels(): Promise<ModelInfo[]> {
+    const response = await this.request<{ models: unknown[] }>("/api/models");
+    return response.models.map((model) => modelInfoSchema.parse(model));
+  }
+
   async testProvider(): Promise<{ ok: boolean; models: ModelInfo[] }> {
     const body = await this.request<{ ok: boolean; models: ModelInfo[] }>(
       "/api/settings/provider/test",
@@ -320,8 +338,10 @@ export class ApiClient {
     await this.request<void>(`/api/profiles/${id}`, { method: "DELETE" });
   }
 
-  async listChannels(): Promise<Channel[]> {
-    const body = await this.request<{ channels: unknown }>("/api/channels");
+  async listChannels(includeArchived = false): Promise<Channel[]> {
+    const body = await this.request<{ channels: unknown }>(
+      `/api/channels${includeArchived ? "?includeArchived=1" : ""}`,
+    );
     return channelSchema.array().parse(body.channels);
   }
 
@@ -362,12 +382,16 @@ export class ApiClient {
     profileId?: string,
     attachmentIds?: string[],
     allowTruncation?: boolean,
+    model?: string,
+    reasoning?: ReasoningEffort,
   ): Promise<SendMessageResponse> {
     return sendMessageResponseSchema.parse(
       await this.request<unknown>(`/api/channels/${channelId}/messages`, {
         method: "POST",
         body: JSON.stringify({
           content,
+          model,
+          reasoning,
           ...(profileId ? { profileId } : {}),
           attachmentIds,
           allowTruncation,

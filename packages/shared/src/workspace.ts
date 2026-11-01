@@ -1,3 +1,4 @@
+import { reasoningEffortSchema } from "./reasoning.js";
 import { z } from "zod";
 import { attachmentSchema, contextEstimateSchema } from "./attachments.js";
 import { browserPermissionsSchema } from "./browser.js";
@@ -34,6 +35,9 @@ export const modelInfoSchema = z.object({
   name: z.string().min(1),
   contextLength: z.number().int().positive().optional(),
   supportsImages: z.boolean().optional(),
+  supportsReasoning: z.boolean().optional(),
+  reasoningMandatory: z.boolean().optional(),
+  reasoningEfforts: z.array(reasoningEffortSchema).optional(),
 });
 
 export type ModelInfo = z.infer<typeof modelInfoSchema>;
@@ -58,7 +62,16 @@ export type Profile = z.infer<typeof profileSchema>;
 
 export const channelKindSchema = z.enum(["channel", "dm"]);
 
+export const conversationExecutionSchema = z
+  .object({
+    terminalMode: terminalModeSchema.optional(),
+    browser: browserPermissionsSchema.optional(),
+  })
+  .strict();
+export type ConversationExecution = z.infer<typeof conversationExecutionSchema>;
+
 export const channelSchema = z.object({
+  execution: conversationExecutionSchema.optional(),
   id: z.string().min(1),
   name: z.string().min(1),
   topic: z.string(),
@@ -178,6 +191,7 @@ export type CreateChannelInput = z.infer<typeof createChannelSchema>;
 
 export const updateChannelSchema = z
   .object({
+    execution: conversationExecutionSchema.nullable().optional(),
     name: z.string().min(1).max(80).optional(),
     topic: z.string().max(500).optional(),
     profileId: z.string().min(1).nullable().optional(),
@@ -192,6 +206,7 @@ export const sendMessageSchema = z
     content: z.string().max(100_000),
     profileId: z.string().min(1).optional(),
     model: z.string().min(1).max(200).optional(),
+    reasoning: reasoningEffortSchema.optional(),
     attachmentIds: z.array(z.string().uuid()).max(50).optional(),
     allowTruncation: z.boolean().optional(),
   })

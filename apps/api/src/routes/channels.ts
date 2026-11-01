@@ -1,6 +1,10 @@
+import { conversationExecution, executionKey } from "../conversation-execution.js";
 import type { FastifyInstance } from "fastify";
 import {
   archiveChannel,
+  setSetting,
+  deleteSetting,
+  appendAudit,
   createChannel,
   getChannel,
   getProfile,
@@ -16,12 +20,20 @@ function includeArchived(value: unknown): boolean {
   return value === "1" || value === "true";
 }
 
-export function registerChannelRoutes(app: FastifyInstance, db: VektorDatabase): void {
+export function registerChannelRoutes(
+  app: FastifyInstance,
+  db: VektorDatabase,
+  revokeExecution?: (id: string) => void,
+): void {
+  const serialize = (channel: Parameters<typeof toChannel>[0]) => ({
+    ...toChannel(channel),
+    execution: conversationExecution(db, channel.id),
+  });
   app.get("/api/channels", async (request) => {
     const query = request.query as { includeArchived?: string };
     return {
       channels: listChannels(db, { includeArchived: includeArchived(query.includeArchived) }).map(
-        toChannel,
+        serialize,
       ),
     };
   });
@@ -54,7 +66,7 @@ export function registerChannelRoutes(app: FastifyInstance, db: VektorDatabase):
       profileId,
     });
 
-    return reply.code(201).send({ channel: toChannel(channel) });
+    return reply.code(201).send({ channel: serialize(channel) });
   });
 
   app.patch("/api/channels/:channelId", async (request, reply) => {
@@ -78,14 +90,25 @@ export function registerChannelRoutes(app: FastifyInstance, db: VektorDatabase):
       }
     }
 
-    const channel = updateChannel(db, channelId, input);
+    const { execution, ...patch } = input;
+    if (execution !== undefined) {
+      if (execution === null) deleteSetting(db, executionKey(channelId));
+      else
+        setSetting(db, executionKey(channelId), {
+          ...conversationExecution(db, channelId),
+          ...execution,
+        });
+      appendAudit(db, "channel.permissions_changed", null, { channelId, execution });
+      revokeExecution?.(channelId);
+    }
+    const channel = updateChannel(db, channelId, patch);
     if (!channel) {
       return reply
         .code(404)
         .send(makeApiError("not_found", "Channel not found.", { requestId: request.id }));
     }
 
-    return { channel: toChannel(channel) };
+    return { channel: serialize(channel) };
   });
 
   app.delete("/api/channels/:channelId", async (request, reply) => {

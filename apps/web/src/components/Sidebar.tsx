@@ -10,6 +10,7 @@ interface SidebarProps {
   onCreate: (name: string, kind: "channel" | "dm") => Promise<void>;
   onRename: (id: string, name: string) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
+  onRestore?: (id: string) => Promise<void>;
 }
 
 function ChannelRow({
@@ -18,12 +19,14 @@ function ChannelRow({
   onSelect,
   onRename,
   onArchive,
+  onRestore,
 }: {
   channel: Channel;
   active: boolean;
   onSelect: () => void;
   onRename: (name: string) => Promise<void>;
   onArchive: () => Promise<void>;
+  onRestore?: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(channel.name);
@@ -47,7 +50,11 @@ function ChannelRow({
   };
 
   const archive = async () => {
-    if (!window.confirm(`Archive "${channel.name}"? The history stays in the database.`)) {
+    if (
+      !window.confirm(
+        `Move "${channel.name}" to Settled? You can open or restore it from the bottom of the sidebar.`,
+      )
+    ) {
       return;
     }
 
@@ -83,14 +90,15 @@ function ChannelRow({
             type="button"
             onClick={onSelect}
             aria-current={active ? "page" : undefined}
+            title={channel.name}
             className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm transition ${
-              active
-                ? "font-medium"
-                : "text-slate-400 hover:text-slate-200"
+              active ? "font-medium" : "text-slate-400 hover:text-slate-200"
             }`}
           >
-            <span className="mr-1.5 text-slate-600">{channel.kind === "dm" ? "@" : "#"}</span>
-            {channel.name}
+            <span className="channel-prefix" aria-hidden="true">
+              {channel.kind === "dm" ? "@" : "#"}
+            </span>
+            <span className="channel-name">{channel.name}</span>
           </button>
           <OverflowMenu label={`Actions for ${channel.name}`}>
             <button
@@ -103,14 +111,19 @@ function ChannelRow({
             >
               <Icon name="edit" /> Rename
             </button>
-            <button
-              type="button"
-              onClick={() => void archive()}
-              disabled={busy}
-              className="text-rose-300 hover:bg-white/5"
-            >
-              <Icon name="archive" /> Archive
-            </button>
+            {channel.archivedAt ? (
+              <button
+                type="button"
+                onClick={() => void onRestore?.()}
+                disabled={busy || !onRestore}
+              >
+                <Icon name="refresh" /> Restore
+              </button>
+            ) : (
+              <button type="button" onClick={() => void archive()} disabled={busy}>
+                <Icon name="archive" /> Settle
+              </button>
+            )}
           </OverflowMenu>
         </div>
       )}
@@ -125,13 +138,18 @@ export function Sidebar({
   onCreate,
   onRename,
   onArchive,
+  onRestore,
 }: SidebarProps) {
   const [creating, setCreating] = useState<"channel" | "dm" | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const rooms = channels.filter((channel) => channel.kind === "channel");
-  const dms = channels.filter((channel) => channel.kind === "dm");
+  const rooms = channels.filter((channel) => !channel.archivedAt && channel.kind === "channel");
+  const dms = channels.filter((channel) => !channel.archivedAt && channel.kind === "dm");
+
+  const settled = channels
+    .filter((channel) => channel.archivedAt !== null)
+    .sort((left, right) => (right.archivedAt ?? "").localeCompare(left.archivedAt ?? ""));
 
   const submit = async () => {
     const name = draft.trim();
@@ -168,7 +186,10 @@ export function Sidebar({
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2" aria-label="Conversations">
+      <nav
+        className="sidebar-conversations flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2"
+        aria-label="Conversations"
+      >
         <ul className="space-y-0.5">
           {rooms.map((channel) => (
             <ChannelRow
@@ -192,10 +213,17 @@ export function Sidebar({
           <button
             type="button"
             onClick={() => {
-              setCreating(creating === "dm" ? null : "dm");
-              setDraft("");
+              if (busy) return;
+              setBusy(true);
+              const numbers = dms.map((channel) =>
+                Number(channel.name.match(/^New conversation (\d+)$/)?.[1] ?? 0),
+              );
+              void onCreate(`New conversation ${Math.max(0, ...numbers) + 1}`, "dm").finally(() =>
+                setBusy(false),
+              );
             }}
             className="ml-auto rounded-md border border-white/10 px-1.5 text-sm leading-5 text-slate-400 hover:bg-white/5 hover:text-slate-100"
+            disabled={busy}
             title="New direct conversation"
           >
             +
@@ -217,6 +245,28 @@ export function Sidebar({
             <li className="px-2 py-1 text-xs text-slate-600">No direct conversations.</li>
           ) : null}
         </ul>
+        {settled.length ? (
+          <section className="settled-conversations" aria-label="Settled conversations">
+            <div className="settled-heading">
+              <Icon name="archive" />
+              <h2>Settled</h2>
+              <span>{settled.length}</span>
+            </div>
+            <ul className="space-y-0.5">
+              {settled.map((channel) => (
+                <ChannelRow
+                  key={channel.id}
+                  channel={channel}
+                  active={channel.id === activeChannelId}
+                  onSelect={() => onSelect(channel.id)}
+                  onRename={(name) => onRename(channel.id, name)}
+                  onArchive={() => onArchive(channel.id)}
+                  onRestore={onRestore ? () => onRestore(channel.id) : undefined}
+                />
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </nav>
 
       {creating ? (

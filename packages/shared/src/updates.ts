@@ -33,3 +33,20 @@ export const updatePreferencesSchema = z
   })
   .strict();
 export type UpdatePreferences = z.infer<typeof updatePreferencesSchema>;
+
+export const updateInstallSchema = z.object({
+  configured: z.boolean(),
+  state: z.enum([
+    "unconfigured",
+    "unavailable",
+    "idle",
+    "queued",
+    "pulling",
+    "backing_up",
+    "installing",
+    "complete",
+    "failed",
+  ]),
+  message: z.string(),
+});
+export type UpdateInstall = z.infer<typeof updateInstallSchema>;

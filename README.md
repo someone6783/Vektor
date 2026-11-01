@@ -128,7 +128,8 @@ The UI labels execution as `container` or `host`; Docker cannot access host path
 unless you mount them. A local backend executes directly as your host user.
 
 **Full Unrestricted** uses the same backend account permissions as Full access and runs
-commands without approval, including scheduled runs. Select it in profile settings.
+commands without approval, including scheduled runs. Select it in conversation terminal
+settings or profile settings.
 
 All enabled modes strip inherited environment variables, set a private umask, cap output
 at 64 KiB, and supervise command process groups. Default timeout is 15 seconds;
@@ -361,9 +362,36 @@ Scheduling endpoints (all bearer-authenticated):
 | `POST /api/scheduler/resume`     | resume future scheduling without replaying the paused interval                   |
 
 Messages and context requests accept `attachmentIds` (omit for all included files;
-use `[]` for none), `profileId`, and `model`. Sending also accepts `allowTruncation`.
+use `[]` for none), `profileId`, `model`, and optional `reasoning` (`auto`, `on`,
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`). Sending also accepts
+`allowTruncation`. The model picker and reasoning selector sit beside Send.
+Reasoning choices follow model capabilities; Auto uses provider defaults. Star
+models in the picker to keep favourites at the top, including while searching;
+favourites are saved on this device. Each
+queued message snapshots its model and reasoning choice, and retries retain them.
+The chat composer accepts submissions immediately into a session queue, including
+while a run is active or context estimates are refreshing. It sends them in order
+when the channel is ready. While a run is active, the composer shows **Queue**;
+Enter queues the draft. **Steer** above a queued message moves it to the front,
+stops the active run in that conversation, and sends after the run stops.
+Emergency stop holds the queue; validation failures stay
+visible for retry or removal, with explicit consent before omitting history. The
+queue survives conversation switches but clears on reload or workspace lock.
+Settling a conversation moves it to **Settled** at the bottom of the sidebar.
+Select it to revisit its history, or choose **Restore** from its menu to return it
+to Channels or Direct. Settling preserves messages and attachments.
+
+Replies render text and tool calls in event order, including after reopening a
+conversation. Reasoning text or summaries supplied by the provider appear in a
+collapsible **Thinking** section at their original position and remain available
+in saved history. They are redacted separately and are excluded from the saved
+answer text. Models that do not expose reasoning show only the existing status.
+Settings → Preferences → **Stream replies by paragraph** reveals
+complete paragraphs; a tool call or turn ending reveals any remaining text.
+
 History responses include linked attachments and `lastRun` with the stored context
-estimate and provider usage. Existing databases migrate automatically on startup.
+estimate and provider usage. Run details accept `?transcript=1` for compact text/tool
+events in their original order. Existing databases migrate automatically on startup.
 
 ## Security notes
 
@@ -397,8 +425,9 @@ Phase 9 adds a browser tool independent of terminal permissions. It defaults off
 Choose observation or interactive access in profile Settings and grant exact origins;
 local testing requires a separate exact loopback origin/port. Every run gets a fresh
 managed Chromium process. Choose a saved default profile to reuse site logins, or
-a fully separate temporary session for either observation or interactive access. Interactive clicks, file transfers and network writes pause
-for scoped approvals; emergency stop closes the session. The run timeline offers
+a fully separate temporary session for either observation or interactive access. Interactive clicks and file transfers pause for scoped approvals. Network writes
+proceed automatically in visible interactive windows; headless sessions require
+scoped network approvals. Emergency stop closes the session. The run timeline offers
 snapshots, masked screenshots, pause/takeover and artifact deletion.
 
 Host backends need `pnpm browser:install`; Docker includes the pinned engine.
@@ -409,3 +438,9 @@ Profiles also choose Headless or Visible window independently of browser permiss
 and saved/separate sessions. A visible window opens on the backend's desktop; the run
 panel offers Open, Focus and private takeover controls. Docker needs an explicitly
 connected display. Existing profiles stay headless. See [browser setup](docs/BROWSER.md).
+
+For automatic update checks and click-to-install desktop/Docker upgrades, see [Updates](docs/UPDATES.md).
+
+Releases include a Windows x64 desktop setup installer and Linux x64 desktop packages.
+The Docker host helper installer enables click-to-install API/Web UI updates on Linux
+or Windows with Docker Desktop; see [setup instructions](docs/UPDATES.md).

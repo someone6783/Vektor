@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { APP_VERSION, type UpdateCheck, type UpdatePreferences } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
+import { InstallUpdates } from "./InstallUpdates";
 import { ReleaseLink } from "./ReleaseLink";
 
 const errors = {
@@ -140,11 +141,20 @@ export function AboutView({ client }: { client: ApiClient }) {
           {error}
         </p>
       ) : null}
+      {info ? (
+        <InstallUpdates
+          client={client}
+          enabled={info.enabled}
+          backendAvailable={info.updateAvailable}
+          refreshKey={info.checkedAt}
+        />
+      ) : null}
       <p className="mt-4 text-xs text-slate-500">
         Back up first. With the release compose file, run{" "}
         <code>docker compose pull &amp;&amp; docker compose up -d</code> in the same project
-        directory. The vektor-data volume is preserved. Desktop users install the release package
-        and upgrade their backend separately. Updates are installed manually.
+        directory. The vektor-data volume is preserved. Desktop AppImage users can install signed
+        updates above. Configure the Docker host updater to install backend and Web UI updates here.
+        Installation always requires a click.
       </p>
     </section>
   );

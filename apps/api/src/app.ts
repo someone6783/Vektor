@@ -1,3 +1,5 @@
+import { RuntimeError } from "./runtime/terminal.js";
+import { listRunningRuns } from "@vektor/db";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { ZodError } from "zod";
 import { makeApiError } from "@vektor/shared";
@@ -29,6 +31,7 @@ import { Scheduler } from "./scheduling/scheduler.js";
 import { registerJobRoutes } from "./routes/jobs.js";
 import { createAppLogger } from "./logging.js";
 import { registerUsageRoutes } from "./routes/usage.js";
+import { DesktopReleases, registerDesktopUpdateRoutes } from "./updates/install.js";
 import { UpdateService } from "./updates/service.js";
 import { registerUpdateRoutes } from "./routes/updates.js";
 import { BrowserService } from "./browser/service.js";
@@ -170,7 +173,7 @@ export async function buildApp({
 
   registerSettingsRoutes(app, providerService, redact);
   registerProfileRoutes(app, storage.db, (profileId) => runManager.revokeBrowser(profileId));
-  registerChannelRoutes(app, storage.db);
+  registerChannelRoutes(app, storage.db, (id) => runManager.revokeConversation(id));
   await registerAttachmentRoutes(app, attachments);
   const context = new ContextService(storage.db, attachments, providerService);
   const scheduler = new Scheduler({
@@ -193,7 +196,12 @@ export async function buildApp({
   registerRunEventRoutes(app, storage.db, runManager, streams);
   registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
   registerUsageRoutes(app, storage.db);
-  registerUpdateRoutes(app, updates);
+  registerUpdateRoutes(app, updates, async () => {
+    if (listRunningRuns(storage.db).length)
+      throw new RuntimeError("Wait for active runs to finish before installing an update.", 409);
+    await runManager.emergencyStop();
+  });
+  registerDesktopUpdateRoutes(app, new DesktopReleases(updates, updateFetch));
   registerBrowserRoutes(app, storage.db, runManager);
   if (config.nodeEnv !== "test")
     app.addHook("onReady", async () => {

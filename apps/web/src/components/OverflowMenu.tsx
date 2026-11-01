@@ -1,8 +1,10 @@
+import { useAnchoredMenu } from "../lib/useAnchoredMenu";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
 export function OverflowMenu({ label, children }: { label: string; children: ReactNode }) {
   const ref = useRef<HTMLDetailsElement>(null);
+  useAnchoredMenu(ref);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (ref.current && !ref.current.contains(event.target as Node)) ref.current.open = false;
