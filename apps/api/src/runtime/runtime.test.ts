@@ -27,7 +27,7 @@ let directory: string;
 let profileId: string;
 let channelId: string;
 let requests: ChatRequest[];
-let commands: Array<{ command: string; args: string[]; timeoutMs?: number }>;
+let commands: Array<{ command: string; args: string[]; cwd?: string; timeoutMs?: number }>;
 let provider: ChatProvider;
 const headers = { authorization: "Bearer runtime-test-access-token" };
 beforeEach(async () => {
@@ -277,6 +277,30 @@ describe("permissioned runtime API", () => {
       error: expect.stringContaining("deadline"),
     });
     finish();
+  });
+
+  it("runs Full Unrestricted shell commands outside the workspace without approvals", async () => {
+    const response = await mode("full-unrestricted");
+    expect(response.statusCode).toBe(200);
+    const target = join(directory, "unrestricted-marker.txt");
+    writeFileSync(target, "Remove without approval");
+    commands = [{ command: "sh", args: ["-c", "rm unrestricted-marker.txt"], cwd: directory }];
+    const { run } = (await send()).json();
+    await completed(run.id);
+    expect(getRun(storage.db, run.id)).toMatchObject({
+      status: "completed",
+      terminalMode: "full-unrestricted",
+    });
+    expect(existsSync(target)).toBe(false);
+    expect(listToolCalls(storage.db, run.id)[0]?.status).toBe("completed");
+    expect(listApprovals(storage.db, run.id)).toHaveLength(0);
+    expect(
+      listRunEvents(storage.db, run.id).some((event) => event.type === "approval.requested"),
+    ).toBe(false);
+    expect(
+      requests[0]?.tools?.find((tool) => tool.function.name === "terminal")?.function.description,
+    ).toContain("without user approval");
+    expect(requests[0]?.messages[0]?.content).toContain("without user approval");
   });
 
   it("requires approval before a full-access destructive command and accepts each approval once", async () => {

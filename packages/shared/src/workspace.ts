@@ -8,7 +8,12 @@ export const profileColorSchema = z.enum(["emerald", "sky", "violet", "amber", "
 
 export type ProfileColor = z.infer<typeof profileColorSchema>;
 
-export const terminalModeSchema = z.enum(["no-terminal", "basic", "full-access"]);
+export const terminalModeSchema = z.enum([
+  "no-terminal",
+  "basic",
+  "full-access",
+  "full-unrestricted",
+]);
 
 export type TerminalMode = z.infer<typeof terminalModeSchema>;
 

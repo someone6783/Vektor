@@ -20,7 +20,7 @@ export interface RunRecord {
   usage: unknown;
   context: unknown;
   includeHistory: boolean;
-  terminalMode: "no-terminal" | "basic" | "full-access";
+  terminalMode: "no-terminal" | "basic" | "full-access" | "full-unrestricted";
   startedAt: number;
   endedAt: number | null;
 }
@@ -32,7 +32,7 @@ export interface CreateRunRecordInput {
   model: string;
   context?: unknown;
   includeHistory?: boolean;
-  terminalMode?: "no-terminal" | "basic" | "full-access";
+  terminalMode?: "no-terminal" | "basic" | "full-access" | "full-unrestricted";
   jobId?: string | null;
 }
 

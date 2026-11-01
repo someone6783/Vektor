@@ -287,8 +287,9 @@ function JobEditor({
       <p className="mt-3 text-[11px] leading-5 text-slate-500">
         Uses the current profile and its terminal permissions. Attachments are excluded. Catch-up
         coalesces missed occurrences into one attempt; overlapping or busy-channel runs are skipped.
-        Full-access commands still wait for approval in the runtime bar and can time out.
-        Pausing/deleting stops future firings; cancel an active run separately.
+        Full-access commands wait for approval in the runtime bar and can time out. Full
+        Unrestricted commands run without approvals. Pausing/deleting stops future firings; cancel
+        an active run separately.
       </p>
       {error ? (
         <p role="alert" className="mt-3 text-xs text-rose-300">

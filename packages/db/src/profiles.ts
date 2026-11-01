@@ -3,7 +3,7 @@ import { asc, eq, isNull } from "drizzle-orm";
 import type { VektorDatabase } from "./client.js";
 import { profiles } from "./schema.js";
 
-export type TerminalMode = "no-terminal" | "basic" | "full-access";
+export type TerminalMode = "no-terminal" | "basic" | "full-access" | "full-unrestricted";
 export type ProfileColor = "emerald" | "sky" | "violet" | "amber" | "rose";
 export interface BrowserPermissions {
   session: "default" | "separate";

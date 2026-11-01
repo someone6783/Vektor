@@ -26,6 +26,7 @@ const terminalModes: Array<{ value: TerminalMode; label: string }> = [
   { value: "no-terminal", label: "No terminal" },
   { value: "basic", label: "Basic · workspace commands" },
   { value: "full-access", label: "Full access · approval required" },
+  { value: "full-unrestricted", label: "Full Unrestricted · no approvals" },
 ];
 
 const colors = ["emerald", "sky", "violet", "amber", "rose"] as const;
@@ -345,7 +346,9 @@ function ProfileEditor({
             ? "Command execution is disabled, including unsolicited tool requests."
             : terminalMode === "basic"
               ? "Basic mode allows pwd, ls, cat, head, tail, wc, mkdir, and touch with restricted options and checked workspace paths. No shell, scripts, interpreters, or symlinks. This is a guardrail, not a hardened sandbox; the container boundary provides isolation."
-              : "Full access can read or modify files outside the workspace with the backend account's permissions. Docker commands run inside the container; a local backend runs commands on your host. Every command requires approval."}
+              : terminalMode === "full-unrestricted"
+                ? "Full Unrestricted runs commands without approval and can read or modify files outside the workspace with the backend account's permissions. Docker commands run inside the container; a local backend runs commands on your host."
+                : "Full access can read or modify files outside the workspace with the backend account's permissions. Docker commands run inside the container; a local backend runs commands on your host. Every command requires approval."}
         </p>
       </div>
       {terminalMode !== "no-terminal" ? (

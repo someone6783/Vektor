@@ -94,40 +94,45 @@ describe("runtime history and permissions UI", () => {
     expect(client.audit).toHaveBeenCalledWith(2);
   });
 
-  it("requires acknowledging full access and persists the terminal tool switch", async () => {
-    const client = new ApiClient("test");
-    vi.spyOn(client, "updateProfile").mockResolvedValue({
-      ...profile,
-      terminalMode: "full-access",
-      tools: ["terminal"],
-    });
-    render(
-      <SettingsView
-        client={client}
-        settings={{
-          openRouterConfigured: false,
-          openRouterSource: "none",
-          defaultModel: "test",
-          models: [],
-          modelsFetchedAt: null,
-        }}
-        profiles={[profile]}
-        onSettingsChange={() => {}}
-        onProfilesChange={async () => {}}
-        onError={() => {}}
-      />,
-    );
-    fireEvent.change(screen.getByRole("combobox", { name: "Terminal mode for Default" }), {
-      target: { value: "full-access" },
-    });
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /I understand full access/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
-    await waitFor(() =>
-      expect(client.updateProfile).toHaveBeenCalledWith(
-        "profile",
-        expect.objectContaining({ terminalMode: "full-access", tools: ["terminal"] }),
-      ),
-    );
-  });
+  it.each(["full-access", "full-unrestricted"] as const)(
+    "persists %s and the terminal tool switch",
+    async (terminalMode) => {
+      const client = new ApiClient("test");
+      vi.spyOn(client, "updateProfile").mockResolvedValue({
+        ...profile,
+        terminalMode,
+        tools: ["terminal"],
+      });
+      render(
+        <SettingsView
+          client={client}
+          settings={{
+            openRouterConfigured: false,
+            openRouterSource: "none",
+            defaultModel: "test",
+            models: [],
+            modelsFetchedAt: null,
+          }}
+          profiles={[profile]}
+          onSettingsChange={() => {}}
+          onProfilesChange={async () => {}}
+          onError={() => {}}
+        />,
+      );
+      fireEvent.change(screen.getByRole("combobox", { name: "Terminal mode for Default" }), {
+        target: { value: terminalMode },
+      });
+      if (terminalMode === "full-access") {
+        expect(screen.getByRole("button", { name: "Save profile" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("checkbox", { name: /I understand full access/ }));
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+      await waitFor(() =>
+        expect(client.updateProfile).toHaveBeenCalledWith(
+          "profile",
+          expect.objectContaining({ terminalMode, tools: ["terminal"] }),
+        ),
+      );
+    },
+  );
 });

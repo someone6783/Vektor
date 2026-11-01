@@ -70,7 +70,7 @@ export class TerminalExecutor {
       throw new RuntimeError("The workspace directory cannot be a symlink.", 403);
     const root = await realpath(this.workspace);
     const cwd = resolve(root, input.cwd ?? ".");
-    if (mode === "full-access") {
+    if (mode === "full-access" || mode === "full-unrestricted") {
       if (!(await lstat(cwd)).isDirectory())
         throw new RuntimeError("Working directory must be an existing directory.");
       return { ...input, cwd };

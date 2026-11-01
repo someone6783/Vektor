@@ -105,7 +105,7 @@ curl -N \
 
 Edit a profile in **Settings** and select its terminal mode. The default,
 **No terminal**, never exposes a command tool and rejects unsolicited calls.
-For either enabled mode, also enable the profile's **terminal tool** checkbox.
+For any enabled mode, also enable the profile's **terminal tool** checkbox.
 Changes apply to new runs; permissions are checked before each subsequent command,
 including after approval. Cancel an active command to stop it immediately.
 
@@ -127,7 +127,10 @@ affect paths outside the workspace; approval does not elevate privileges.
 The UI labels execution as `container` or `host`; Docker cannot access host paths
 unless you mount them. A local backend executes directly as your host user.
 
-Both modes strip inherited environment variables, set a private umask, cap output
+**Full Unrestricted** uses the same backend account permissions as Full access and runs
+commands without approval, including scheduled runs. Select it in profile settings.
+
+All enabled modes strip inherited environment variables, set a private umask, cap output
 at 64 KiB, and supervise command process groups. Default timeout is 15 seconds;
 basic caps at 15 seconds, full permits up to 60 seconds. Timeout, output overflow,
 cancellation, and loss of the API pipe kill the supervised group. Full-access
