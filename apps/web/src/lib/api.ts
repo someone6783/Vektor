@@ -1,5 +1,7 @@
 import {
   apiErrorSchema,
+  usageReportSchema,
+  type UsageReport,
   backendInfoSchema,
   type BackendInfo,
   attachmentSchema,
@@ -71,6 +73,15 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+
+  async usageReport(
+    from: string,
+    to: string,
+    provider: UsageReport["provider"],
+  ): Promise<UsageReport> {
+    const query = new URLSearchParams({ from, to, provider });
+    return usageReportSchema.parse(await this.request(`/api/usage?${query}`));
+  }
 
   async backendInfo(): Promise<BackendInfo> {
     return backendInfoSchema.parse(await this.request("/api/backend"));

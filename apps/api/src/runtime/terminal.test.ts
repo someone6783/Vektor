@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,25 @@ const input = (command: string, args: string[] = [], cwd?: string) =>
   terminalInputSchema.parse({ command, args, cwd });
 
 describe("terminal permissions and supervision", () => {
+  it("rejects hard links, special files and paths replaced with symlinks after preparation", async () => {
+    await writeFile(join(directory, "outside"), "private outside data");
+    await link(join(directory, "outside"), join(terminal.workspace, "hard-link"));
+    await expect(terminal.prepare("basic", input("cat", ["hard-link"]))).rejects.toThrow(
+      "hard-linked",
+    );
+    await writeFile(join(terminal.workspace, "safe"), "safe");
+    const prepared = await terminal.prepare("basic", input("cat", ["safe"]));
+    await rm(join(terminal.workspace, "safe"));
+    await symlink(join(directory, "outside"), join(terminal.workspace, "safe"));
+    await expect(terminal.execute(prepared, new AbortController().signal)).rejects.toThrow(
+      "symlinks",
+    );
+    const fifo = spawn("mkfifo", [join(terminal.workspace, "fifo")]);
+    await new Promise((resolve) => fifo.once("exit", resolve));
+    await expect(terminal.prepare("basic", input("cat", ["fifo"]))).rejects.toThrow(
+      "regular files",
+    );
+  });
   it("executes basic commands inside the workspace and rejects paths, symlinks, shells, and option escapes", async () => {
     await writeFile(join(directory, "outside.txt"), "outside-private-data");
     await writeFile(join(terminal.workspace, "inside.txt"), "inside-data");

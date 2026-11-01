@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ModelInfo, Profile, SettingsView, TerminalMode } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { HealthCard } from "./HealthCard";
+import { UsageView } from "./UsageView";
 
 interface SettingsViewProps {
   client: ApiClient;
@@ -521,6 +522,7 @@ export function SettingsView({
           </div>
         </section>
 
+        <UsageView client={client} />
         <HealthCard />
       </div>
     </div>

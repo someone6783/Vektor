@@ -103,6 +103,23 @@ async function completed(id: string) {
 }
 
 describe("permissioned runtime API", () => {
+  it("rolls back a failed completion as one unit before persisting a failed run", async () => {
+    await mode("basic");
+    storage.sqlite.exec(
+      "CREATE TRIGGER fail_completion BEFORE INSERT ON run_events WHEN NEW.type = 'run.completed' BEGIN SELECT RAISE(ABORT, 'Completion storage unavailable'); END;",
+    );
+    const { run } = (await send()).json();
+    await completed(run.id);
+    expect(getRun(storage.db, run.id)?.status).toBe("failed");
+    const assistant = listMessages(storage.db, channelId).messages.filter(
+      (message) => message.role === "assistant",
+    );
+    expect(assistant).toHaveLength(1);
+    expect(assistant[0]?.status).toBe("failed");
+    const events = listRunEvents(storage.db, run.id);
+    expect(events.filter((event) => event.type === "run.completed")).toHaveLength(0);
+    expect(events.filter((event) => event.type === "run.failed")).toHaveLength(1);
+  });
   it("keeps output and persisted events free of known secrets, including split text chunks", async () => {
     await app.close();
     provider = {

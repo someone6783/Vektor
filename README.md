@@ -217,6 +217,9 @@ editing/history available. The default is `1`. `VEKTOR_SCHEDULER_TICK_MS` defaul
 
 ## Scripts
 
+Backup/restore, rotating logs, usage reports, crash recovery and safe upgrade/rollback
+commands are documented in [Operations](docs/OPERATIONS.md).
+
 ### Desktop app (Tauri 2)
 
 The desktop app bundles the same web frontend and connects to a separately running
@@ -337,8 +340,8 @@ logs/             reserved for file logs
 | `GET /api/dev/stream`                    | bearer | 20 stub deltas plus completion; supports `Last-Event-ID` / `?after=` |
 | `GET /api/dev/provider`                  | bearer | normalized provider events from the stub or OpenRouter               |
 
-The dev endpoints are enabled outside production by default. Compose enables
-them explicitly for demo purposes; set `VEKTOR_ENABLE_DEV_STREAM=0` to disable.
+The dev endpoints are enabled outside production by default. Production Compose
+disables them; set `VEKTOR_ENABLE_DEV_STREAM=1` only when deliberately running a dev demo.
 
 Scheduling endpoints (all bearer-authenticated):
 

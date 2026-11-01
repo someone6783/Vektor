@@ -42,6 +42,7 @@ export type ProviderEvent =
   | { type: "finish"; reason: "stop" | "tool_calls" | "length" | "error" };
 
 export interface ChatProvider {
+  readonly kind?: "openrouter" | "stub";
   streamChat(request: ChatRequest): AsyncIterable<ProviderEvent>;
   listModels?(): Promise<ModelInfo[]>;
 }

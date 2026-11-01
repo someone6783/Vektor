@@ -78,6 +78,8 @@ export const messageSchema = z.object({
 export type Message = z.infer<typeof messageSchema>;
 
 export const runUsageSchema = z.object({
+  rounds: z.number().int().nonnegative().optional(),
+  pricedRounds: z.number().int().nonnegative().optional(),
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),

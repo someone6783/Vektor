@@ -6,6 +6,22 @@ import { messages } from "./schema.js";
 export type MessageRole = "system" | "user" | "assistant";
 export type MessageStatus = "complete" | "cancelled" | "failed";
 
+export function recoverAssistantMessage(
+  db: VektorDatabase,
+  runId: string,
+  channelId: string,
+  content: string,
+) {
+  const existing = db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.runId, runId), eq(messages.role, "assistant")))
+    .get();
+  if (existing)
+    db.update(messages).set({ status: "failed" }).where(eq(messages.id, existing.id)).run();
+  else createMessage(db, { channelId, role: "assistant", content, status: "failed", runId });
+}
+
 export interface MessageRecord {
   id: string;
   channelId: string;

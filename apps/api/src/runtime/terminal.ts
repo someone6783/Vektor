@@ -19,6 +19,7 @@ export interface TerminalResult {
   reason: string;
 }
 export interface PreparedCommand {
+  original?: TerminalInput;
   command: string;
   args: string[];
   cwd: string;
@@ -90,6 +91,8 @@ export class TerminalExecutor {
             throw new RuntimeError("Basic mode does not follow symlinks.", 403);
           if (!stat.isDirectory() && !stat.isFile())
             throw new RuntimeError("Basic mode only supports regular files and directories.", 403);
+          if (stat.isFile() && stat.nlink > 1)
+            throw new RuntimeError("Basic mode does not access hard-linked files.", 403);
         } catch (error) {
           if (allowMissing && (error as NodeJS.ErrnoException).code === "ENOENT") break;
           throw error;
@@ -136,10 +139,12 @@ export class TerminalExecutor {
       args,
       cwd,
       timeoutMs: Math.min(input.timeoutMs, 15_000),
+      original: input,
     };
   }
 
-  execute(spec: PreparedCommand, signal: AbortSignal): Promise<TerminalResult> {
+  async execute(spec: PreparedCommand, signal: AbortSignal): Promise<TerminalResult> {
+    if (spec.original) spec = await this.prepare("basic", spec.original);
     if (signal.aborted)
       return Promise.resolve({
         output: "Command cancelled.",

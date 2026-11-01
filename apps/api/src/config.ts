@@ -16,6 +16,14 @@ const envSchema = z.object({
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
   VEKTOR_WEB_DIST: z.string().min(1).optional(),
+  VEKTOR_LOG_FILE: z.enum(["0", "1"]).default("1"),
+  VEKTOR_LOG_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1024)
+    .max(1024 * 1024 * 1024)
+    .default(10 * 1024 * 1024),
+  VEKTOR_LOG_RETAINED_FILES: z.coerce.number().int().min(1).max(20).default(5),
   VEKTOR_OPENROUTER_KEY: z.string().min(1).optional(),
   VEKTOR_OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   VEKTOR_OPENROUTER_MODEL: z.string().min(1).default("openrouter/auto"),
@@ -46,6 +54,9 @@ export interface AppConfig {
   devStreamDelayMs: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   webDistDir: string;
+  logFile?: boolean;
+  logMaxBytes?: number;
+  logRetainedFiles?: number;
   version: string;
   openRouterKey?: string;
   openRouterBaseUrl: string;
@@ -78,6 +89,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : devStreamFlag === "1" || devStreamFlag === "true",
     devStreamDelayMs: parsed.VEKTOR_DEV_STREAM_DELAY_MS,
     logLevel: parsed.VEKTOR_LOG_LEVEL,
+    logFile: parsed.VEKTOR_LOG_FILE === "1",
+    logMaxBytes: parsed.VEKTOR_LOG_MAX_BYTES,
+    logRetainedFiles: parsed.VEKTOR_LOG_RETAINED_FILES,
     webDistDir: parsed.VEKTOR_WEB_DIST
       ? resolve(parsed.VEKTOR_WEB_DIST)
       : fileURLToPath(new URL("../../web/dist", import.meta.url)),

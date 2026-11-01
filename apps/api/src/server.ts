@@ -1,11 +1,21 @@
 import { buildApp } from "./app.js";
 import { bootstrapStorage } from "./bootstrap.js";
 import { loadConfig } from "./config.js";
+import { acquireDataLock } from "./maintenance/data-lock.js";
+import { makeRedactor } from "./runtime/redact.js";
 
 async function main(): Promise<void> {
+  process.umask(0o077);
   const config = loadConfig();
-  const storage = bootstrapStorage(config);
-  const app = await buildApp({ config, storage });
+  const release = await acquireDataLock(config.dataDir);
+  let app;
+  try {
+    const storage = bootstrapStorage(config);
+    app = await buildApp({ config, storage });
+  } catch (error) {
+    await release();
+    throw error;
+  }
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, "shutting down");
@@ -18,6 +28,7 @@ async function main(): Promise<void> {
 
     try {
       await app.close();
+      await release();
       clearTimeout(forceExit);
       process.exit(0);
     } catch (error) {
@@ -38,7 +49,13 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => onSignal("SIGINT"));
   process.on("SIGTERM", () => onSignal("SIGTERM"));
 
-  await app.listen({ host: config.host, port: config.port });
+  try {
+    await app.listen({ host: config.host, port: config.port });
+  } catch (error) {
+    await app.close();
+    await release();
+    throw error;
+  }
   app.log.info(
     {
       host: config.host,
@@ -51,6 +68,17 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(error);
+  const redact = makeRedactor(() => [
+    process.env.VEKTOR_ACCESS_TOKEN ?? "",
+    process.env.VEKTOR_OPENROUTER_KEY ?? "",
+  ]);
+  console.error(
+    JSON.stringify({
+      level: 50,
+      time: Date.now(),
+      msg: "Vektor startup failed",
+      error: redact(error instanceof Error ? error.message : "Unknown startup error"),
+    }),
+  );
   process.exit(1);
 });

@@ -27,6 +27,7 @@ async function* readBody(body: ReadableStream<Uint8Array>): AsyncIterable<string
 }
 
 export class OpenRouterProvider implements ChatProvider {
+  readonly kind = "openrouter" as const;
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;

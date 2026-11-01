@@ -71,6 +71,8 @@ function parseUsage(value: unknown): RunUsage | null {
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
     totalTokens: usage.totalTokens,
+    ...(typeof usage.rounds === "number" ? { rounds: usage.rounds } : {}),
+    ...(typeof usage.pricedRounds === "number" ? { pricedRounds: usage.pricedRounds } : {}),
     ...(typeof usage.costUsd === "number" ? { costUsd: usage.costUsd } : {}),
   };
 }

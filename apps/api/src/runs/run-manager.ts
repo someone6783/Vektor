@@ -38,6 +38,7 @@ interface ActiveRun {
   controller: AbortController;
   seq: number;
   events: RunEvent[];
+  outbox?: RunEvent[];
   listeners: Set<(event: RunEvent) => void>;
   finished: boolean;
   text: string;
@@ -197,8 +198,19 @@ export class RunManager {
       type: fullEvent.type,
       payloadJson: JSON.stringify(fullEvent),
     });
-    active.events.push(fullEvent);
-    for (const listener of active.listeners) listener(fullEvent);
+    if (active.outbox) active.outbox.push(fullEvent);
+    else this.publish(active, fullEvent);
+  }
+
+  private publish(active: ActiveRun, event: RunEvent): void {
+    active.events.push(event);
+    for (const listener of active.listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.options.logger.error({ err: error }, "run event listener failed");
+      }
+    }
   }
 
   private finalize(
@@ -211,56 +223,71 @@ export class RunManager {
     const { db, redact } = this.options;
     active.controller.abort();
     clearTimeout(active.timer);
-    if (active.pendingText) {
-      const text = redact(active.pendingText);
-      active.pendingText = "";
-      active.text += text;
-      this.emit(active, { type: "message.delta", text });
-    }
-    for (const [id, pending] of this.pending) {
-      if (pending.runId === active.run.id) {
-        this.pending.delete(id);
-        pending.resolve(false);
-      }
-    }
-    for (const tool of listToolCalls(db, active.run.id).filter((tool) =>
-      ["requested", "waiting", "running"].includes(tool.status),
-    )) {
-      this.emit(active, {
-        type: "tool.output",
-        toolCallId: tool.id,
-        output: error ?? `Run ${status}.`,
-        isError: true,
+    const checkpoint = { seq: active.seq, text: active.text, pendingText: active.pendingText };
+    const outbox: RunEvent[] = [];
+    active.outbox = outbox;
+    try {
+      db.transaction(() => {
+        if (active.pendingText) {
+          const text = redact(active.pendingText);
+          active.pendingText = "";
+          active.text += text;
+          this.emit(active, { type: "message.delta", text });
+        }
+        for (const [id, pending] of this.pending) {
+          if (pending.runId === active.run.id) {
+            this.pending.delete(id);
+            pending.resolve(false);
+          }
+        }
+        for (const tool of listToolCalls(db, active.run.id).filter((tool) =>
+          ["requested", "waiting", "running"].includes(tool.status),
+        )) {
+          this.emit(active, {
+            type: "tool.output",
+            toolCallId: tool.id,
+            output: error ?? `Run ${status}.`,
+            isError: true,
+          });
+          appendAudit(db, "tool.cancelled", active.run.id, { toolCallId: tool.id, reason: status });
+        }
+        closeRunTools(db, active.run.id, error ?? `Run ${status}.`);
+        const message = createMessage(db, {
+          channelId: active.run.channelId,
+          role: "assistant",
+          content: redact(active.text),
+          status: status === "completed" ? "complete" : status,
+          runId: active.run.id,
+        });
+        updateRun(db, active.run.id, {
+          status,
+          error: error ?? null,
+          usage: active.usage,
+          endedAt: Date.now(),
+        });
+        if (status === "completed")
+          this.emit(active, { type: "run.completed", messageId: message.id });
+        else if (status === "cancelled") this.emit(active, { type: "run.cancelled", reason });
+        else
+          this.emit(active, {
+            type: "run.failed",
+            error: error ?? "Run failed.",
+            code: "runtime_error",
+          });
+        appendAudit(db, `run.${status}`, active.run.id, {
+          ...(error ? { error } : {}),
+          ...(status === "cancelled" ? { reason } : {}),
+        });
       });
-      appendAudit(db, "tool.cancelled", active.run.id, { toolCallId: tool.id, reason: status });
+    } catch (failure) {
+      Object.assign(active, checkpoint);
+      throw failure;
+    } finally {
+      delete active.outbox;
     }
-    closeRunTools(db, active.run.id, error ?? `Run ${status}.`);
-    const message = createMessage(db, {
-      channelId: active.run.channelId,
-      role: "assistant",
-      content: redact(active.text),
-      status: status === "completed" ? "complete" : status,
-      runId: active.run.id,
-    });
-    updateRun(db, active.run.id, {
-      status,
-      error: error ?? null,
-      usage: active.usage,
-      endedAt: Date.now(),
-    });
-    if (status === "completed") this.emit(active, { type: "run.completed", messageId: message.id });
-    else if (status === "cancelled") this.emit(active, { type: "run.cancelled", reason });
-    else
-      this.emit(active, {
-        type: "run.failed",
-        error: error ?? "Run failed.",
-        code: "runtime_error",
-      });
-    appendAudit(db, `run.${status}`, active.run.id, {
-      ...(error ? { error } : {}),
-      ...(status === "cancelled" ? { reason } : {}),
-    });
     active.finished = true;
+    // Publish only after message, status, terminal event and audit commit together.
+    for (const event of outbox) this.publish(active, event);
     active.listeners.clear();
     this.active.delete(active.run.id);
     for (const listener of this.completionListeners) {
@@ -376,6 +403,8 @@ export class RunManager {
   }
 
   private async execute(active: ActiveRun, messages: ChatMessage[]): Promise<void> {
+    const provider = this.options.getChatProvider();
+    updateRun(this.options.db, active.run.id, { provider: provider.kind ?? "unknown" });
     const systemPrompt = runtimeSystemPrompt(active.profile);
     const history: ChatMessage[] = systemPrompt
       ? [{ role: "system", content: systemPrompt }, ...messages]
@@ -418,8 +447,10 @@ export class RunManager {
         }
       };
       let finish: string | undefined;
-      let roundUsage: RunUsage | null = null;
-      for await (const event of this.options.getChatProvider().streamChat({
+      const usageBeforeRound = active.usage;
+      let knownRoundCost: number | undefined;
+      updateRun(this.options.db, active.run.id, { providerCalls: round + 1 });
+      for await (const event of provider.streamChat({
         model: active.run.model,
         messages: history,
         tools,
@@ -449,28 +480,26 @@ export class RunManager {
         } else if (event.type === "error")
           throw new RuntimeError(this.options.redact(event.message));
         else if (event.type === "finish") finish = event.reason;
-        else if (event.type === "usage")
-          roundUsage = {
-            promptTokens: event.promptTokens,
-            completionTokens: event.completionTokens,
-            totalTokens: event.totalTokens,
-            ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
+        else if (event.type === "usage") {
+          const old = usageBeforeRound;
+          if (event.costUsd !== undefined) knownRoundCost = event.costUsd;
+          active.usage = {
+            promptTokens: (old?.promptTokens ?? 0) + event.promptTokens,
+            completionTokens: (old?.completionTokens ?? 0) + event.completionTokens,
+            totalTokens: (old?.totalTokens ?? 0) + event.totalTokens,
+            rounds: (old?.rounds ?? 0) + 1,
+            pricedRounds: (old?.pricedRounds ?? 0) + (event.costUsd !== undefined ? 1 : 0),
+            ...(old?.costUsd !== undefined || knownRoundCost !== undefined
+              ? { costUsd: (old?.costUsd ?? 0) + (knownRoundCost ?? 0) }
+              : {}),
           };
+          // Persist provider usage as soon as it arrives, including before an error or crash.
+          updateRun(this.options.db, active.run.id, { usage: active.usage });
+          this.emit(active, { type: "usage", ...active.usage });
+        }
       }
       if (active.finished) return;
       flushText(true);
-      if (roundUsage) {
-        const old = active.usage;
-        active.usage = {
-          promptTokens: (old?.promptTokens ?? 0) + roundUsage.promptTokens,
-          completionTokens: (old?.completionTokens ?? 0) + roundUsage.completionTokens,
-          totalTokens: (old?.totalTokens ?? 0) + roundUsage.totalTokens,
-          ...(old?.costUsd !== undefined || roundUsage.costUsd !== undefined
-            ? { costUsd: (old?.costUsd ?? 0) + (roundUsage.costUsd ?? 0) }
-            : {}),
-        };
-        this.emit(active, { type: "usage", ...active.usage });
-      }
       if (finish === "error" || !finish)
         throw new RuntimeError("Provider stream ended without a successful finish.");
       if (!calls.length) {

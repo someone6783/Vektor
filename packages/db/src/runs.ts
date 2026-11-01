@@ -12,6 +12,9 @@ export interface RunRecord {
   userMessageId: string;
   model: string;
   runner: "native" | "cli";
+  provider: "openrouter" | "stub" | "unknown";
+  providerCalls: number;
+  jobId: string | null;
   status: RunStatus;
   error: string | null;
   usage: unknown;
@@ -30,6 +33,7 @@ export interface CreateRunRecordInput {
   context?: unknown;
   includeHistory?: boolean;
   terminalMode?: "no-terminal" | "basic" | "full-access";
+  jobId?: string | null;
 }
 
 export interface RunEventRecord {
@@ -55,6 +59,9 @@ function toRecord(row: typeof runs.$inferSelect): RunRecord {
     userMessageId: row.userMessageId,
     model: row.model,
     runner: row.runner as "native" | "cli",
+    provider: row.provider as RunRecord["provider"],
+    providerCalls: row.providerCalls,
+    jobId: row.jobId,
     status: row.status as RunStatus,
     error: row.error,
     usage,
@@ -74,6 +81,9 @@ export function createRun(db: VektorDatabase, input: CreateRunRecordInput): RunR
     userMessageId: input.userMessageId,
     model: input.model,
     runner: "native" as const,
+    provider: "unknown" as const,
+    providerCalls: 0,
+    jobId: input.jobId ?? null,
     status: "running" as const,
     error: null,
     usageJson: null,
@@ -141,6 +151,8 @@ export function listRuns(db: VektorDatabase, channelId?: string, before?: number
 }
 
 export interface UpdateRunRecordInput {
+  provider?: RunRecord["provider"];
+  providerCalls?: number;
   status?: RunStatus;
   error?: string | null;
   usage?: unknown;
@@ -153,6 +165,8 @@ export function updateRun(
   patch: UpdateRunRecordInput,
 ): RunRecord | undefined {
   const set: Partial<typeof runs.$inferInsert> = {};
+  if (patch.provider !== undefined) set.provider = patch.provider;
+  if (patch.providerCalls !== undefined) set.providerCalls = patch.providerCalls;
 
   if (patch.status !== undefined) set.status = patch.status;
   if (patch.error !== undefined) set.error = patch.error;

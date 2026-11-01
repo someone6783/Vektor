@@ -12,6 +12,7 @@ function tokenize(text: string): string[] {
 }
 
 export class StubChatProvider implements ChatProvider {
+  readonly kind = "stub" as const;
   async *streamChat(request: ChatRequest): AsyncIterable<ProviderEvent> {
     for (const token of tokenize(STUB_TEXT)) {
       if (request.signal?.aborted) {

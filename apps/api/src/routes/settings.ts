@@ -22,6 +22,7 @@ function toSettingsView(service: ProviderService) {
 export function registerSettingsRoutes(
   app: FastifyInstance,
   providerService: ProviderService,
+  redact: (text: string) => string,
 ): void {
   app.get("/api/settings", async () => toSettingsView(providerService));
 
@@ -61,7 +62,7 @@ export function registerSettingsRoutes(
         .send(
           makeApiError(
             "provider_error",
-            error instanceof Error ? error.message : "Provider connection test failed.",
+            redact(error instanceof Error ? error.message : "Provider connection test failed."),
             { requestId: request.id },
           ),
         );

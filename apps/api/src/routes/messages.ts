@@ -241,6 +241,7 @@ export function registerMessageRoutes(
       userMessageId: userMessage.id,
       model: previous.model,
       includeHistory: previous.includeHistory,
+      jobId: previous.jobId,
       context: prepared.estimate,
       terminalMode: profile.terminalMode,
     });

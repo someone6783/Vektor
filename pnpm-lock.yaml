@@ -65,6 +65,9 @@ importers:
       pdfjs-dist:
         specifier: ^6.4.299
         version: 6.4.299
+      pino:
+        specifier: ^10.4.0
+        version: 10.4.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76

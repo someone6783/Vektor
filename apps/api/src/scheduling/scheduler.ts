@@ -357,6 +357,7 @@ export class Scheduler {
           content: `[Scheduled job: ${job.name} · ${new Date(scheduledFor).toISOString()}]\n${job.prompt}`,
         });
         run = createRun(tx, {
+          jobId: job.id,
           channelId: job.channelId,
           profileId: job.profileId,
           userMessageId: message.id,

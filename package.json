@@ -9,6 +9,9 @@
   },
   "scripts": {
     "build": "pnpm -r build",
+    "backup": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts backup",
+    "backup:verify": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts verify",
+    "restore": "pnpm build:packages && pnpm --filter @vektor/api exec tsx src/maintenance/cli.ts restore",
     "desktop:dev": "pnpm build:packages && pnpm --filter @vektor/web exec tauri dev",
     "desktop:build": "pnpm build:packages && pnpm --filter @vektor/web exec tauri build",
     "desktop:check": "cargo test --locked --manifest-path apps/web/src-tauri/Cargo.toml",

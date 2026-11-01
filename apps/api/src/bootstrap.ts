@@ -6,6 +6,7 @@ import {
   getOrCreateInstanceId,
   openDatabase,
   runMigrations,
+  verifyMigrationHistory,
   type OpenedDatabase,
 } from "@vektor/db";
 import type { AppConfig } from "./config.js";
@@ -47,6 +48,10 @@ function ensureBinarySecretFile(path: string, bytes: number): Buffer {
 }
 
 export function bootstrapStorage(config: AppConfig): Storage {
+  if (existsSync(join(config.dataDir, ".restore-in-progress")))
+    throw new Error(
+      "An interrupted restore was found. Restore the backup into a fresh empty data directory before starting Vektor.",
+    );
   ensureDirectory(config.dataDir);
   for (const name of ["files", "workspace", "logs"]) {
     ensureDirectory(join(config.dataDir, name));
@@ -60,6 +65,7 @@ export function bootstrapStorage(config: AppConfig): Storage {
   const opened = openDatabase(join(config.dataDir, "vektor.db"));
 
   try {
+    verifyMigrationHistory(opened.sqlite);
     runMigrations(opened.db);
     ensureDefaultProfile(opened.db);
 

@@ -10,8 +10,11 @@ services:
       HOST: 0.0.0.0
       PORT: "8787"
       VEKTOR_DATA_DIR: /data
-      VEKTOR_ENABLE_DEV_STREAM: "1"
-      VEKTOR_LOG_LEVEL: info
+      VEKTOR_ENABLE_DEV_STREAM: ${VEKTOR_ENABLE_DEV_STREAM:-0}
+      VEKTOR_LOG_LEVEL: ${VEKTOR_LOG_LEVEL:-info}
+      VEKTOR_LOG_FILE: ${VEKTOR_LOG_FILE:-1}
+      VEKTOR_LOG_MAX_BYTES: ${VEKTOR_LOG_MAX_BYTES:-10485760}
+      VEKTOR_LOG_RETAINED_FILES: ${VEKTOR_LOG_RETAINED_FILES:-5}
       VEKTOR_MAX_FILE_BYTES: ${VEKTOR_MAX_FILE_BYTES:-26214400}
       VEKTOR_CHANNEL_FILE_BYTES: ${VEKTOR_CHANNEL_FILE_BYTES:-262144000}
       VEKTOR_RUN_TIMEOUT_MS: ${VEKTOR_RUN_TIMEOUT_MS:-120000}
@@ -21,6 +24,11 @@ services:
       - vektor-data:/data
     restart: unless-stopped
     init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     healthcheck:
       test:
         [

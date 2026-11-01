@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { ZodError } from "zod";
 import { makeApiError } from "@vektor/shared";
 import type { Storage } from "./bootstrap.js";
@@ -27,6 +27,8 @@ import { makeRedactor } from "./runtime/redact.js";
 import { registerRuntimeRoutes } from "./routes/runtime.js";
 import { Scheduler } from "./scheduling/scheduler.js";
 import { registerJobRoutes } from "./routes/jobs.js";
+import { createAppLogger } from "./logging.js";
+import { registerUsageRoutes } from "./routes/usage.js";
 
 export interface BuildAppOptions {
   config: AppConfig;
@@ -52,18 +54,26 @@ export async function buildApp({
   schedulerClock,
   startScheduler = true,
 }: BuildAppOptions): Promise<VektorApp> {
-  const app = Fastify({
-    logger: logger
-      ? {
-          level: config.logLevel,
-          redact: {
-            paths: ["req.headers.authorization", "req.headers.cookie"],
-            censor: "[redacted]",
-          },
-        }
-      : false,
-    trustProxy: false,
+  const providerService = new ProviderService({
+    db: storage.db,
+    secretsKey: storage.secretsKey,
+    ...(config.openRouterKey ? { envKey: config.openRouterKey } : {}),
+    baseUrl: config.openRouterBaseUrl,
+    ...(injectedProvider ? { providerOverride: injectedProvider } : {}),
   });
+  const redact = makeRedactor(() => [
+    storage.accessToken,
+    storage.secretsKey.toString("hex"),
+    storage.secretsKey.toString("base64"),
+    storage.secretsKey.toString("utf8"),
+    providerService.getKey().key ?? "",
+  ]);
+  const logging = logger ? createAppLogger(config, (text) => redact(text, false)) : null;
+  const serverOptions: FastifyServerOptions = {
+    ...(logging ? { loggerInstance: logging.logger } : { logger: false }),
+    trustProxy: false,
+  };
+  const app = Fastify(serverOptions);
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -84,7 +94,9 @@ export async function buildApp({
       .send(
         makeApiError(
           isServerError ? "internal_error" : "request_error",
-          isServerError ? "Internal server error." : (normalized.message ?? "Request failed."),
+          isServerError
+            ? "Internal server error."
+            : redact(normalized.message ?? "Request failed."),
           { requestId: request.id },
         ),
       );
@@ -104,21 +116,6 @@ export async function buildApp({
   }
 
   const streams = createStreamRegistry();
-  const providerService = new ProviderService({
-    db: storage.db,
-    secretsKey: storage.secretsKey,
-    ...(config.openRouterKey ? { envKey: config.openRouterKey } : {}),
-    baseUrl: config.openRouterBaseUrl,
-    ...(injectedProvider ? { providerOverride: injectedProvider } : {}),
-  });
-
-  const redact = makeRedactor(() => [
-    storage.accessToken,
-    storage.secretsKey.toString("hex"),
-    storage.secretsKey.toString("base64"),
-    storage.secretsKey.toString("utf8"),
-    providerService.getKey().key ?? "",
-  ]);
   const terminal = new TerminalExecutor(join(storage.dataDir, "workspace"), redact);
   const runManager = new RunManager({
     db: storage.db,
@@ -131,7 +128,7 @@ export async function buildApp({
     now: schedulerClock,
   });
 
-  registerSettingsRoutes(app, providerService);
+  registerSettingsRoutes(app, providerService, redact);
   registerProfileRoutes(app, storage.db);
   registerChannelRoutes(app, storage.db);
   const attachments = new AttachmentService(
@@ -161,6 +158,7 @@ export async function buildApp({
   registerMessageRoutes(app, storage.db, runManager, context);
   registerRunEventRoutes(app, storage.db, runManager, streams);
   registerRuntimeRoutes(app, storage.db, runManager, terminal, config.runtimeEnvironment ?? "host");
+  registerUsageRoutes(app, storage.db);
 
   if (config.enableDevStream) {
     registerDevStreamRoutes(app, config.devStreamDelayMs, streams);
@@ -185,6 +183,7 @@ export async function buildApp({
   });
 
   app.addHook("onClose", async () => {
+    await logging?.close();
     storage.sqlite.close();
   });
 
