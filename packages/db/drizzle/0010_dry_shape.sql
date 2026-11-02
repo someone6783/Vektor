@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `runner` text DEFAULT 'native' NOT NULL;

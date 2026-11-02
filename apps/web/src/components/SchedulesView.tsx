@@ -7,6 +7,7 @@ import type {
   SchedulerState,
   SchedulePreview,
   CreateJob,
+  McpSetup,
 } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 
@@ -46,6 +47,11 @@ function JobEditor({
   const [catchUp, setCatchUp] = useState(job?.catchUp ?? false);
   const [includeHistory, setIncludeHistory] = useState(job?.includeHistory ?? false);
   const [allowTruncation, setAllowTruncation] = useState(job?.allowTruncation ?? false);
+  const [computerAccess, setComputerAccess] = useState<"off" | "observe" | "control">(
+    job?.computerAccess ?? "off",
+  );
+  const [mcpServers, setMcpServers] = useState<string[]>(job?.mcpServers ?? []),
+    [mcpSetup, setMcpSetup] = useState<McpSetup | null>(null);
   const [browserAccess, setBrowserAccess] = useState<"off" | "observe" | "interactive">(
     job?.browserAccess ?? "off",
   );
@@ -88,6 +94,8 @@ function JobEditor({
       includeHistory,
       allowTruncation: includeHistory && allowTruncation,
       browserAccess,
+      computerAccess,
+      mcpServers,
     };
     try {
       if (job) await client.updateJob(job.id, input);
@@ -248,7 +256,76 @@ function JobEditor({
         This declaration can only reduce the profile’s browser permissions. Interactive scheduled
         runs pause for approvals; they do not assume unattended consent.
       </p>
+      <label className="mt-3 block text-xs text-slate-400">
+        Declared isolated computer capability
+        <select
+          aria-label="Job computer access"
+          value={computerAccess}
+          onChange={(event) => setComputerAccess(event.target.value as typeof computerAccess)}
+          className={fieldClass}
+        >
+          <option value="off">Off</option>
+          <option value="observe">Observation only · unattended isolated session</option>
+          <option value="control">Control · waits for human approval for each input</option>
+        </select>
+      </label>
+      <p className="mt-2 text-xs text-slate-500">
+        Only the isolated desktop is available. This explicit declaration can reduce profile grants;
+        it cannot enable host control or waive approvals. Count and time limits apply to scheduled
+        sessions.
+      </p>
       <div className="mt-3 space-y-2 text-xs text-slate-300">
+        <fieldset className="space-y-2 rounded border border-white/10 p-2">
+          <legend>Declared MCP servers</legend>
+          <p>
+            Off by default. Each selected server also needs a scheduled profile grant. Every tool
+            call pauses for human approval.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void client
+                .mcpSetup()
+                .then(setMcpSetup)
+                .catch((cause) => setError(cause.message));
+            }}
+          >
+            Load MCP choices
+          </button>
+          {mcpSetup?.servers
+            .filter(
+              (s) =>
+                s.enabled &&
+                mcpSetup.grants.some(
+                  (g) =>
+                    g.profileId === profileId &&
+                    g.serverId === s.id &&
+                    g.revision === s.revision &&
+                    g.grant.scheduled,
+                ),
+            )
+            .map((s) => (
+              <label key={s.id} className="flex gap-2">
+                <input
+                  type="checkbox"
+                  checked={mcpServers.includes(s.id)}
+                  onChange={(e) =>
+                    setMcpServers(
+                      e.target.checked
+                        ? [...mcpServers, s.id]
+                        : mcpServers.filter((id) => id !== s.id),
+                    )
+                  }
+                />
+                {s.name}
+              </label>
+            ))}
+          {mcpServers.length ? (
+            <button type="button" onClick={() => setMcpServers([])}>
+              Clear MCP declarations ({mcpServers.length})
+            </button>
+          ) : null}
+        </fieldset>
         <label className="flex gap-2">
           <input
             type="checkbox"

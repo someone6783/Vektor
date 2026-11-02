@@ -351,3 +351,39 @@ describe("context composer", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 });
+
+it("previews prepared MCP context and sends only explicitly selected items", async () => {
+  const source = {
+    id: "00000000-0000-4000-8000-000000000001",
+    serverId: "00000000-0000-4000-8000-000000000002",
+    profileId: profile.id,
+    revision: 1,
+    kind: "resource" as const,
+    name: "fixture://notes",
+    createdAt: "2026-11-02",
+    preview: "Prepared notes",
+    size: 100,
+  };
+  const load = vi.spyOn(client, "mcpContexts").mockResolvedValue([source]),
+    preview = vi
+      .spyOn(client, "mcpContext")
+      .mockResolvedValue({ text: "Explicit untrusted MCP text" });
+  setup();
+  expect(load).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Load prepared MCP context" }));
+  const selection = await screen.findByLabelText(/resource: fixture:\/\/notes/);
+  expect(selection).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+  await screen.findByText("Explicit untrusted MCP text");
+  expect(preview).toHaveBeenCalledWith(source.id);
+  fireEvent.click(selection);
+  fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
+    target: { value: "Use selected MCP context" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  await waitFor(() =>
+    expect(onSend).toHaveBeenCalledWith("Use selected MCP context", [pdf.id, image.id], false, [
+      source.id,
+    ]),
+  );
+});

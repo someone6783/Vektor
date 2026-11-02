@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getRun,
+  updateProfile,
   getChannel,
   getProfile,
   updateChannel,
@@ -662,6 +663,127 @@ describe("permissioned runtime API", () => {
     expect(getRun(storage.db, run.id)?.status).toBe("failed");
     expect(listToolCalls(storage.db, run.id)[0]?.status).toBe("cancelled");
     expect(listApprovals(storage.db, run.id)[0]?.status).toBe("cancelled");
+    expect(requests).toHaveLength(0);
+  });
+});
+
+describe("runner admission", () => {
+  it("rejects unavailable runners before persisting user messages or contacting OpenRouter", async () => {
+    for (const runner of ["codex", "cli", "acp:test-agent"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/channels/${channelId}/messages`,
+        headers,
+        payload: { content: "Hello", runner },
+      });
+      expect(response.statusCode).toBe(409);
+    }
+    expect(listMessages(storage.db, channelId).messages).toHaveLength(0);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("persists profile selection across restart and permits an explicit native override", async () => {
+    updateProfile(storage.db, profileId, { runner: "codex" });
+    await app.close();
+    await open();
+    expect(getProfile(storage.db, profileId)?.runner).toBe("codex");
+    expect((await send()).statusCode).toBe(409);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/channels/${channelId}/messages`,
+      headers,
+      payload: { content: "Hello", runner: "native" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().run.runner).toBe("native");
+    await vi.waitFor(() =>
+      expect(getRun(storage.db, response.json().run.id)?.status).toBe("completed"),
+    );
+    expect(requests.length).toBeGreaterThan(0);
+    expect(getProfile(storage.db, profileId)?.runner).toBe("codex");
+  });
+
+  it("retries the stored runner even after the profile runner changes", async () => {
+    const response = await send();
+    const id = response.json().run.id as string;
+    await vi.waitFor(() => expect(getRun(storage.db, id)?.status).toBe("completed"));
+    updateProfile(storage.db, profileId, { runner: "codex" });
+    const retry = await app.inject({
+      method: "POST",
+      url: `/api/runs/${id}/retry`,
+      headers,
+      payload: {},
+    });
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().run.runner).toBe("native");
+    await vi.waitFor(() =>
+      expect(getRun(storage.db, retry.json().run.id)?.status).toBe("completed"),
+    );
+  });
+
+  it("does not retry an unavailable stored runner using a native profile", async () => {
+    const message = createMessage(storage.db, { channelId, role: "user", content: "Hello" });
+    const run = createRun(storage.db, {
+      channelId,
+      profileId,
+      userMessageId: message.id,
+      model: "test",
+      runner: "codex",
+    });
+    const retry = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/retry`,
+      headers,
+      payload: {},
+    });
+    expect(retry.statusCode).toBe(409);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("fails an existing scheduled job if its profile switches to an unavailable runner", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers,
+      payload: {
+        name: "Existing job",
+        profileId,
+        channelId,
+        prompt: "Hello",
+        schedule: "0 * * * *",
+        timezone: "UTC",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    updateProfile(storage.db, profileId, { runner: "codex" });
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/jobs/${created.json().job.id}/run`,
+      headers,
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().execution.status).toBe("failed");
+    expect(response.json().execution.runId).toBeNull();
+    expect(response.json().execution.error).toContain("runner is unavailable");
+    expect(requests).toHaveLength(0);
+  });
+
+  it("rejects scheduled jobs targeting unavailable runners", async () => {
+    updateProfile(storage.db, profileId, { runner: "codex" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/jobs",
+      headers,
+      payload: {
+        name: "Codex job",
+        profileId,
+        channelId,
+        prompt: "Hello",
+        schedule: "0 * * * *",
+        timezone: "UTC",
+      },
+    });
+    expect(response.statusCode).toBe(409);
     expect(requests).toHaveLength(0);
   });
 });

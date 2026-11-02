@@ -8,11 +8,14 @@ import {
   createMessage,
   getMessage,
   getProfile,
+  createProfile,
+  updateProfile,
   listAttachments,
   createAttachment,
   linkMessageAttachments,
   listMessageAttachments,
   getRun,
+  getJob,
   listToolCalls,
   defaultMigrationsFolder,
   getSetting,
@@ -98,6 +101,16 @@ describe("database bootstrap", () => {
       allowedOrigins: [],
       localOrigins: [],
     });
+    expect(getProfile(db, profile.id)?.computer).toEqual({
+      mode: "off",
+      session: "isolated",
+      maxActions: 60,
+      maxDurationMs: 300_000,
+      artifactDays: 7,
+      width: 1280,
+      height: 800,
+      apps: [],
+    });
     expect(getRun(db, "old-run")).toMatchObject({
       status: "completed",
       terminalMode: "no-terminal",
@@ -137,6 +150,62 @@ describe("database bootstrap", () => {
     expect(sqlite.prepare("pragma table_info(runs)").all()).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "context_json" })]),
     );
+  });
+  it("round-trips computer permissions and falls back safely on malformed values", () => {
+    const { db, sqlite } = setup();
+    const profile = createProfile(db, {
+      name: "Desktop",
+      model: "test",
+      computer: {
+        mode: "control",
+        session: "isolated",
+        maxActions: 60,
+        maxDurationMs: 300_000,
+        artifactDays: 7,
+        width: 1024,
+        height: 768,
+        apps: [{ name: "Message", command: "/usr/bin/xmessage", args: ["hello"] }],
+      },
+    });
+    expect(getProfile(db, profile.id)?.computer).toEqual({
+      mode: "control",
+      session: "isolated",
+      maxActions: 60,
+      maxDurationMs: 300_000,
+      artifactDays: 7,
+      width: 1024,
+      height: 768,
+      apps: [{ name: "Message", command: "/usr/bin/xmessage", args: ["hello"] }],
+    });
+    expect(updateProfile(db, profile.id, { computer: undefined })?.computer?.mode).toBe("control");
+
+    sqlite
+      .prepare("update profiles set computer_json = ? where id = ?")
+      .run('{"mode":"control","apps":[{"name":1}]}', profile.id);
+    expect(getProfile(db, profile.id)?.computer).toEqual({
+      mode: "control",
+      session: "isolated",
+      maxActions: 60,
+      maxDurationMs: 300_000,
+      artifactDays: 7,
+      width: 1280,
+      height: 800,
+      apps: [],
+    });
+
+    sqlite
+      .prepare("update profiles set computer_json = ? where id = ?")
+      .run("not json", profile.id);
+    expect(getProfile(db, profile.id)?.computer).toEqual({
+      mode: "off",
+      session: "isolated",
+      maxActions: 60,
+      maxDurationMs: 300_000,
+      artifactDays: 7,
+      width: 1280,
+      height: 800,
+      apps: [],
+    });
   });
   it("enables WAL and foreign keys", () => {
     const { sqlite } = setup();
@@ -179,5 +248,76 @@ describe("database bootstrap", () => {
     runMigrations(second.db);
 
     expect(getOrCreateInstanceId(second.db)).toBe(instanceId);
+  });
+});
+
+it("preserves legacy runner history and defaults profiles to native on upgrade", () => {
+  tempDir = mkdtempSync(join(tmpdir(), "vektor-runner-migration-"));
+  const legacy = join(tempDir, "legacy");
+  mkdirSync(join(legacy, "meta"), { recursive: true });
+  const journal = JSON.parse(
+    readFileSync(join(defaultMigrationsFolder, "meta/_journal.json"), "utf8"),
+  ) as { entries: Array<{ tag: string; idx: number }> };
+  journal.entries = journal.entries.filter((entry) => entry.idx < 10);
+  writeFileSync(join(legacy, "meta/_journal.json"), JSON.stringify(journal));
+  for (const entry of journal.entries)
+    cpSync(join(defaultMigrationsFolder, `${entry.tag}.sql`), join(legacy, `${entry.tag}.sql`));
+  const { db, sqlite } = openDatabase(join(tempDir, "vektor.db"));
+  connection = sqlite;
+  runMigrations(db, legacy);
+  const profile = legacyProfile(sqlite, "Legacy");
+  const channel = createChannel(db, { name: "Legacy", profileId: profile.id });
+  const message = createMessage(db, { channelId: channel.id, role: "user", content: "Hi" });
+  const oldRun = { id: "legacy-cli-run" };
+  sqlite
+    .prepare(
+      "INSERT INTO runs (id, channel_id, profile_id, user_message_id, model, runner, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(oldRun.id, channel.id, profile.id, message.id, "test", "cli", Date.now());
+  runMigrations(db);
+  runMigrations(db);
+  expect(getProfile(db, profile.id)?.runner).toBe("native");
+  expect(getRun(db, oldRun.id)?.runner).toBe("cli");
+  const updated = updateProfile(db, profile.id, { runner: "acp:agent" });
+  expect(updated?.runner).toBe("acp:agent");
+});
+
+it("upgrades Phase 11 scheduled jobs with MCP disabled and preserves their content", () => {
+  tempDir = mkdtempSync(join(tmpdir(), "vektor-mcp-migration-"));
+  const legacy = join(tempDir, "legacy");
+  mkdirSync(join(legacy, "meta"), { recursive: true });
+  const journal = JSON.parse(
+    readFileSync(join(defaultMigrationsFolder, "meta/_journal.json"), "utf8"),
+  ) as { entries: Array<{ tag: string; idx: number }> };
+  journal.entries = journal.entries.filter((entry) => entry.idx < 12);
+  writeFileSync(join(legacy, "meta/_journal.json"), JSON.stringify(journal));
+  for (const entry of journal.entries)
+    cpSync(join(defaultMigrationsFolder, `${entry.tag}.sql`), join(legacy, `${entry.tag}.sql`));
+  const { db, sqlite } = openDatabase(join(tempDir, "vektor.db"));
+  connection = sqlite;
+  runMigrations(db, legacy);
+  const profile = createProfile(db, { name: "Legacy scheduler", model: "test" }),
+    channel = createChannel(db, { name: "Existing", profileId: profile.id });
+  sqlite
+    .prepare(
+      "INSERT INTO scheduled_jobs (id,name,schedule,cron,timezone,profile_id,channel_id,prompt,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .run(
+      "legacy-job",
+      "Original job",
+      "0 9 * * *",
+      "0 9 * * *",
+      "UTC",
+      profile.id,
+      channel.id,
+      "Keep the original prompt",
+      Date.now(),
+      Date.now(),
+    );
+  runMigrations(db);
+  expect(getJob(db, "legacy-job")).toMatchObject({
+    prompt: "Keep the original prompt",
+    profileId: profile.id,
+    mcpServers: [],
   });
 });

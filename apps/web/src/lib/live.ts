@@ -6,6 +6,7 @@ export interface LiveToolCall {
   input?: unknown;
   status: string;
   output?: string;
+  progress?: string;
 }
 
 export interface LiveRun {
@@ -74,6 +75,16 @@ export function applyRunEvent(live: LiveRun, event: RunEvent): LiveRun {
         ...next,
         tools: live.tools.map((tool) =>
           tool.id === event.toolCallId ? { ...tool, status: "waiting" } : tool,
+        ),
+      };
+    case "tool.progress":
+      return {
+        ...next,
+        phase: "tools",
+        tools: live.tools.map((tool) =>
+          tool.id === event.toolCallId
+            ? { ...tool, status: "running", progress: JSON.stringify(event.detail) }
+            : tool,
         ),
       };
     case "tool.output": {

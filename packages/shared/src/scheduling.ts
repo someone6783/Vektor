@@ -17,6 +17,8 @@ export const createJobSchema = scheduleInputSchema
     includeHistory: z.boolean().default(false),
     allowTruncation: z.boolean().default(false),
     browserAccess: z.enum(["off", "observe", "interactive"]).optional(),
+    computerAccess: z.enum(["off", "observe", "control"]).optional(),
+    mcpServers: z.array(z.string().uuid()).max(20).default([]),
   })
   .strict();
 export const updateJobSchema = createJobSchema

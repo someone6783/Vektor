@@ -16,3 +16,7 @@ release-artifacts/
 
 # Python host-updater bytecode
 __pycache__/
+
+# Generated, platform-specific desktop API and Node runtime
+apps/web/src-tauri/resources/backend/*
+!apps/web/src-tauri/resources/backend/README.txt

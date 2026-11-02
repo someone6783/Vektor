@@ -1,8 +1,21 @@
 import {
+  mcpSetupSchema,
+  mcpServerSchema,
+  mcpContextSchema,
+  type McpServerInput,
+  type McpGrant,
+  type McpContext,
+  runnerSetupSchema,
+  runnerProbeSchema,
   browserCapabilitiesSchema,
   defaultBrowserProfileSchema,
   browserStateSchema,
   browserArtifactSchema,
+  computerCapabilitiesSchema,
+  computerStateSchema,
+  computerArtifactSchema,
+  type ComputerInput,
+  type ComputerState,
   type BrowserInput,
   updateCheckSchema,
   updateInstallSchema,
@@ -39,6 +52,7 @@ import {
   type MessagesResponse,
   type ModelInfo,
   type ReasoningEffort,
+  type RunnerId,
   type Profile,
   type Run,
   type RunEvent,
@@ -84,6 +98,77 @@ async function parseError(response: Response): Promise<ApiError> {
 
 export class ApiClient {
   constructor(private readonly token: string) {}
+  async mcpSetup() {
+    return mcpSetupSchema.parse(await this.request("/api/mcp"));
+  }
+  async configureMcp(input: McpServerInput, id?: string) {
+    const result = await this.request<{ server: unknown }>(
+      id ? `/api/mcp/servers/${id}` : "/api/mcp/servers",
+      { method: id ? "PUT" : "POST", body: JSON.stringify(input) },
+    );
+    return mcpServerSchema.parse(result.server);
+  }
+  async mcpCredentials(id: string, values: Record<string, string>) {
+    await this.request(`/api/mcp/servers/${id}/credentials`, {
+      method: "PUT",
+      body: JSON.stringify({ values }),
+    });
+  }
+  async testMcp(id: string) {
+    const result = await this.request<{ server: unknown }>(`/api/mcp/servers/${id}/test`, {
+      method: "POST",
+    });
+    return mcpServerSchema.parse(result.server);
+  }
+  async enableMcp(id: string, enabled: boolean) {
+    await this.request(`/api/mcp/servers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+  async removeMcp(id: string) {
+    await this.request(`/api/mcp/servers/${id}`, { method: "DELETE" });
+  }
+  async grantMcp(profileId: string, id: string, grant: McpGrant) {
+    await this.request(`/api/mcp/profiles/${profileId}/servers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(grant),
+    });
+  }
+  async previewMcp(
+    profileId: string,
+    serverId: string,
+    kind: McpContext["kind"],
+    name: string,
+    args: Record<string, string>,
+  ) {
+    const result = await this.request<{ context: unknown; text: string }>(
+      "/api/mcp/context/preview",
+      {
+        method: "POST",
+        body: JSON.stringify({ profileId, serverId, kind, name, arguments: args }),
+      },
+    );
+    return { context: mcpContextSchema.parse(result.context), text: result.text };
+  }
+  async mcpContexts(profileId: string) {
+    const result = await this.request<{ contexts: unknown[] }>(
+      `/api/mcp/context?profileId=${encodeURIComponent(profileId)}`,
+    );
+    return result.contexts.map((c) => mcpContextSchema.parse(c));
+  }
+  async mcpContext(id: string) {
+    return this.request<{ text: string }>(`/api/mcp/context/${id}`);
+  }
+  async removeMcpContext(id: string) {
+    await this.request(`/api/mcp/context/${id}`, { method: "DELETE" });
+  }
+  async mcpArtifact(id: string) {
+    return this.request<{ runId: string; text: string }>(`/api/mcp/artifacts/${id}`);
+  }
+  async removeMcpArtifact(id: string) {
+    await this.request(`/api/mcp/artifacts/${id}`, { method: "DELETE" });
+  }
   async browserCapabilities() {
     return browserCapabilitiesSchema.parse(await this.request("/api/browser/capabilities"));
   }
@@ -128,6 +213,46 @@ export class ApiClient {
   }
   async deleteBrowserArtifacts(runId: string) {
     await this.request(`/api/runs/${runId}/browser/artifacts`, { method: "DELETE" });
+  }
+  async computerCapabilities() {
+    return computerCapabilitiesSchema.parse(await this.request("/api/computer/capabilities"));
+  }
+  async computerState(runId: string): Promise<ComputerState> {
+    const result = await this.request<{ session: unknown }>(`/api/runs/${runId}/computer`);
+    return computerStateSchema.parse(result.session);
+  }
+  async computerControl(runId: string, action: "pause" | "resume" | "close" | "private") {
+    await this.request(`/api/runs/${runId}/computer/control`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+  }
+  async computerArtifacts(runId: string) {
+    const result = await this.request<{ artifacts: unknown[] }>(`/api/runs/${runId}/computer`);
+    return result.artifacts.map((value) => computerArtifactSchema.parse(value));
+  }
+  async computerArtifact(id: string): Promise<Blob> {
+    const response = await apiFetch(`/api/computer-artifacts/${id}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!response.ok) throw new Error("Computer screenshot is unavailable.");
+    return response.blob();
+  }
+  async deleteComputerArtifacts(runId: string) {
+    await this.request(`/api/runs/${runId}/computer/artifacts`, { method: "DELETE" });
+  }
+  async computerInput(runId: string, input: ComputerInput) {
+    return this.request(`/api/runs/${runId}/computer/input`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  async computerScreenshot(runId: string): Promise<Blob> {
+    const response = await apiFetch(`/api/runs/${runId}/computer/screenshot`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!response.ok) throw await parseError(response);
+    return response.blob();
   }
 
   async updateInstallState() {
@@ -265,6 +390,72 @@ export class ApiClient {
     };
   }
 
+  async discoverRunners() {
+    return this.request<{ executables: Array<{ name: string; command: string }> }>(
+      "/api/runners/discover",
+    );
+  }
+  async configureRunner(input: {
+    id: string;
+    executableHash: string;
+    trustLocalCodex?: true;
+    inferenceHosts: string[];
+    credentialName: string;
+  }) {
+    await this.request("/api/runners/installations", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+  async enableRunner(id: string, enabled: boolean) {
+    await this.request(`/api/runners/installations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+  }
+  async removeRunner(id: string) {
+    await this.request(`/api/runners/installations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+  async runnerCredential(id: string, key: string | null) {
+    await this.request(`/api/runners/installations/${encodeURIComponent(id)}/credential`, {
+      method: "PUT",
+      body: JSON.stringify({ key }),
+    });
+  }
+  async runnerGrant(
+    profileId: string,
+    grant: { runner?: RunnerId; workspace: boolean; inference: boolean },
+  ) {
+    await this.request(`/api/profiles/${profileId}/runner-grant`, {
+      method: "PUT",
+      body: JSON.stringify(grant),
+    });
+  }
+  async removeRunnerCheckpoint(runId: string) {
+    await this.request(`/api/runs/${runId}/runner-checkpoint`, { method: "DELETE" });
+  }
+
+  async runnerSetup() {
+    return runnerSetupSchema.parse(await this.request("/api/runners"));
+  }
+  async syncRunnerRegistry() {
+    await this.request("/api/runners/registry/sync", { method: "POST", body: "{}" });
+  }
+  async probeRunner(input: {
+    interface: "codex-app-server" | "acp-v1";
+    command: string;
+    args: string[];
+  }) {
+    return runnerProbeSchema.parse(
+      await this.request("/api/runners/probe", { method: "POST", body: JSON.stringify(input) }),
+    );
+  }
+  async removeRunnerProbe(hash: string) {
+    await this.request(`/api/runners/probes/${hash}`, { method: "DELETE" });
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await apiFetch(path, {
       ...init,
@@ -384,6 +575,9 @@ export class ApiClient {
     allowTruncation?: boolean,
     model?: string,
     reasoning?: ReasoningEffort,
+    runner?: RunnerId,
+    resumeFromRunId?: string,
+    mcpContextIds?: string[],
   ): Promise<SendMessageResponse> {
     return sendMessageResponseSchema.parse(
       await this.request<unknown>(`/api/channels/${channelId}/messages`, {
@@ -392,6 +586,9 @@ export class ApiClient {
           content,
           model,
           reasoning,
+          runner,
+          resumeFromRunId,
+          mcpContextIds,
           ...(profileId ? { profileId } : {}),
           attachmentIds,
           allowTruncation,

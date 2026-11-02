@@ -2,7 +2,16 @@ import { ModelPicker } from "./ModelPicker";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChunkedStreaming } from "../lib/streamingPreference";
 import { useStreamedText } from "../lib/useStreamedText";
-import type { Channel, Message, ModelInfo, Profile, Run, ReasoningEffort } from "@vektor/shared";
+import type {
+  Channel,
+  Message,
+  ModelInfo,
+  Profile,
+  Run,
+  ReasoningEffort,
+  RunnerId,
+  RunnerInstallationView,
+} from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { ContextComposer } from "./ContextComposer";
 import { MessageAttachments } from "./Attachments";
@@ -31,7 +40,14 @@ interface ChatViewProps {
   loadingMore: boolean;
   hasMore: boolean;
   error: string | null;
-  onSend: (content: string, attachmentIds: string[], allowTruncation: boolean) => Promise<void>;
+  onSend: (
+    content: string,
+    attachmentIds: string[],
+    allowTruncation: boolean,
+    runner?: RunnerId,
+    resumeFromRunId?: string,
+    mcpContextIds?: string[],
+  ) => Promise<void>;
   onStop: () => void;
   onRetry: (runId: string) => void;
   onLoadMore: () => void;
@@ -104,6 +120,16 @@ export function ChatView({
   onLoadMore,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [runnerOverride, setRunnerOverride] = useState<RunnerId | undefined>();
+  const [availableRunners, setAvailableRunners] = useState<RunnerInstallationView[]>([]);
+  const [resume, setResume] = useState(false);
+  const [runnerError, setRunnerError] = useState("");
+  useEffect(() => {
+    setRunnerOverride(undefined);
+    setResume(false);
+    setRunnerError("");
+  }, [channel?.id, profile?.id]);
+  const effectiveRunner = runnerOverride ?? profile?.runner ?? "native";
   const [contextTarget, setContextTarget] = useState<HTMLDivElement | null>(null);
   const [contextOpen, setContextOpen] = useState(
     () =>
@@ -270,26 +296,98 @@ export function ChatView({
             {queuedMessages}
             <ContextComposer
               modelControls={
-                <ModelPicker
-                  client={client}
-                  model={profile.model}
-                  models={models}
-                  onChange={onModelChange}
-                  reasoning={reasoning}
-                  onReasoningChange={onReasoningChange}
-                />
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <select
+                    aria-label="Runner for this message"
+                    className="rounded border border-white/10 bg-slate-950 p-1"
+                    value={runnerOverride ?? "profile"}
+                    onFocus={() => {
+                      void client
+                        .runnerSetup()
+                        .then((setup) => setAvailableRunners(setup.installations))
+                        .catch((error) =>
+                          setRunnerError(
+                            error instanceof Error ? error.message : "Runner setup unavailable.",
+                          ),
+                        );
+                    }}
+                    onChange={(event) => {
+                      setRunnerOverride(
+                        event.target.value === "profile"
+                          ? undefined
+                          : (event.target.value as RunnerId),
+                      );
+                      setResume(false);
+                    }}
+                  >
+                    <option value="profile">Profile runner · {profile.runner ?? "native"}</option>
+                    <option value="native">Native · this message</option>
+                    <option value="codex">Codex · this message</option>
+                    {availableRunners
+                      .filter((entry) => entry.id.startsWith("acp:"))
+                      .map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.name} · {entry.enabled ? "enabled" : "disabled"}
+                        </option>
+                      ))}
+                  </select>
+                  {effectiveRunner === "native" ? (
+                    <ModelPicker
+                      client={client}
+                      model={profile.model}
+                      models={models}
+                      onChange={onModelChange}
+                      reasoning={reasoning}
+                      onReasoningChange={onReasoningChange}
+                    />
+                  ) : (
+                    <label>
+                      Agent model
+                      <input
+                        aria-label="External runner model"
+                        value={profile.model}
+                        onChange={(event) => onModelChange?.(event.target.value)}
+                        className="ml-1 rounded border border-white/10 bg-slate-950 p-1"
+                      />
+                    </label>
+                  )}
+                  {lastRun?.harness?.sessionId &&
+                  lastRun.status === "completed" &&
+                  lastRun.runner === effectiveRunner &&
+                  lastRun.profileId === profile.id ? (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={resume}
+                        onChange={(event) => setResume(event.target.checked)}
+                      />{" "}
+                      Resume saved agent session with this new message
+                    </label>
+                  ) : null}
+                  {runnerError ? <span role="alert">{runnerError}</span> : null}
+                </div>
               }
               contextTarget={contextTarget}
               activeRunCount={activeRunCount}
               key={channel.id}
               client={client}
               channel={channel}
-              profile={profile}
+              profile={{ ...profile, runner: effectiveRunner }}
               busy={busy}
               executionStopped={emergencyStopped}
               historyVersion={messages.length}
               lastRun={lastRun}
-              onSend={onSend}
+              onSend={async (content, attachments, allowTruncation, mcpContextIds) => {
+                await onSend(
+                  content,
+                  attachments,
+                  allowTruncation,
+                  runnerOverride,
+                  resume ? lastRun?.id : undefined,
+                  mcpContextIds,
+                );
+                setResume(false);
+              }}
               onStop={onStop}
               canRetry={!!lastAssistant?.runId}
               onRetry={() => {

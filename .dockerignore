@@ -12,3 +12,7 @@ coverage
 .env
 .env.*
 !.env.example
+
+**/src-tauri/resources/backend
+
+**/src-tauri/resources/backend/**

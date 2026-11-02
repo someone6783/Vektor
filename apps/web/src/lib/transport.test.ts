@@ -35,8 +35,21 @@ describe("desktop transport", () => {
   it("keeps web requests relative and preserves the web token key", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
     await apiFetch("/healthz");
-    expect(fetch).toHaveBeenCalledWith("/healthz", undefined);
+    expect(fetch).toHaveBeenCalledWith(
+      "/healthz",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
     expect(tokenStorageKey()).toBe("vektor.accessToken");
+  });
+  it("uses the HttpOnly session cookie without sending a placeholder bearer credential", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    await apiFetch("/api/settings", {
+      headers: { Authorization: "Bearer @session", "X-Test": "kept" },
+    });
+    const options = fetch.mock.calls[0]![1]!;
+    expect(new Headers(options.headers).has("Authorization")).toBe(false);
+    expect(new Headers(options.headers).get("X-Test")).toBe("kept");
+    expect(options.credentials).toBe("same-origin");
   });
   it("uses native HTTP for streaming, upload bodies and aborts, with redirects disabled", async () => {
     desktop.active = true;

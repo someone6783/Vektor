@@ -70,6 +70,7 @@ export function registerRuntimeRoutes(
     return {
       ...(query.transcript ? { transcript: compactTranscript(events) } : {}),
       browser: manager.browserState(runId),
+      computer: manager.computerState(runId),
       run: toRun(run),
       tools: listToolCalls(db, runId).map((tool) =>
         toolCallSchema.parse({

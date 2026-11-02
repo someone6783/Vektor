@@ -1,3 +1,4 @@
+import { conversationProfile } from "../conversation-execution.js";
 import type { FastifyInstance } from "fastify";
 import {
   createMessage,
@@ -60,8 +61,9 @@ export function registerMessageRoutes(
     const channel = getChannel(db, channelId);
     if (!channel) return reply.code(404).send(makeApiError("not_found", "Channel not found."));
     const input = contextRequestSchema.parse(request.body);
-    return context.prepare(channelId, input, channel.profileId ?? listProfiles(db)[0]?.id ?? null)
-      .estimate;
+    return (
+      await context.prepare(channelId, input, channel.profileId ?? listProfiles(db)[0]?.id ?? null)
+    ).estimate;
   });
   app.get("/api/channels/:channelId/messages", async (request, reply) => {
     const { channelId } = request.params as { channelId: string };
@@ -127,18 +129,32 @@ export function registerMessageRoutes(
       );
     }
 
+    const runner = input.runner ?? profile.runner ?? "native";
+    runManager.assertRunner(runner, conversationProfile(db, channelId, profile));
+    runManager.validateResume(runner, profile.id, channelId, input.resumeFromRunId);
+    if (runner !== "native" && input.reasoning && input.reasoning !== "auto")
+      throw new AttachmentError(
+        "Explicit reasoning overrides are not supported by this runner adapter. Select Auto.",
+        409,
+      );
     const model = input.model ?? profile.model;
-    const prepared = context.prepare(channelId, input, profileId);
-    if (!input.content.trim() && !prepared.attachments.length)
+    const prepared = await context.prepare(channelId, input, profileId);
+    if (!input.content.trim() && !prepared.attachments.length && !input.mcpContextIds?.length)
       throw new AttachmentError("Write a message or include an attachment before sending.");
     checkContextBudget(prepared.estimate, input.allowTruncation);
     const chatMessages = await context.messages(prepared);
+    runManager.validateRunnerContext(runner, chatMessages);
     runManager.assertCanStart();
     if (getActiveRun(db, channelId))
       return reply
         .code(409)
         .send(makeApiError("run_active", "A run is already active in this channel."));
 
+    const latestProfile = getProfile(db, profileId);
+    if (!latestProfile || latestProfile.archivedAt !== null)
+      throw new AttachmentError("The selected profile is no longer available.", 409);
+    runManager.assertRunner(runner, conversationProfile(db, channelId, latestProfile));
+    runManager.validateMcpContext(profileId, prepared.estimate);
     const message = createMessage(db, {
       channelId,
       role: "user",
@@ -155,12 +171,14 @@ export function registerMessageRoutes(
       profileId,
       userMessageId: message.id,
       model,
+      runner,
       context: prepared.estimate,
       terminalMode: prepared.profile.terminalMode,
     });
 
     runManager.start({
       run,
+      resumeFromRunId: input.resumeFromRunId,
       profile: prepared.profile,
       messages: chatMessages,
     });
@@ -208,6 +226,7 @@ export function registerMessageRoutes(
       return reply
         .code(409)
         .send(makeApiError("run_active", "A run is already active in this channel."));
+    runManager.assertRunner(previous.runner, conversationProfile(db, channel.id, profile));
     const retryOptions = sendMessageSchema
       .pick({ allowTruncation: true })
       .parse(request.body ?? {});
@@ -216,11 +235,15 @@ export function registerMessageRoutes(
       profileId: profile.id,
       model: previous.model,
       reasoning: contextReasoning(previous.context),
+      runner: previous.runner,
+      mcpContextIds:
+        (previous.context as { selectedMcpContextIds?: string[] } | null)?.selectedMcpContextIds ??
+        [],
       attachmentIds: listMessageAttachments(db, userMessage.id)
         .filter((file) => file.included)
         .map((file) => file.id),
     };
-    const prepared = context.prepare(
+    const prepared = await context.prepare(
       channel.id,
       retryInput,
       profile.id,
@@ -229,12 +252,18 @@ export function registerMessageRoutes(
     );
     checkContextBudget(prepared.estimate, retryOptions.allowTruncation);
     const chatMessages = await context.messages(prepared);
+    runManager.validateRunnerContext(previous.runner, chatMessages);
     runManager.assertCanStart();
     if (getActiveRun(db, channel.id))
       return reply
         .code(409)
         .send(makeApiError("run_active", "A run is already active in this channel."));
 
+    const latestProfile = getProfile(db, profile.id);
+    if (!latestProfile || latestProfile.archivedAt !== null)
+      throw new AttachmentError("The selected profile is no longer available.", 409);
+    runManager.assertRunner(previous.runner, conversationProfile(db, channel.id, latestProfile));
+    runManager.validateMcpContext(profile.id, prepared.estimate);
     deleteAssistantMessageForRun(db, runId);
 
     const run = createRun(db, {
@@ -242,6 +271,7 @@ export function registerMessageRoutes(
       profileId: profile.id,
       userMessageId: userMessage.id,
       model: previous.model,
+      runner: previous.runner,
       includeHistory: previous.includeHistory,
       jobId: previous.jobId,
       context: prepared.estimate,
@@ -267,20 +297,26 @@ export function registerMessageRoutes(
       return reply
         .code(409)
         .send(makeApiError("run_retry_unavailable", "This run can no longer be retried."));
-    return context.prepare(
-      channel.id,
-      {
-        content: message.content,
-        profileId: run.profileId,
-        model: run.model,
-        reasoning: contextReasoning(run.context),
-        attachmentIds: listMessageAttachments(db, message.id)
-          .filter((file) => file.included)
-          .map((file) => file.id),
-      },
-      run.profileId,
-      message.id,
-      run.includeHistory,
+    return (
+      await context.prepare(
+        channel.id,
+        {
+          content: message.content,
+          profileId: run.profileId,
+          model: run.model,
+          reasoning: contextReasoning(run.context),
+          runner: run.runner,
+          mcpContextIds:
+            (run.context as { selectedMcpContextIds?: string[] } | null)?.selectedMcpContextIds ??
+            [],
+          attachmentIds: listMessageAttachments(db, message.id)
+            .filter((file) => file.included)
+            .map((file) => file.id),
+        },
+        run.profileId,
+        message.id,
+        run.includeHistory,
+      )
     ).estimate;
   });
 

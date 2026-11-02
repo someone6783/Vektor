@@ -37,7 +37,11 @@ export function tokenStorageKey(): string {
 
 // Native HTTP preserves streaming, uploads and cancellation without opening API CORS.
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  if (!isTauri()) return fetch(path, init);
+  if (!isTauri()) {
+    const headers = new Headers(init?.headers);
+    if (headers.get("Authorization") === "Bearer @session") headers.delete("Authorization");
+    return fetch(path, { ...init, headers, credentials: "same-origin" });
+  }
   return nativeFetch(`${backendUrl()}${path}`, {
     ...init,
     maxRedirections: 0,

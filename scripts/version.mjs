@@ -68,10 +68,12 @@ export function syncVersion(check = false, root = projectRoot) {
   );
   update(lockPath, lock);
   const dockerPath = "Dockerfile";
-  const docker = readFileSync(resolve(root, dockerPath), "utf8").replace(
-    /(# BEGIN GENERATED RELEASE LABELS\n)[\s\S]*?(# END GENERATED RELEASE LABELS)/,
-    `$1LABEL org.opencontainers.image.version="${info.version}" \\\n      org.opencontainers.image.source="${info.sourceUrl}"\n$2`,
-  );
+  const docker = readFileSync(resolve(root, dockerPath), "utf8")
+    .replace(/ARG APP_VERSION=[^\n]+/, `ARG APP_VERSION=${info.version}`)
+    .replace(
+      /(# BEGIN GENERATED RELEASE LABELS\n)[\s\S]*?(# END GENERATED RELEASE LABELS)/,
+      `$1LABEL org.opencontainers.image.version="${info.version}" \\\n      org.opencontainers.image.source="${info.sourceUrl}"\n$2`,
+    );
   update(dockerPath, docker);
   const capabilityPath = "apps/web/src-tauri/capabilities/default.json";
   const capability = readFileSync(resolve(root, capabilityPath), "utf8").replace(
@@ -84,7 +86,13 @@ export function syncVersion(check = false, root = projectRoot) {
     /(VEKTOR_IMAGE:-)[^}]+/,
     (_match, prefix) => `${prefix}${info.image}:latest`,
   );
-  update(composePath, compose);
+  update(
+    composePath,
+    compose.replace(
+      /(VEKTOR_WEB_IMAGE:-)[^}]+/,
+      (_match, prefix) => `${prefix}${info.image}-web:latest`,
+    ),
+  );
   return info;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))

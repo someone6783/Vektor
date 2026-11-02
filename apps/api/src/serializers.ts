@@ -1,6 +1,6 @@
 import type { ChannelRecord, MessageRecord, ProfileRecord, RunRecord } from "@vektor/db";
 import type { Channel, Message, Profile, Run, RunUsage } from "@vektor/shared";
-import { contextEstimateSchema } from "@vektor/shared";
+import { harnessStateSchema, contextEstimateSchema } from "@vektor/shared";
 
 function iso(ms: number): string {
   return new Date(ms).toISOString();
@@ -16,12 +16,14 @@ export function toProfile(record: ProfileRecord): Profile {
     name: record.name,
     color: record.color,
     systemPrompt: record.systemPrompt,
+    runner: record.runner ?? "native",
     model: record.model,
     temperature: record.temperature,
     maxTokens: record.maxTokens,
     terminalMode: record.terminalMode,
     tools: record.tools,
     browser: record.browser,
+    computer: record.computer,
     createdAt: iso(record.createdAt),
     updatedAt: iso(record.updatedAt),
     archivedAt: isoOrNull(record.archivedAt),
@@ -86,6 +88,7 @@ export function toRun(record: RunRecord): Run {
     userMessageId: record.userMessageId,
     model: record.model,
     runner: record.runner,
+    harness: record.harness ? harnessStateSchema.parse(record.harness) : null,
     status: record.status,
     error: record.error,
     usage: parseUsage(record.usage),

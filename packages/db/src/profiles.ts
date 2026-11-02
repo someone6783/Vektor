@@ -3,6 +3,8 @@ import { asc, eq, isNull } from "drizzle-orm";
 import type { VektorDatabase } from "./client.js";
 import { profiles } from "./schema.js";
 
+export type RunnerId = "native" | "codex" | "cli" | `acp:${string}`;
+
 export type TerminalMode = "no-terminal" | "basic" | "full-access" | "full-unrestricted";
 export type ProfileColor = "emerald" | "sky" | "violet" | "amber" | "rose";
 export interface BrowserPermissions {
@@ -13,7 +15,24 @@ export interface BrowserPermissions {
   localOrigins: string[];
 }
 
+export interface ComputerApp {
+  name: string;
+  command: string;
+  args: string[];
+}
+export interface ComputerPermissions {
+  maxActions: number;
+  maxDurationMs: number;
+  artifactDays: number;
+  mode: "off" | "observe" | "control";
+  session: "isolated";
+  width: number;
+  height: number;
+  apps: ComputerApp[];
+}
+
 export interface ProfileRecord {
+  runner?: RunnerId;
   id: string;
   name: string;
   color: ProfileColor;
@@ -24,13 +43,16 @@ export interface ProfileRecord {
   terminalMode: TerminalMode;
   tools: string[];
   browser?: BrowserPermissions;
+  computer?: ComputerPermissions;
   createdAt: number;
   updatedAt: number;
   archivedAt: number | null;
 }
 
 export interface CreateProfileRecordInput {
+  runner?: RunnerId;
   browser?: BrowserPermissions;
+  computer?: ComputerPermissions;
   name: string;
   model: string;
   systemPrompt?: string;
@@ -42,7 +64,9 @@ export interface CreateProfileRecordInput {
 }
 
 export interface UpdateProfileRecordInput {
+  runner?: RunnerId;
   browser?: BrowserPermissions;
+  computer?: ComputerPermissions;
   name?: string;
   model?: string;
   systemPrompt?: string;
@@ -102,11 +126,13 @@ function toRecord(row: typeof profiles.$inferSelect): ProfileRecord {
     color: row.color as ProfileColor,
     systemPrompt: row.systemPrompt,
     model: row.model,
+    runner: row.runner as RunnerId,
     temperature: params.temperature,
     maxTokens: params.maxTokens,
     terminalMode: row.terminalMode as TerminalMode,
     tools: parseTools(row.toolsJson),
     browser: parseBrowser(row.browserJson),
+    computer: parseComputer(row.computerJson),
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
     archivedAt: row.archivedAt?.getTime() ?? null,
@@ -137,6 +163,66 @@ function parseBrowser(value: string): BrowserPermissions {
       ...parsed,
       session: parsed.session ?? "separate",
       display: parsed.display ?? "headless",
+    };
+  } catch {
+    return off;
+  }
+}
+
+function parseComputer(value: string): ComputerPermissions {
+  const off: ComputerPermissions = {
+    mode: "off",
+    session: "isolated",
+    width: 1280,
+    height: 800,
+    apps: [],
+    maxActions: 60,
+    maxDurationMs: 300_000,
+    artifactDays: 7,
+  };
+  try {
+    const parsed = JSON.parse(value) as ComputerPermissions;
+    if (!["off", "observe", "control"].includes(parsed.mode) || !Array.isArray(parsed.apps))
+      return off;
+    const apps = parsed.apps
+      .filter(
+        (app) =>
+          app &&
+          typeof app.name === "string" &&
+          typeof app.command === "string" &&
+          Array.isArray(app.args) &&
+          app.args.every((arg) => typeof arg === "string"),
+      )
+      .slice(0, 5)
+      .map((app) => ({ name: app.name, command: app.command, args: app.args.slice(0, 32) }));
+    return {
+      mode: parsed.mode,
+      session: "isolated",
+      width:
+        Number.isInteger(parsed.width) && parsed.width >= 640 && parsed.width <= 2560
+          ? parsed.width
+          : 1280,
+      height:
+        Number.isInteger(parsed.height) && parsed.height >= 480 && parsed.height <= 1600
+          ? parsed.height
+          : 800,
+      apps,
+      maxActions:
+        Number.isInteger(parsed.maxActions) && parsed.maxActions! >= 1 && parsed.maxActions! <= 200
+          ? parsed.maxActions
+          : 60,
+      maxDurationMs:
+        Number.isInteger(parsed.maxDurationMs) &&
+        parsed.maxDurationMs! >= 1000 &&
+        parsed.maxDurationMs! <= 1_800_000
+          ? parsed.maxDurationMs
+          : 300_000,
+      artifactDays:
+        Number.isInteger(parsed.artifactDays) &&
+        parsed.artifactDays! >= 0 &&
+        parsed.artifactDays! <= 30
+          ? parsed.artifactDays
+          : 7,
     };
   } catch {
     return off;
@@ -177,12 +263,14 @@ export function createProfile(db: VektorDatabase, input: CreateProfileRecordInpu
     color: input.color ?? "emerald",
     systemPrompt: input.systemPrompt ?? "",
     model: input.model,
+    runner: input.runner ?? "native",
     paramsJson: paramsJson(input),
     terminalMode: input.terminalMode ?? "no-terminal",
     toolsJson: JSON.stringify(input.tools ?? []),
     browserJson: JSON.stringify(
       input.browser ?? { mode: "off", allowedOrigins: [], localOrigins: [] },
     ),
+    computerJson: JSON.stringify(input.computer ?? { mode: "off", apps: [] }),
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
@@ -205,6 +293,7 @@ export function updateProfile(
   const now = new Date();
   const set: Partial<typeof profiles.$inferInsert> = { updatedAt: now };
 
+  if (patch.runner !== undefined) set.runner = patch.runner;
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.model !== undefined) set.model = patch.model;
   if (patch.systemPrompt !== undefined) set.systemPrompt = patch.systemPrompt;
@@ -212,6 +301,7 @@ export function updateProfile(
   if (patch.terminalMode !== undefined) set.terminalMode = patch.terminalMode;
   if (patch.tools !== undefined) set.toolsJson = JSON.stringify(patch.tools);
   if (patch.browser !== undefined) set.browserJson = JSON.stringify(patch.browser);
+  if (patch.computer !== undefined) set.computerJson = JSON.stringify(patch.computer);
   if (patch.archived !== undefined) set.archivedAt = patch.archived ? now : null;
   if (patch.temperature !== undefined || patch.maxTokens !== undefined) {
     set.paramsJson = paramsJson({

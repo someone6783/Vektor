@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backend;
+
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 use tauri::{
@@ -264,12 +266,17 @@ async fn install_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn main() {
+    #[cfg(windows)]
+    if let Some(code) = backend::service_host() {
+        std::process::exit(code);
+    }
     let client = Client::builder()
         .timeout(Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("HTTP client");
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
         .manage(DesktopState::default())
         .manage(InstallState::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -280,7 +287,11 @@ fn main() {
             configure_connection,
             clear_connection,
             check_desktop_update,
-            install_desktop_update
+            install_desktop_update,
+            backend::install_local_service,
+            backend::restore_backend,
+            backend::connect_docker,
+            backend::save_backend
         ])
         .setup(move |app| {
             let show_item = MenuItem::with_id(app, "show", "Open Vektor", true, None::<&str>)?;
@@ -292,7 +303,7 @@ fn main() {
             let quit = MenuItem::with_id(
                 app,
                 "quit",
-                "Quit desktop (backend keeps running)",
+                "Quit Vektor and stop local API",
                 true,
                 None::<&str>,
             )?;
@@ -303,7 +314,7 @@ fn main() {
             let tray_client = client.clone();
             let tray = TrayIconBuilder::with_id("vektor")
                 .icon(app.default_window_icon().expect("bundled icon").clone())
-                .tooltip("Vektor · Backend runs independently")
+                .tooltip("Vektor · Working in the background")
                 .menu(&menu)
                 .on_menu_event(move |app, event| {
                     let id = event.id.as_ref();
@@ -313,7 +324,18 @@ fn main() {
                             show(app);
                             let _ = app.emit("desktop:connection", ());
                         }
-                        "quit" => app.exit(0),
+                        "quit" => {
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                match backend::stop_local_service(app.clone()).await {
+                                    Ok(()) => app.exit(0),
+                                    Err(error) => {
+                                        show(&app);
+                                        let _ = app.emit("desktop:notice", error);
+                                    }
+                                }
+                            });
+                        }
                         _ => {
                             tauri::async_runtime::spawn(tray_action(
                                 app.clone(),

@@ -46,6 +46,13 @@ async function main(): Promise<void> {
     void shutdown(signal);
   };
 
+  if (process.env.VEKTOR_MANAGED_SERVICE === "1") {
+    process.on("message", (message: unknown) => {
+      if (message === "vektor:shutdown") onSignal("desktop");
+    });
+    process.on("disconnect", () => onSignal("supervisor disconnected"));
+  }
+
   process.on("SIGINT", () => onSignal("SIGINT"));
   process.on("SIGTERM", () => onSignal("SIGTERM"));
 

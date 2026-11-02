@@ -1,3 +1,4 @@
+import { runnerIdSchema } from "./runners.js";
 import { reasoningEffortSchema } from "./reasoning.js";
 import { z } from "zod";
 
@@ -27,6 +28,10 @@ export const contextEstimateSchema = z.object({
   availableInputTokens: z.number(),
   attachmentTokens: z.number(),
   selectedAttachments: z.number(),
+  selectedAttachmentIds: z.array(z.string()).optional(),
+  selectedMcpContextIds: z.array(z.string().uuid()).optional(),
+  mcpContextTokens: z.number().nonnegative().optional(),
+  mcpPolicyHash: z.string().optional(),
   droppedMessages: z.number(),
   exceedsBudget: z.boolean(),
   requiresTruncation: z.boolean(),
@@ -38,9 +43,11 @@ export const contextRequestSchema = z
   .object({
     content: z.string().max(100_000).default(""),
     profileId: z.string().min(1).optional(),
+    runner: runnerIdSchema.optional(),
     model: z.string().min(1).max(200).optional(),
     reasoning: reasoningEffortSchema.optional(),
     attachmentIds: z.array(z.string().uuid()).max(50).optional(),
+    mcpContextIds: z.array(z.string().uuid()).max(5).optional(),
   })
   .strict();
 export type ContextRequest = z.infer<typeof contextRequestSchema>;

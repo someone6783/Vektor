@@ -41,6 +41,8 @@ function describeEvent(event: RunEvent): string {
       return `${event.name} ${JSON.stringify(event.input)}`;
     case "tool.output":
       return event.output;
+    case "tool.progress":
+      return JSON.stringify(event.detail);
     case "approval.requested":
       return event.command;
     case "usage":

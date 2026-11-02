@@ -2,7 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { OverflowMenu } from "./OverflowMenu";
 import { createPortal } from "react-dom";
-import type { Attachment, Channel, ContextEstimate, Profile, Run } from "@vektor/shared";
+import type {
+  Attachment,
+  Channel,
+  ContextEstimate,
+  Profile,
+  Run,
+  McpContext,
+} from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { AttachmentPreview } from "./Attachments";
 
@@ -17,7 +24,12 @@ interface Props {
   busy: boolean;
   historyVersion: number;
   lastRun: Run | null;
-  onSend: (content: string, attachmentIds: string[], allowTruncation: boolean) => Promise<void>;
+  onSend: (
+    content: string,
+    attachmentIds: string[],
+    allowTruncation: boolean,
+    mcpContextIds?: string[],
+  ) => Promise<void>;
   onStop: () => void;
   onRetry: () => void;
   canRetry: boolean;
@@ -41,6 +53,14 @@ export function ContextComposer({
 }: Props) {
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
+  const [mcpContexts, setMcpContexts] = useState<McpContext[]>([]),
+    [mcpSelected, setMcpSelected] = useState<string[]>([]),
+    [mcpPreview, setMcpPreview] = useState<string | null>(null);
+  useEffect(() => {
+    setMcpContexts([]);
+    setMcpSelected([]);
+    setMcpPreview(null);
+  }, [channel.id, profile.id]);
   const [limits, setLimits] = useState({
     maxFileBytes: 25 * 1024 * 1024,
     channelFileBytes: 250 * 1024 * 1024,
@@ -93,8 +113,10 @@ export function ContextComposer({
         .estimateContext(channel.id, {
           content: draft.trim(),
           profileId: profile.id,
+          runner: profile.runner,
           model: profile.model,
           attachmentIds: files.filter((file) => file.included).map((file) => file.id),
+          mcpContextIds: mcpSelected,
         })
         .then((result) => {
           if (active) {
@@ -109,7 +131,7 @@ export function ContextComposer({
       active = false;
       clearTimeout(timer);
     };
-  }, [client, channel.id, draft, files, profile, historyVersion, loaded]);
+  }, [client, channel.id, draft, files, profile, historyVersion, loaded, mcpSelected]);
 
   const upload = async (uploads: File[]) => {
     if (!uploads.length || operation.current || !loaded) return;
@@ -155,7 +177,7 @@ export function ContextComposer({
     }
   };
 
-  const canSend = !!draft.trim() || files.some((file) => file.included);
+  const canSend = !!draft.trim() || files.some((file) => file.included) || mcpSelected.length > 0;
   const submit = async () => {
     if (!canSend) return;
     setSending(true);
@@ -165,8 +187,12 @@ export function ContextComposer({
         draft.trim(),
         files.filter((file) => file.included).map((file) => file.id),
         allowTruncation,
+        ...(mcpSelected.length ? ([mcpSelected] as [string[]]) : ([] as [])),
       );
-      if (mounted.current) setDraft("");
+      if (mounted.current) {
+        setDraft("");
+        setMcpSelected([]);
+      }
     } catch (error) {
       if (mounted.current) setError(error instanceof Error ? error.message : "Send failed.");
     } finally {
@@ -274,6 +300,79 @@ export function ContextComposer({
           placeholder={`Message ${channel.kind === "dm" ? "@" : "#"}${channel.name}`}
           className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-600"
         />
+        <details className="my-2 text-xs text-slate-400">
+          <summary className="cursor-pointer">MCP context · {mcpSelected.length} selected</summary>
+          <p className="my-2">
+            Prepare and preview resources or prompts in Settings → MCP plugins, then explicitly
+            select them for this message.
+          </p>
+          <button
+            type="button"
+            className="rounded border border-white/10 px-2 py-1"
+            onClick={() => {
+              void client
+                .mcpContexts(profile.id)
+                .then(setMcpContexts)
+                .catch((cause) => setError(cause.message));
+            }}
+          >
+            Load prepared MCP context
+          </button>
+          {mcpContexts.map((item) => (
+            <div key={item.id} className="my-2 flex flex-wrap items-center gap-2">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={mcpSelected.includes(item.id)}
+                  disabled={!mcpSelected.includes(item.id) && mcpSelected.length >= 5}
+                  onChange={(e) =>
+                    setMcpSelected(
+                      e.target.checked
+                        ? [...mcpSelected, item.id]
+                        : mcpSelected.filter((id) => id !== item.id),
+                    )
+                  }
+                />{" "}
+                {item.kind}: {item.name} · {Math.ceil(item.size / 1024)} KB
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  void client
+                    .mcpContext(item.id)
+                    .then((r) => setMcpPreview(r.text))
+                    .catch((cause) => setError(cause.message));
+                }}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void client
+                    .removeMcpContext(item.id)
+                    .then(() => {
+                      setMcpSelected((v) => v.filter((id) => id !== item.id));
+                      setMcpContexts((v) => v.filter((c) => c.id !== item.id));
+                    })
+                    .catch((cause) => setError(cause.message));
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+          {mcpPreview !== null ? (
+            <div>
+              <pre className="my-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">
+                {mcpPreview}
+              </pre>
+              <button type="button" onClick={() => setMcpPreview(null)}>
+                Close MCP preview
+              </button>
+            </div>
+          ) : null}
+        </details>
         {estimate?.exceedsBudget ? (
           <p role="alert" className="mt-2 text-rose-300">
             Context is too large. Exclude files, shorten the message, lower max output tokens, or

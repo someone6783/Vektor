@@ -103,6 +103,10 @@ function pack() {
       resolve(projectRoot, "compose.updates.yaml"),
       resolve(directory, "compose.updates.yaml"),
     );
+    for (const name of ["install.sh", "install.ps1", "open-workspace.mjs"]) {
+      cpSync(resolve(projectRoot, "scripts", name), resolve(directory, name));
+    }
+    cpSync(resolve(projectRoot, "docs/INSTALLING.md"), resolve(directory, "INSTALLING.md"));
     cpSync(resolve(projectRoot, "docs/UPDATES.md"), resolve(directory, "UPDATES.md"));
     cpSync(resolve(projectRoot, "docs/OPERATIONS.md"), resolve(stage, "OPERATIONS.md"));
     cpSync(resolve(projectRoot, "docs/RELEASING.md"), resolve(stage, "RELEASING.md"));
@@ -143,6 +147,8 @@ function pack() {
             encoding: "utf8",
           }).trim(),
           apiPlatform: "linux-x64-node22",
+          webImage: `${info.image}-web`,
+          desktopIncludes: ["node22", "api", "chromium"],
           imagePlatforms: ["linux/amd64", "linux/arm64"],
         },
         null,
@@ -164,7 +170,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (process.env.GITHUB_OUTPUT)
       appendFileSync(
         process.env.GITHUB_OUTPUT,
-        `version=${info.version}\nimage=${info.image}\nrevision=${info.revision}\ndate=${info.date}\nprerelease=${info.prerelease}\ntags<<VEKTOR_TAGS\n${info.tags.join("\n")}\nVEKTOR_TAGS\n`,
+        `version=${info.version}\nimage=${info.image}\nrevision=${info.revision}\ndate=${info.date}\nprerelease=${info.prerelease}\ntags<<VEKTOR_TAGS\n${info.tags.join("\n")}\nVEKTOR_TAGS\nweb_tags<<VEKTOR_WEB_TAGS\n${releaseTags(info.version, info.image + "-web").join("\n")}\nVEKTOR_WEB_TAGS\n`,
       );
     process.stdout.write(JSON.stringify(info, null, 2) + "\n");
   } else throw new Error("Usage: release.mjs validate TAG | pack | checksums DIRECTORY");

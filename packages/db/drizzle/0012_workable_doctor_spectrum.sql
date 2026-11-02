@@ -1,0 +1,1 @@
+ALTER TABLE `scheduled_jobs` ADD `mcp_servers_json` text DEFAULT '[]' NOT NULL;

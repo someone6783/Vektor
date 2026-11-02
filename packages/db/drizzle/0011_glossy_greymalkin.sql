@@ -1,0 +1,1 @@
+ALTER TABLE `runs` ADD `harness_json` text;

@@ -42,6 +42,7 @@ const initialJob: ScheduledJob = {
   catchUp: false,
   includeHistory: false,
   allowTruncation: false,
+  mcpServers: [],
   nextRunAt: date,
   lastStatus: null,
   lastError: null,

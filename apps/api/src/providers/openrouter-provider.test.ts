@@ -33,7 +33,7 @@ describe("OpenRouter reasoning controls", () => {
               {
                 id: "model",
                 reasoning: { supported_efforts: ["low", "high"], mandatory: true },
-                supported_parameters: ["reasoning"],
+                supported_parameters: ["reasoning", "tools"],
               },
               { id: "plain", supported_parameters: ["temperature"] },
             ],
@@ -45,10 +45,15 @@ describe("OpenRouter reasoning controls", () => {
     expect(models[0]).toMatchObject({
       id: "model",
       supportsReasoning: true,
+      supportsTools: true,
       reasoningMandatory: true,
       reasoningEfforts: ["low", "high"],
     });
-    expect(models[1]).toMatchObject({ id: "plain", supportsReasoning: false });
+    expect(models[1]).toMatchObject({
+      id: "plain",
+      supportsReasoning: false,
+      supportsTools: false,
+    });
   });
   it("sends the selected reasoning configuration while leaving Auto to the provider", async () => {
     const bodies: Array<Record<string, unknown>> = [];

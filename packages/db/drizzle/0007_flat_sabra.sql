@@ -1,0 +1,1 @@
+ALTER TABLE `profiles` ADD `computer_json` text DEFAULT '{"mode":"off","apps":[]}' NOT NULL;

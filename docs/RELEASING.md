@@ -137,3 +137,26 @@ An actual GUI-driven desktop update between two published versions is still futu
 Implementation references: [GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release),
 [Docker build-push action](https://github.com/docker/build-push-action), and
 [Tauri opener scopes](https://v2.tauri.app/plugin/opener/).
+
+### Desktop service and split-container installation
+
+Desktop build hooks run `pnpm desktop:prepare` on each target OS. This deploys a
+hoisted production API, copies Node 22 and matching Chromium binaries, and strips
+package-manager links before Tauri bundles the resources. Windows payloads must be
+prepared on Windows so SQLite native modules match. Never reuse a Linux payload in
+NSIS. The Windows/Linux build jobs run `verify-desktop-service.mjs` against their
+prepared payloads, including browser launch and graceful supervisor shutdown.
+
+The default Docker image retains the combined API/web layout for existing users.
+Source Compose uses target `api`; target `web` builds only frontend dependencies
+and produces a separate non-root nginx image. Release publishing pushes matching
+`vektor` and `vektor-web` tags and versions. `compose.yaml` disables the embedded
+frontend in the API container and starts the separate web service. The optional
+host updater verifies and pins both digests before replacement.
+
+Release assets also include `install.sh`, `install.ps1`, `open-workspace.mjs` and
+`INSTALLING.md` in SHA256SUMS. Keep the scripts and their downloads in the same
+versioned release. The Docker installers open an authenticated single-use link;
+no long-lived credential is printed. Existing releases without these assets cannot
+be installed using the new Docker scripts. CI exercises actual split containers,
+streaming, sign-in, proxy reconnection and session persistence across API replacement.

@@ -1,6 +1,6 @@
 # Vektor Product Plan
 
-Status: v0.7 · 2026-11-01
+Status: v0.8 · 2026-11-01
 Approval: Scope and Phase 0 accepted on 2026-10-31. Implementation may begin with Phase 1. OCR remains deferred, and v1 uses a single local access token.
 
 ## Product summary
@@ -17,7 +17,7 @@ Vektor is a single-user, local-first AI workspace. It combines:
 
 Non-goals for v1 are listed under [Explicitly deferred](#explicitly-deferred).
 
-After the first release, the roadmap adds browser use (Phase 9), computer use (Phase 10), Codex harness integration (Phase 11), and MCP plugin support (Phase 12). These are planned capabilities with their own exit criteria, not requirements for the first usable release.
+After the first release, the roadmap adds browser use (Phase 9), computer use (Phase 10), Codex harness integration plus an ACP agent registry (Phase 11), and MCP plugin support (Phase 12). These are planned capabilities with their own exit criteria, not requirements for the first usable release.
 
 ## Approval gate
 
@@ -57,7 +57,7 @@ Accepted: single user, no accounts. The API requires a locally generated access 
 
 V1 uses a Vektor-owned loop. The API calls OpenRouter chat completions with streaming and tool calling, executes tools itself, and persists every event. Permissions, approvals, audit, cancellation, and scheduling all sit inside a loop we control.
 
-After v1, a runner interface adds the Codex harness as an optional execution backend for coding and longer-running agent tasks. All runners share Vektor's run-event contract, approval model, and audit trail; see [Phase 11 — Codex harness and hybrid runners](#phase-11--codex-harness-and-hybrid-runners). Browser and computer tools are separate permissioned capabilities in Phases 9–10, not implicit grants from choosing a runner.
+After v1, a runner interface adds the Codex harness and a curated ACP (Agent Client Protocol) agent registry as optional execution backends for coding and longer-running agent tasks. All runners share Vektor's run-event contract, approval model, and audit trail; see [Phase 11 — Codex harness and hybrid runners](#phase-11--codex-harness-and-hybrid-runners). Browser and computer tools are separate permissioned capabilities in Phases 9–10, not implicit grants from choosing a runner.
 
 ### D5. Streaming and run events — accepted
 
@@ -104,7 +104,7 @@ Accepted: Tauri wraps the built web UI and connects to a backend URL chosen on f
 
 ### D13. Version 1 provider scope — accepted
 
-Accepted: OpenRouter only for v1, using its model list and usage reporting. The provider layer is an internal interface so another provider can be added later without changing the UI. Phase 11's Codex harness is a separate post-v1 runner integration with its own authentication and capability checks; it is not merely a Codex-named model selected through OpenRouter.
+Accepted: OpenRouter only for v1, using its model list and usage reporting. The provider layer is an internal interface so another provider can be added later without changing the UI. Phase 11's Codex harness and ACP agent registry are separate post-v1 runner integrations with their own authentication and capability checks; they are not merely Codex-named models selected through OpenRouter.
 
 ### D14. Releases and update checks — accepted
 
@@ -138,7 +138,7 @@ Accepted: GitHub Actions builds and publishes tagged releases to GitHub Releases
 
 1. Client posts a message; the API stores it and creates a run.
 2. The runner assembles context: profile prompt, recent conversation history, selected attachments, tool definitions, and explicitly granted MCP tools.
-3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the Codex harness adapter arrives in Phase 11 after v1.
+3. The active runner streams from OpenRouter and appends every delta and tool event to the run log. V1 has one runner; the Codex harness and ACP agent adapters arrive in Phase 11 after v1.
 4. Tool calls pause the run if they need approval; the UI resolves the approval and the run resumes.
 5. On completion the assistant message, usage, and final status are persisted; the event stream closes.
 6. Cancel sets the run to `cancelled`, aborts the provider request, and kills any child process group, including MCP stdio servers.
@@ -475,61 +475,164 @@ Goal: let an explicitly enabled profile interact with applications through scree
 
 Dependencies: Phase 9 plus a reviewed desktop-session isolation and permission design. The Phase 6 Tauri shell alone does not grant OS control or turn a remote Docker backend into a host automation agent.
 
-- [ ] Introduce a computer-session interface for screenshots, screen geometry, pointer movement/click/drag/scroll, keyboard input, and application/window selection, with a capability check for the chosen model's image/tool support.
-- [ ] Start with an isolated virtual desktop/container or VM with its own display, files, and credentials. Host-desktop attachment is a separate opt-in milestone requiring a local bridge, explicit OS permissions, a visible connected-session indicator, and a revocable grant.
-- [ ] Add per-profile computer access off by default, separately from browser and terminal permissions. Scope grants to a particular desktop/session and supported applications; never infer permission to control the whole host from full terminal access.
-- [ ] Provide a user-visible session preview, action target, pause/takeover, and an action timeline with before/after screenshots. Validate screen coordinates and discard queued actions when display geometry, session, or foreground target changes.
-- [ ] Require confirmation for consequential actions, including sending/submitting, installing software, changing security/account settings, and deleting files. Handle login, password, payment, and other sensitive fields through user takeover without logging keystrokes or putting secrets into model-visible screenshots.
-- [ ] Keep clipboard, filesystem transfer, and external network access disabled unless separately granted. Reuse approved attachment paths and download limits, and define screenshot access, retention, deletion, and redaction behavior.
-- [ ] Enforce bounded action/time budgets, cancellation, and emergency stop that releases held keys/buttons, clears queued input, revokes control, and terminates the isolated session. Restart must not resume clicks or keystrokes automatically.
-- [ ] For scheduled computer tasks, require an isolated session and explicit unattended policy; pending human approval pauses the job. Do not allow scheduled tasks to seize the user's active desktop implicitly.
-- [ ] Test against controlled desktop applications, including scaling/multiple-display changes, stale targets, permission denial, prompt injection in screenshots, sensitive-field takeover, cancellation during drag/typing, and restart recovery.
+Status (2026-11-02): **implemented and verified for isolated Linux desktops**.
+
+The backend now launches explicitly granted applications in Bubblewrap with separate
+filesystem, PID and network namespaces and a private authenticated Xvfb display.
+Off/Observation/Control grants are independent of browser and terminal permissions.
+Up to five allowed apps can be selected; each mutating action requires a fresh
+approval, with foreground/window/geometry checks before input. The run panel provides
+live preview, target/window selection, pause/close, private takeover and authenticated
+before/after screenshot history with retention and deletion. Private mode blocks
+agent images/input until the desktop is destroyed. Count/time/resource limits,
+credential filtering, profile/job revocation, parent-death supervision and actual
+SIGKILL/restart tests complete the isolated-session exit criteria. Scheduled sessions
+require an explicit per-job grant and retain human input approvals.
+
+Host-desktop attachment remains the separate opt-in milestone described below.
+Clipboard bridging, file transfer and external network grants remain unavailable;
+the isolated implementation enforces them off. Multiple physical displays and
+arbitrary host applications are unsupported and never cause a host fallback.
+Operational requirements and exact isolation/privacy boundaries are documented in
+[COMPUTER.md](./COMPUTER.md).
+
+- [x] Introduce a computer-session interface for screenshots, screen geometry, pointer movement/click/drag/scroll, keyboard input, and application/window selection, with a capability check for the chosen model's image/tool support.
+- [x] Start with an isolated virtual desktop/container or VM with its own display, files, and credentials. Host-desktop attachment is a separate opt-in milestone requiring a local bridge, explicit OS permissions, a visible connected-session indicator, and a revocable grant.
+- [x] Add per-profile computer access off by default, separately from browser and terminal permissions. Scope grants to a particular desktop/session and supported applications; never infer permission to control the whole host from full terminal access.
+- [x] Provide a user-visible session preview, action target, pause/takeover, and an action timeline with before/after screenshots. Validate screen coordinates and discard queued actions when display geometry, session, or foreground target changes.
+- [x] Require confirmation for consequential actions, including sending/submitting, installing software, changing security/account settings, and deleting files. Handle login, password, payment, and other sensitive fields through user takeover without logging keystrokes or putting secrets into model-visible screenshots.
+- [x] Keep clipboard, filesystem transfer, and external network access disabled unless separately granted. Reuse approved attachment paths and download limits, and define screenshot access, retention, deletion, and redaction behavior.
+- [x] Enforce bounded action/time budgets, cancellation, and emergency stop that releases held keys/buttons, clears queued input, revokes control, and terminates the isolated session. Restart must not resume clicks or keystrokes automatically.
+- [x] For scheduled computer tasks, require an isolated session and explicit unattended policy; pending human approval pauses the job. Do not allow scheduled tasks to seize the user's active desktop implicitly.
+- [x] Test against controlled desktop applications, including scaling/multiple-display changes, stale targets, permission denial, prompt injection in screenshots, sensitive-field takeover, cancellation during drag/typing, and restart recovery.
 
 Exit criteria: a profile completes a benign task in an isolated test desktop with visible actions; a consequential step pauses for approval, revoked access prevents further input, and emergency stop halts input and releases keys/buttons. The user's real desktop remains untouched unless a separate host-control grant was explicitly made.
 
 ## Phase 11 — Codex harness and hybrid runners (late plan, after v1)
 
-Goal: add the Codex agent harness as an optional runner while retaining Vektor's native OpenRouter loop, workspace UI, permissions, and execution history. This makes the existing hybrid-runtime plan in D4 concrete.
+Goal: add the Codex agent harness and a curated ACP (Agent Client Protocol) agent registry as optional runners while retaining Vektor's native OpenRouter loop, workspace UI, permissions, and execution history. This makes the existing hybrid-runtime plan in D4 concrete.
+
+Phase 11 has two sub-phases. **11A** adds the Codex adapter and the runner identity/permission contracts it needs. **11B** adds the ACP agent registry, with Codex exposed as a first-class entry and other ACP-compatible coding agents discoverable from the official registry. 11B starts only after 11A's exit criteria are demonstrated.
 
 Dependencies: Phase 8's release/versioning foundation and Phases 9–10's capability contracts. Integration is scheduled after browser/computer use; the first Codex milestone may expose only capabilities whose enforcement and event mapping have been verified.
 
-Integration proposal: prefer a locally managed Codex app-server connection over stdio for the interactive Vektor experience. Official documentation describes app-server's thread/turn lifecycle, streamed events, interruption, and approval requests, while the Codex SDK and `codex exec` cover other programmatic/job workflows. Re-evaluate the supported interface and authentication requirements when implementation starts. Sources: [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) and [Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform).
+Integration proposal: prefer a locally managed Codex app-server connection over stdio for the interactive Vektor experience. Official documentation describes app-server's thread/turn lifecycle, streamed events, interruption, and approval requests, while the Codex SDK and `codex exec` cover other programmatic/job workflows. Re-evaluate the supported interface and authentication requirements when implementation starts. For 11B, use the official ACP agent registry as discovery metadata only, with Codex as a first-class entry; Vektor still probes each local agent, verifies versions and capabilities, and enforces its own approval boundaries. Sources: [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server), [Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform), and the [Agent Client Protocol](https://agentclientprotocol.com/).
 
-- [ ] Introduce a versioned runner interface with explicit `native` and `codex` identities; migrate stored runner values/shared contracts and reserve a generic `cli` adapter for other future integrations. Provide per-profile selection and an explicit per-run override without silently switching runners on failure.
-- [ ] Add Codex installation/version discovery, a compatibility probe, process/session health, and setup diagnostics. Document local and Docker packaging without requiring users to install Codex for the native runner.
-- [ ] Add separate Codex authentication/account configuration using officially supported mechanisms. Keep credentials write-only/protected, surface missing access and usage limits, and distinguish Codex billing/model availability from OpenRouter. Do not assume an OpenRouter key or a particular subscription grants Codex access.
-- [ ] Map Vektor conversations and runs to Codex thread/turn identifiers. Persist the mapping and lifecycle cursor, support deliberate resume/reconnect, and prevent duplicate turns or command replay after interruption/restart.
-- [ ] Normalize streamed messages, tool calls/output, proposed file changes/diffs, approval requests, usage, errors, and completion into Vektor's timeline/audit contracts. Preserve identifiers for traceability and label provider metrics that are unavailable rather than fabricating them.
-- [ ] Translate Vektor's filesystem/network permissions and approval decisions into supported Codex controls. Do not equate similarly named sandbox modes with identical guarantees. Reject unsupported mappings or disable the capability; never widen permissions or approve a harness request automatically to make a run proceed.
-- [ ] Initially reject the Codex runner for no-terminal profiles unless the integration can prove command execution is disabled. Basic mode must preserve Vektor's effective restrictions; expose it only after verifying enforcement. Full-access command/file-change approvals must remain visible and attributable in Vektor.
-- [ ] Supply only explicitly selected conversation/file context and scoped workspace access. Define which layer owns compaction/context limits, distinguish harness estimates from actual usage, and keep excluded attachments and backend credentials out of implicit context sources.
-- [ ] Reuse browser/computer controllers only through capability-checked adapters that preserve Phases 9–10's session boundaries and approvals. A harness runner must not gain browser, computer, network, integration, or file access merely because the underlying tool exists.
-- [ ] Bridge cancellation and emergency stop to turn interruption plus supervised process/session cleanup. Resolve pending approvals as cancelled, preserve the global stop latch, and require explicit action before resuming interrupted work. Scheduled Codex jobs use the same execution gate and history as native jobs.
-- [ ] Add protocol fixtures and compatibility tests for event ordering, reconnect/duplicate delivery, approval/denial, unsupported permissions, missing/expired authentication, cancellation, process death, and version drift. Re-check official interfaces before each supported harness upgrade.
+### Phase 11A — Codex harness adapter
 
-Exit criteria: the same Vektor workspace can run a native conversation and a Codex-backed task with clearly labelled runner/model/auth state, streamed progress, reviewable file/tool actions, durable history, and working cancel/emergency stop. Unsupported permission combinations are rejected before execution; Codex disconnect or unavailability leaves the native runner usable without automatically resubmitting the task.
+Status (2026-11-02): **implemented and verified locally**.
+
+The native OpenRouter loop, Codex app-server 0.166.0 and registry-keyed ACP v1
+runners now share Vektor's run/approval/audit lifecycle. Existing runner history and
+profiles migrate without changing native defaults. Profiles and queued messages can
+select a runner explicitly; retry retains its identity and resume requires a new user
+message plus a compatible encrypted checkpoint. No failure silently switches runners.
+
+The supported first mapping requires Linux isolation, agent-specific workspace and
+inference grants, Full access with terminal approvals, and text context. Basic,
+No-terminal, Full Unrestricted, external browser/computer control, remote ACP and
+unverifiable/package-only entries are rejected. Codex effective controls are checked
+at startup and thread creation/resume; agents receive an isolated workspace snapshot,
+with real commands and proposed file changes mediated by Vektor. Inference egress is
+restricted to configured public hosts. Separate API keys and private checkpoints are
+encrypted; stop/revocation and actual API SIGKILL/restart cleanup have dedicated tests.
+
+A real installed Codex harness has completed a file-tool task, human approval and
+explicit durable resume against a local TLS model fixture. Native and ACP task paths
+are exercised through the real API and Bubblewrap, including official-artifact
+verification, scheduled approval waits, denial, conflicts, revocation and no fallback.
+No paid inference or real provider key is used in these checks. Operational details,
+unsupported mappings and reproducible verification are in
+[runner operations](./OPERATIONS.md#codex-and-acp-runners).
+
+Verification passed: full workspace tests, lint, typecheck, formatting, production
+build, packaged API/web smoke checks and all 44 opt-in runner checks against the
+installed Codex 0.166.0 binary and live official ACP registry. The real-Codex model
+endpoint and ACP execution agents in these tests are controlled fixtures; this does
+not claim commercial account entitlement or certify every registry entry.
+
+- [x] Introduce a versioned runner interface with explicit `native`, `codex`, and registry-keyed `acp:<agent-id>` identities (`acp` is implemented in 11B); migrate stored runner values/shared contracts and reserve a generic `cli` adapter for other future integrations. Provide per-profile selection and an explicit per-run override without silently switching runners on failure.
+- [x] Add Codex installation/version discovery, a compatibility probe, process/session health, and setup diagnostics. Document local and Docker packaging without requiring users to install Codex for the native runner.
+- [x] Add separate Codex authentication/account configuration using officially supported mechanisms. Keep credentials write-only/protected, surface missing access and usage limits, and distinguish Codex billing/model availability from OpenRouter. Do not assume an OpenRouter key or a particular subscription grants Codex access.
+- [x] Map Vektor conversations and runs to Codex thread/turn identifiers. Persist the mapping and lifecycle cursor, support deliberate resume/reconnect, and prevent duplicate turns or command replay after interruption/restart.
+- [x] Normalize streamed messages, tool calls/output, proposed file changes/diffs, approval requests, usage, errors, and completion into Vektor's timeline/audit contracts. Preserve identifiers for traceability and label provider metrics that are unavailable rather than fabricating them.
+- [x] Translate Vektor's filesystem/network permissions and approval decisions into supported Codex controls. Do not equate similarly named sandbox modes with identical guarantees. Reject unsupported mappings or disable the capability; never widen permissions or approve a harness request automatically to make a run proceed.
+- [x] Initially reject the Codex runner for no-terminal profiles unless the integration can prove command execution is disabled. Basic mode must preserve Vektor's effective restrictions; expose it only after verifying enforcement. Full-access command/file-change approvals must remain visible and attributable in Vektor.
+- [x] Supply only explicitly selected conversation/file context and scoped workspace access. Define which layer owns compaction/context limits, distinguish harness estimates from actual usage, and keep excluded attachments and backend credentials out of implicit context sources.
+- [x] Reuse browser/computer controllers only through capability-checked adapters that preserve Phases 9–10's session boundaries and approvals. A harness runner must not gain browser, computer, network, integration, or file access merely because the underlying tool exists.
+- [x] Bridge cancellation and emergency stop to turn interruption plus supervised process/session cleanup. Resolve pending approvals as cancelled, preserve the global stop latch, and require explicit action before resuming interrupted work. Scheduled Codex jobs use the same execution gate and history as native jobs.
+- [x] Add protocol fixtures and compatibility tests for event ordering, reconnect/duplicate delivery, approval/denial, unsupported permissions, missing/expired authentication, cancellation, process death, and version drift. Re-check official interfaces before each supported harness upgrade.
+
+Exit criteria (11A): the same Vektor workspace can run a native conversation and a Codex-backed task with clearly labelled runner/model/auth state, streamed progress, reviewable file/tool actions, durable history, and working cancel/emergency stop. Unsupported permission combinations are rejected before execution; Codex disconnect or unavailability leaves the native runner usable without automatically resubmitting the task.
+
+### Phase 11B — ACP agent registry
+
+Status (2026-11-02): **implemented and verified locally**. The 11A execution/approval/resume checks were demonstrated before finalizing the ACP execution gate. The verification evidence and account-specific limits above apply to both sub-phases.
+
+Goal: let a user discover, verify, and enable ACP-compatible coding agents from the official ACP registry, with Codex available as a first-class entry, without adding a marketplace for arbitrary plugin code or weakening the permission, approval, and audit boundaries established in 11A.
+
+Design note: the ACP registry is discovery metadata, not a trust decision. Treat every registry entry, agent name, description, version, and install hint as untrusted input. Vektor resolves a local executable, verifies provenance where the registry provides it, probes the agent over ACP `initialize`, and records which agent/version/interface served each run. An entry that cannot be verified is shown as unavailable rather than executed. Re-check the ACP specification and registry format before implementation starts.
+
+- [x] Add a registry data model and sync: persist source, entry id, name, version, publisher, homepage, install/run hints, verification status, last-checked time, and a content hash. Fetch the official ACP registry through a cached, bounded request; keep the last known-good snapshot, reject malformed data, and never block native runs when the registry is unreachable.
+- [x] Represent Codex as a first-class entry backed by the 11A app-server adapter when that interface provides stronger lifecycle and approval guarantees, and by its ACP entry otherwise. Record which interface served the run, forbid concurrent app-server and ACP sessions for one run, and do not duplicate approval or cancellation state across both.
+- [x] Add explicit discovery and setup: detect already-installed ACP agents, probe version and capabilities with `initialize`, show a clear compatibility result, and require an explicit user action to add, enable, upgrade, or launch an entry. Never auto-install, auto-update, or auto-run an agent from registry metadata.
+- [x] Launch agents as supervised child process groups with a command/argument array (no shell interpolation), an allowlisted environment, a scoped working directory, resource limits, and no inherited Vektor or provider secrets. If remote ACP transports are supported, apply Phase 9's network rules and require explicit opt-in; document Docker and host-binary packaging.
+- [x] Map ACP session lifecycle (`session/new`, `session/prompt`, `session/update`, `session/cancel`, and permission requests) onto Vektor conversations, runs, timeline events, and audit records. Persist agent session ids and lifecycle cursors; resume or reconnect only on explicit user action and never replay prompts after restart.
+- [x] Translate ACP permission requests into Vektor approvals with deny-by-default outcomes. Reject or hide unsupported permission kinds before a run, never auto-approve because an agent labels a request safe or because an entry is verified, and keep file, terminal, and network grants scoped per profile and per run.
+- [x] Handle agent authentication and account state separately per entry. Keep credentials write-only and protected at rest, surface missing or expired authentication and usage limits, and distinguish agent subscription/quota state from OpenRouter and Codex app-server billing.
+- [x] Add registry and agent-management UI: browse/search entries, show source, publisher, verification and compatibility status, enable/disable, remove, and per-profile grants. Installation or upgrade is an explicit action with a preview; no execution happens from the list view.
+- [x] Add health, isolation, and fallback behavior: bounded startup and probe times, crash containment, single-owner sessions, reconnect with backoff, and clear unavailable states. A missing, crashed, or unverified ACP agent leaves the native runner usable and is never replaced by an automatic retry or silent runner switch.
+- [x] Add fixtures and a fake ACP agent covering registry schema drift, duplicate or malicious entries, unknown capabilities and permission kinds, malformed messages, cancellation during a turn, process death, reconnect, restart, unreachable registry, and version drift. Re-check the ACP specification and supported registry fields before each supported agent upgrade.
+
+Exit criteria (11B): a user can browse the official registry, verify and enable Codex plus at least one other ACP agent, see provenance and compatibility state, and run either with streamed progress, approvals, durable history, and working cancel/emergency stop. An unverified, unsupported, or unreachable entry never executes and never falls back silently; native chat remains usable throughout.
 
 ## Phase 12 — MCP plugin support (late plan, after v1)
 
-Goal: let users attach MCP servers as optional, explicitly enabled plugins that contribute tools, resources, and prompts to native and Codex runs without bypassing Vektor's permissions, approvals, audit trail, or isolation boundaries.
+Status (2026-11-02): **implemented and verified locally**.
+
+MCP 2025-11-25 stdio and Streamable HTTP clients now share Vektor's native,
+scheduled, Codex and ACP approval/audit lifecycle. Settings manages explicit
+configuration, protected credentials, discovery, enablement and per-profile tool/
+context grants. MCP tools always require approval; local processes see isolated
+snapshots, with separately reviewed real file proposals. Resources/templates/prompts
+are previewed and selected per message, budgeted and checked again before sending.
+
+The supported mapping uses operation-scoped sessions, standalone local executables,
+checked public HTTPS or explicitly granted loopback HTTP, and text context. Unknown
+client capabilities, task-required tools, remote schema references, legacy SSE and
+unsupported revisions are rejected or disabled. No server instructions grant access,
+and no interrupted call is replayed automatically. Local isolation remains unavailable
+when host/container namespace policy prevents enforcement. See [MCP operations](MCP.md)
+for setup, supported limits, retention, packaging and verification.
+
+Verification passed: full workspace tests, lint, typecheck, formatting, production
+build, release checksum/startup checks, MCP smoke tests against the extracted API
+release, and Docker build/HTTP-SSE smoke checks. All 45 opt-in runner checks passed,
+including real installed Codex 0.166.0 MCP approval and durable resume against a local
+TLS model fixture. Host stdio isolation and API SIGKILL/restart cleanup were exercised.
+Default Docker namespace policy denied local isolation on this host, and the local
+server remained unavailable; no unsandboxed fallback was used. Tests use controlled
+MCP/model fixtures and no real service keys or paid inference.
+
+Goal: let users attach MCP servers as optional, explicitly enabled plugins that contribute tools, resources, and prompts to native, Codex, and ACP runs without bypassing Vektor's permissions, approvals, audit trail, or isolation boundaries.
 
 Dependencies: Phases 4 and 7 (approval, stop, audit, and recovery), Phase 9 (untrusted external content and network boundaries), and Phases 10–11 (capability adapters and the runner interface). This phase adds a user-configured MCP client; it does not add a marketplace, automatic plugin installation, or make Vektor itself an MCP server.
 
 Design note: treat every MCP server as third-party code and every response as untrusted data. Server tool annotations and descriptions are hints, not authorization. Vektor owns discovery, allowlisting, approval, timeouts, output limits, and redaction. Re-check the [MCP specification](https://modelcontextprotocol.io/specification) and supported transports before implementation starts.
 
-- [ ] Add a versioned MCP client interface with protocol/capability negotiation and explicit support for local stdio servers and remote Streamable HTTP servers, adding legacy SSE only if still required. Pin supported protocol versions and reject unsupported capabilities instead of silently degrading.
-- [ ] Add a plugin registry and settings UI to add, edit, test, enable/disable, reconnect, and remove MCP servers. Store name, transport, command or URL, arguments, working directory, environment/headers, and per-profile tool grants. Secrets stay write-only, encrypted at rest, redacted, and never returned by the API.
-- [ ] Discover tools, resources, resource templates, and prompts per server; namespace names to prevent collisions; validate schemas; and bound tool output, resource size, prompt size, and pagination. Surface discovery failures and unsupported features in the UI.
-- [ ] Map MCP tools into the existing tool contract and timeline, including JSON-schema validation, cancellation, progress notifications, structured results, and bounded time/output. An MCP server cannot call another tool, widen its own permissions, or approve its own request.
-- [ ] Add per-profile least-privilege grants: off by default, per-server and per-tool allowlists, and separate read-only/mutating policy. Require Vektor approval for consequential or unknown-effect tools even when a server labels them safe; never auto-approve from tool metadata.
-- [ ] Treat resources and prompts as untrusted context. Require explicit user or profile selection before inclusion, apply size/type limits and previews, and keep server content out of system instructions, permission decisions, and other servers' scopes. Text in results cannot grant capabilities or approve actions.
-- [ ] Run local stdio servers as supervised child process groups with an allowlisted environment, scoped working directory, resource limits, and no inherited backend secrets. Apply Phase 9's network rules to remote servers, including private, loopback, and metadata targets plus redirects. Document Docker packaging and require explicit opt-in for host binaries.
-- [ ] Add lifecycle and failure isolation: bounded startup/discovery, health checks, reconnect with backoff, concurrency limits, crash containment, and clear unavailable states. One server's failure must not fail the run, block native tools, or replay work automatically after restart.
-- [ ] Bridge stop/cancel to in-flight MCP requests and stdio child cleanup, and resolve pending approvals as cancelled. Emergency stop keeps its existing latch and must not restart MCP servers or replay calls until explicit resume.
-- [ ] Record server identity, tool, redacted arguments/results, duration, approval, and errors in run events and the audit log; store large results as controlled artifacts. Keep MCP activity distinguishable from native, terminal, and browser calls.
-- [ ] For scheduled jobs, require declared MCP capabilities and pause on approval instead of assuming unattended access. For the Codex runner, expose only explicitly granted MCP tools through a capability-checked adapter; a server configured in Vektor must not appear in Codex merely because Codex supports MCP.
-- [ ] Add protocol fixtures and fake servers for discovery, schema mismatch, duplicate or invalid names, timeouts, cancellation, crashes, reconnect, protocol-version drift, approval/denial, secret redaction, resource limits, restart, and unavailable servers.
-- [ ] Test a local stdio server and a remote server end to end, including denial, stop, audit, scheduled pauses, Docker/host packaging, and native-runner fallback. Verify that no secret or excluded context reaches a server.
+- [x] Add a versioned MCP client interface with protocol/capability negotiation and explicit support for local stdio servers and remote Streamable HTTP servers, adding legacy SSE only if still required. Pin supported protocol versions and reject unsupported capabilities instead of silently degrading.
+- [x] Add a plugin registry and settings UI to add, edit, test, enable/disable, reconnect, and remove MCP servers. Store name, transport, command or URL, arguments, working directory, environment/headers, and per-profile tool grants. Secrets stay write-only, encrypted at rest, redacted, and never returned by the API.
+- [x] Discover tools, resources, resource templates, and prompts per server; namespace names to prevent collisions; validate schemas; and bound tool output, resource size, prompt size, and pagination. Surface discovery failures and unsupported features in the UI.
+- [x] Map MCP tools into the existing tool contract and timeline, including JSON-schema validation, cancellation, progress notifications, structured results, and bounded time/output. An MCP server cannot call another tool, widen its own permissions, or approve its own request.
+- [x] Add per-profile least-privilege grants: off by default, per-server and per-tool allowlists, and separate read-only/mutating policy. Require Vektor approval for consequential or unknown-effect tools even when a server labels them safe; never auto-approve from tool metadata.
+- [x] Treat resources and prompts as untrusted context. Require explicit user or profile selection before inclusion, apply size/type limits and previews, and keep server content out of system instructions, permission decisions, and other servers' scopes. Text in results cannot grant capabilities or approve actions.
+- [x] Run local stdio servers as supervised child process groups with an allowlisted environment, scoped working directory, resource limits, and no inherited backend secrets. Apply Phase 9's network rules to remote servers, including private, loopback, and metadata targets plus redirects. Document Docker packaging and require explicit opt-in for host binaries.
+- [x] Add lifecycle and failure isolation: bounded startup/discovery, health checks, reconnect with backoff, concurrency limits, crash containment, and clear unavailable states. One server's failure must not fail the run, block native tools, or replay work automatically after restart.
+- [x] Bridge stop/cancel to in-flight MCP requests and stdio child cleanup, and resolve pending approvals as cancelled. Emergency stop keeps its existing latch and must not restart MCP servers or replay calls until explicit resume.
+- [x] Record server identity, tool, redacted arguments/results, duration, approval, and errors in run events and the audit log; store large results as controlled artifacts. Keep MCP activity distinguishable from native, terminal, and browser calls.
+- [x] For scheduled jobs, require declared MCP capabilities and pause on approval instead of assuming unattended access. For Codex and ACP runners, expose only explicitly granted MCP tools through a capability-checked adapter; a server configured in Vektor must not appear in an external agent merely because that agent supports MCP.
+- [x] Add protocol fixtures and fake servers for discovery, schema mismatch, duplicate or invalid names, timeouts, cancellation, crashes, reconnect, protocol-version drift, approval/denial, secret redaction, resource limits, restart, and unavailable servers.
+- [x] Test a local stdio server and a remote server end to end, including denial, stop, audit, scheduled pauses, Docker/host packaging, and native-runner fallback. Verify that no secret or excluded context reaches a server.
 
 Exit criteria: a user can add and test local and remote MCP servers, review their declared capabilities, grant one tool to a profile, and use it in a streamed run; a consequential call pauses for approval, denial prevents execution, and the request appears in the timeline and audit log. Disabling or crashing a server leaves native chat usable, emergency stop cancels its work, excluded data and secrets are not sent, and no MCP capability is available without an explicit grant.
 
@@ -549,7 +652,7 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 
 - Browser use/automation until Phase 9 (planned after v1).
 - Computer use and desktop automation until Phase 10 (planned after v1).
-- Codex harness and hybrid-runner integration until Phase 11 (late plan, after v1).
+- Codex harness, hybrid runners, and the ACP agent registry until Phase 11 (late plan, after v1).
 - MCP plugin support until Phase 12 (late plan, after v1).
 - Multi-user accounts and collaboration.
 - Visual workflow builder.
@@ -560,7 +663,7 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 - Marketplace/plugin ecosystem, including automatic discovery, installation, and distribution of third-party plugins.
 - Complex multi-agent planning graphs.
 
-Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, the Codex harness, and explicitly configured MCP servers are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
+Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, the Codex harness, the ACP agent registry, and explicitly configured MCP servers are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
 
 ## Definition of the first usable release
 
@@ -592,7 +695,8 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 - **CLI adapter drift.** External CLIs change flags and event formats; pin versions, detect capabilities, and fail closed. Switching to the native runner requires an explicit choice rather than automatic task resubmission.
 - **Browser boundaries.** Pages can redirect, contact private services, expose session cookies, or contain instructions aimed at the agent. Network/action grants, separate sessions, scoped approvals, and artifact controls must be enforced outside the model.
 - **Computer control.** Stale coordinates, focus changes, sensitive screenshots, and held input can affect the wrong application. Begin with isolated sessions; host control requires explicit OS grants, visible takeover, and tested stop behavior.
-- **Harness policy mismatch.** Codex permissions, authentication, event schemas, and compaction may differ from Vektor's. Verify effective restrictions, pin supported interfaces, and reject unsupported configurations instead of widening access or silently changing runners.
+- **Harness policy mismatch.** Codex and ACP agents differ in permissions, authentication, event schemas, and compaction. Verify effective restrictions, pin supported interfaces, and reject unsupported configurations instead of widening access or silently changing runners.
+- **ACP registry supply chain.** Registry entries, install hints, and agent metadata can be stale, spoofed, or malicious. Treat the registry as advisory, verify provenance and local capabilities, never auto-install or auto-run, and fail closed on unverified or unreachable entries.
 - **MCP trust boundary.** MCP servers are third-party code and their responses are untrusted data. Tool annotations, prompts, and resources can attempt to expand access or inject instructions. Keep plugins off by default, scope grants per profile and tool, enforce approvals and output limits outside the server, redact secrets, and contain stdio processes.
 - **Update checks.** GitHub's API is rate-limited and may be unreachable; checks must be cached, optional, and must never block startup or reveal local data.
 
@@ -612,3 +716,4 @@ Phase mapping: item 1 → Phase 1; items 2, 3, 5 → Phase 2; item 6 → Phase 3
 | 2026-10-31 | Plan v0.4: all Phase 0 decisions accepted; Phase 1 expanded into a task checklist                                                                         | Accepted |
 | 2026-10-31 | Plan v0.6: add post-v1 browser use (Phase 9), computer use (Phase 10), and late Codex harness/hybrid runners (Phase 11); preserve the first-release scope | Planned  |
 | 2026-11-01 | Plan v0.7: add Phase 12 MCP plugin support for explicitly configured, permissioned MCP servers; no marketplace or automatic plugin installation           | Planned  |
+| 2026-11-01 | Plan v0.8: add Phase 11B ACP agent registry with Codex as a first-class entry; registry metadata is advisory, no auto-install or auto-run                 | Planned  |

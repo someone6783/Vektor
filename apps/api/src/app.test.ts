@@ -695,3 +695,34 @@ it("loads the complete model catalog without requiring a connection test or API 
     (await app.inject({ method: "GET", url: "/api/settings", headers })).json().models,
   ).toEqual(models);
 });
+
+describe("external runner setup endpoints", () => {
+  it("requires authentication and keeps browsing separate from process launch", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/runners" })).statusCode).toBe(401);
+    const headers = { authorization: `Bearer ${ACCESS_TOKEN}` };
+    const response = await app.inject({ method: "GET", url: "/api/runners", headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ probes: [], registry: null, installations: [] });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/runners/probe",
+          headers,
+          payload: { interface: "acp-v1", command: "relative-command" },
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+  it("blocks probe launches while emergency stop is latched", async () => {
+    const headers = { authorization: `Bearer ${ACCESS_TOKEN}` };
+    await app.inject({ method: "POST", url: "/api/runtime/emergency-stop", headers });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runners/probe",
+      headers,
+      payload: { interface: "codex-app-server", command: "/does/not/exist" },
+    });
+    expect(response.statusCode).toBe(423);
+  });
+});

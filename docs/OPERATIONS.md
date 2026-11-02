@@ -1,5 +1,8 @@
 # Vektor operations
 
+For desktop local-service installation, tray shutdown and separate Docker API/web
+containers, see [Installation](INSTALLING.md).
+
 Vektor supports one backend per local data directory. Stop the backend before
 backup, restore, volume maintenance, or manual database changes. A separate SQLite
 connection holds an exclusive OS lock on `.vektor-lock.db` for the server's lifetime
@@ -258,3 +261,199 @@ The optional default profile saves cookies/site storage encrypted in SQLite, so 
 restore its last saved state as well. Reset in Settings removes current saved state,
 not older backup copies.
 After a crash, interrupted runs require a deliberate new run/retry and fresh approvals.
+
+## Isolated computer use
+
+See [COMPUTER.md](COMPUTER.md) for Xvfb/Bubblewrap requirements, namespace diagnostics,
+application grants, private takeover, screenshot retention and cleanup. Computer
+access defaults off independently of browser/terminal access. Each session has its
+own authenticated display, sandboxed files/processes and no external network or host
+clipboard/file transfer. Scheduled use requires an explicit job grant and retains
+input approvals. Emergency stop and API death terminate sessions; restart cancels
+pending approvals and never replays input. Host-desktop attachment is not implemented.
+
+## Codex and ACP runners
+
+Native OpenRouter chat remains the default. Codex and ACP are separate execution
+backends, not OpenRouter model aliases. Existing profiles migrate to `native`;
+legacy `cli` history remains readable while the generic CLI adapter is reserved.
+The runner contract is version 1. Codex app-server is pinned to **0.166.0** and ACP
+negotiates **protocol 1**. Unsupported versions/capabilities fail closed. Re-check
+[Codex app-server](https://learn.chatgpt.com/docs/app-server),
+[Codex authentication](https://learn.chatgpt.com/docs/auth), the
+[ACP protocol](https://agentclientprotocol.com/protocol/v1/overview) and the
+[registry format](https://github.com/agentclientprotocol/registry/blob/main/FORMAT.md)
+before changing a supported interface.
+
+### Backend requirements and packaging
+
+External execution requires Linux, usable Bubblewrap user/mount/PID/network
+namespaces, Python 3, `prlimit`, CA certificates and writable `/dev/shm`. The Docker
+runtime includes the system dependencies; compose allocates 256 MiB of shared
+memory. Host/container policy can prohibit namespaces. A failed isolated probe is
+an unavailable state, never permission to launch an unsandboxed process. Native
+chat does not require these runner dependencies or a Codex installation.
+
+Install the external agent yourself from its publisher. For Docker, add a deliberate
+read-only executable bind, such as `/absolute/host/codex:/opt/agents/codex:ro`, in a
+local compose override, then probe `/opt/agents/codex` inside Vektor. Do not mount a
+host home, Codex configuration directory, provider credential files or Docker socket.
+A standalone executable and system runtimes are visible to the probe; adjacent npm
+or Python package trees are not shared. Unsupported launcher dependencies remain
+unavailable. There is no automatic `npx`/`uvx` installation, package upgrade or remote
+ACP transport. ZIP distributions are currently unavailable; supported platform
+artifacts are raw executables or tar.gz/tgz, tar.bz2 and tar.xz archives.
+
+### Explicit setup
+
+1. Open Settings → Agent runner setup and **Load setup**. **Find installed
+   executables** only checks paths; it does not launch them. For ACP, explicitly
+   refresh the official registry and review the entry's publisher/version/source.
+2. Choose Codex app-server or ACP v1, enter an absolute installed executable and
+   the ACP entry's exact argument array, then **Probe installed agent**. This bounded
+   handshake has no credentials, network, host home or workspace. Its hash/version
+   record is a diagnostic result, not an execution grant.
+3. Choose the probe and registry identity in **Verify and add agent**. Codex requires
+   explicit approval of the displayed local executable hash and the supported version.
+   Its source is labelled local user trust rather than a registry artifact claim.
+   ACP verification downloads the declared official archive through checked public
+   addresses, verifies its checksum and compares its executable with the installed
+   file. Nothing is extracted into a host path or executed from registry metadata.
+   Missing checksums, mismatched versions/hashes or unsupported packaging cannot enable
+   an entry. Codex's ACP alias is blocked while its app-server adapter is used.
+4. Review the exact inference hosts and credential variable. Codex accepts
+   `api.openai.com` and a separate `OPENAI_API_KEY`; ACP accepts the supported key
+   variable selected for that agent. Save the key in the password field, then enable
+   the agent explicitly. A configured key does not prove entitlement: an inference
+   turn verifies that model/account access. OpenRouter keys are never reused. Agent
+   accounts, model availability, subscription limits and billing are separate.
+5. Under **Profile grants**, select the specific agent and separately grant real
+   workspace access and its configured inference hosts. Changing the grant's agent
+   clears both capabilities. In the profile editor, select the runner/model and
+   **Full access**, enable terminal, and keep browser/computer access off. ACP's
+   `agent-default` uses its advertised/default model; an explicit model id requires
+   an advertised ACP model configuration option. Codex uses the requested API model.
+
+Verification/add, key save, enablement, profile grants and launch are distinct actions.
+An upgrade repeats the probe/verification flow and leaves the entry disabled until
+explicitly enabled again. Changing inference destinations or credential type clears
+the old key. Removing an agent stops its sessions and clears its credential/grants;
+shared managed binaries are removed only after their final installation reference.
+Registry changes invalidate stale provenance rather than trusting an old enabled flag.
+
+### Filesystem, tools and network boundaries
+
+A run receives a clean environment, private home, isolated `/tmp`, a text workspace
+snapshot and its own intended agent credential. Backend data, attachments, host homes,
+saved browser sessions, displays, integration credentials and Vektor's access token
+are not mounted. Workspace snapshots omit `.git`, `node_modules`, `.env` and `.env.*`
+files, `.npmrc`, `.netrc`, oversized/non-text files and text containing known backend secrets.
+Only explicitly selected attachment text and conversation context are supplied in the
+prompt; excluded attachments and image input are not forwarded by these adapters.
+
+Codex's effective shell, unified execution, apps, plugins, browser, computer and MCP
+controls are verified before a turn. Its real workspace tools are Vektor's dynamic
+terminal/read/write broker. ACP may use client filesystem/terminal calls or its own
+local tools. Local tools operate on an isolated snapshot, not the real workspace.
+After the agent exits, Vektor collects local file proposals, shows their previous/new
+content and requires approval for each write or deletion. Conflicting human edits,
+links, special files and paths outside the workspace prevent application. Brokered
+file writes and host terminal commands likewise require fresh Vektor approval.
+A harness permission request only concerns the isolated operation shown; it cannot
+authorize a later real workspace action or widen any grant. Unknown permission kinds
+are denied, and `allow_always` is never selected.
+
+**Approved terminal commands retain existing Full-access semantics:** they run with
+the backend account's permissions, can use paths outside the workspace, and require
+approval before execution. The isolated agent's own processes have no such host
+access. Browser/computer, Basic, No-terminal and Full Unrestricted mappings are
+currently rejected for external runners. Use an explicit Native selection for those
+existing capabilities. No Vektor MCP or integration configuration is inherited.
+
+The agent network namespace has no host route. A private bridge accepts HTTPS CONNECT
+only for its exact configured inference hosts on port 443. Public DNS is checked and
+pinned; private, loopback, metadata, reserved addresses and other destinations are
+blocked, including redirect destinations that require another tunnel. There is no
+inference grant implied by a profile's browser permission. Approved host terminal
+commands remain the separate Full-access action described above.
+
+There are at most four external sessions. Processes have a 4 GiB per-process address
+space limit, 120 seconds of CPU, 128 file descriptors and a 32 MiB per-file limit.
+Protocol output, headers, connections and tool counts are bounded. Snapshots contain
+at most 1,000 text files/32 MiB; proposals and broker calls have a 32-action budget.
+The run deadline, session deadline and shared-memory capacity can end work sooner.
+These resource guards share the backend's host/container resources; this is not a VM
+or protection against kernel vulnerabilities or resource exhaustion by arbitrary code.
+
+### History, resume, cancellation and recovery
+
+Run rows persist the runner, interface/version/hash, session/turn ids, lifecycle cursor,
+state and available metrics. Timeline/audit records distinguish harness-local actions,
+real broker calls, staged file proposals and approval decisions. Vektor estimates the
+selected text budget; the harness owns its internal context and compaction. Available
+Codex token counters are reported without fabricated cost. Resume subtracts the saved
+thread baseline; unavailable ACP metrics stay unavailable rather than zero-priced.
+
+The composer can override a runner for one queued message without changing its profile.
+Retries retain the original runner. **Resume saved agent session with this new message**
+restores a completed compatible checkpoint only after explicit selection. It sends the
+new message, not the interrupted/original prompt. Version, policy, authentication,
+profile, conversation, attachment or history-scope changes can reject resume. Start
+fresh after excluding context, changing credentials, upgrading, truncating history,
+or when the checkpoint has expired or been deleted.
+
+Private homes are checkpointed only after the process exits and encrypted with the
+backend secret key. At most twenty completed checkpoints are retained, each capped at
+32 MiB before encryption. Delete a saved checkpoint in run history to remove its resume
+state; this does not delete the recorded conversation/audit history or older backups.
+The offline backup/restore workflow includes managed runner binaries and encrypted
+checkpoints; managed binary paths are remapped to the restored data directory and
+hashes are checked before a later launch.
+
+Stop sends turn/session interruption when possible, then terminates supervised process
+groups. Pending approvals and commands are cancelled. Emergency stop also retains the
+global latch, and profile/agent/grant/key revocation cancels affected active work.
+An API-parent watchdog kills descendants and removes private runtime directories after
+API death. Restart marks interrupted runs/approvals failed/cancelled, preserves their
+partial output and never reconnects or replays prompts automatically.
+
+Scheduled external jobs use the same admission gate, durable history, command/file
+approvals and stop latch. They pause for human approval rather than assuming unattended
+access. An unavailable agent never falls back to native or another runner. Failed
+connections get a persisted exponential reconnect delay (2–60 seconds); another attempt
+still requires an explicit action. Key/configuration changes reset diagnostics, while
+successful turns record healthy access. Native chat remains available throughout.
+
+### Verification
+
+`pnpm test`, `pnpm lint`, `pnpm typecheck` and `pnpm build` cover the shared contracts,
+migrations, registry parsing/cache, artifact verification, credential isolation, actual
+Bubblewrap execution, native/ACP broker flows, staging conflicts, approvals/denials,
+scheduled pauses, revocation, explicit resume and API SIGKILL/restart cleanup.
+
+Opt-in protocol checks use an already installed Codex binary and the live official
+registry, with no paid inference or real provider key:
+
+```sh
+VEKTOR_CODEX_PROBE_BIN=/absolute/path/to/codex VEKTOR_LIVE_REGISTRY=1 \
+  pnpm --filter @vektor/api exec vitest run src/runners
+```
+
+The real-Codex test uses a temporary local TLS model fixture to exercise the installed
+harness, tool broker, approval, encrypted checkpoint and resume without incurring model
+charges. ACP conformance fixtures exercise the complete official-artifact verification,
+enablement and execution path. Account-specific model entitlement and provider quota
+are checked only when the user supplies that agent's key and starts a real task.
+
+## MCP plugins
+
+Optional local stdio and remote Streamable HTTP servers are managed in Settings → MCP
+plugins. Configuration, protected credentials, testing, enablement and per-profile
+capability grants are explicit steps. MCP tool calls always require approval, and local
+file proposals receive separate review. Jobs additionally declare permitted servers;
+Codex/ACP require a separate external-runner grant. Prepared resources/prompts are
+included only when selected for a message.
+
+See [MCP operations](MCP.md) for the pinned protocol/SDK, packaging, isolation and network
+boundaries, schema/resource limits, context selection, artifact retention, backup,
+cancellation, crash recovery and verification commands.

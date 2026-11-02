@@ -1,3 +1,4 @@
+import { conversationProfile } from "../conversation-execution.js";
 import { randomUUID } from "node:crypto";
 import {
   acquireSchedulerLease,
@@ -104,11 +105,22 @@ export class Scheduler {
     setSetting(this.options.db, "scheduler.paused", false);
     appendAudit(this.options.db, "scheduler.resumed", null);
   }
-  private target(profileId: string, channelId: string, browserAccess = "off"): void {
+  private target(
+    profileId: string,
+    channelId: string,
+    browserAccess = "off",
+    computerAccess = "off",
+    mcpServers: string[] = [],
+  ): void {
     const profile = getProfile(this.options.db, profileId);
     const channel = getChannel(this.options.db, channelId);
+    this.options.manager.assertMcpJob(profileId, mcpServers);
     if (!profile || profile.archivedAt !== null || !channel || channel.archivedAt !== null)
       throw new RuntimeError("Choose an active profile and channel.");
+    this.options.manager.assertRunner(
+      profile.runner ?? "native",
+      conversationProfile(this.options.db, channelId, profile),
+    );
     if (
       browserAccess !== "off" &&
       (profile.browser?.mode === "off" ||
@@ -119,9 +131,25 @@ export class Scheduler {
         "The job's declared browser capability exceeds its profile permissions.",
         403,
       );
+    if (
+      computerAccess !== "off" &&
+      (!profile.computer ||
+        profile.computer.mode === "off" ||
+        (computerAccess === "control" && profile.computer.mode !== "control"))
+    )
+      throw new RuntimeError(
+        "The job's declared computer capability exceeds its profile permissions.",
+        403,
+      );
   }
   create(input: CreateJob): JobRecord {
-    this.target(input.profileId, input.channelId, input.browserAccess);
+    this.target(
+      input.profileId,
+      input.channelId,
+      input.browserAccess,
+      input.computerAccess,
+      input.mcpServers,
+    );
     if (listJobs(this.options.db).length >= 100)
       throw new RuntimeError(
         "At most 100 scheduled jobs are supported. Delete unused jobs before adding more.",
@@ -147,8 +175,20 @@ export class Scheduler {
   update(id: string, patch: UpdateJob): JobRecord {
     const job = this.get(id);
     const input = { ...job, ...patch };
-    if (input.enabled || patch.profileId !== undefined || patch.channelId !== undefined)
-      this.target(input.profileId, input.channelId, input.browserAccess);
+    if (
+      input.enabled ||
+      patch.profileId !== undefined ||
+      patch.channelId !== undefined ||
+      patch.computerAccess !== undefined ||
+      patch.mcpServers !== undefined
+    )
+      this.target(
+        input.profileId,
+        input.channelId,
+        input.browserAccess,
+        input.computerAccess,
+        input.mcpServers,
+      );
     const preview = previewSchedule(input.schedule, input.timezone, this.now());
     const reschedule =
       patch.schedule !== undefined || patch.timezone !== undefined || patch.enabled !== undefined;
@@ -163,6 +203,14 @@ export class Scheduler {
       { ...patch, cron: preview.cron, nextRunAt, leaseOwner: null, leaseUntil: null },
       this.now(),
     )!;
+    if (patch.mcpServers !== undefined || patch.profileId !== undefined || patch.enabled === false)
+      this.options.manager.revokeJobMcp(id);
+    if (
+      patch.computerAccess !== undefined ||
+      patch.profileId !== undefined ||
+      patch.channelId !== undefined
+    )
+      this.options.manager.revokeJobComputer(id);
     appendAudit(this.options.db, "job.updated", null, {
       jobId: id,
       fields: Object.keys(patch),
@@ -172,6 +220,7 @@ export class Scheduler {
   }
   remove(id: string): void {
     this.get(id);
+    this.options.manager.revokeJobMcp(id);
     updateJob(
       this.options.db,
       id,
@@ -184,6 +233,7 @@ export class Scheduler {
       },
       this.now(),
     );
+    this.options.manager.revokeJobComputer(id);
     appendAudit(this.options.db, "job.deleted", null, { jobId: id });
   }
   get(id: string): JobRecord {
@@ -302,20 +352,28 @@ export class Scheduler {
     if (!skip && !manual && late && !job.catchUp) skip = "missed";
     let failure: string | null = null;
     let disable = false;
-    let prepared: ReturnType<ContextService["prepare"]> | undefined;
+    let prepared: Awaited<ReturnType<ContextService["prepare"]>> | undefined;
     let messages: Awaited<ReturnType<ContextService["messages"]>> | undefined;
     if (!skip) {
       try {
-        this.target(job.profileId, job.channelId, job.browserAccess);
-        prepared = context.prepare(
+        this.target(
+          job.profileId,
+          job.channelId,
+          job.browserAccess,
+          job.computerAccess,
+          job.mcpServers,
+        );
+        prepared = await context.prepare(
           job.channelId,
           { content: job.prompt, profileId: job.profileId, attachmentIds: [] },
           job.profileId,
           undefined,
           job.includeHistory,
+          job.mcpServers,
         );
         checkContextBudget(prepared.estimate, job.allowTruncation);
         messages = await context.messages(prepared);
+        manager.validateRunnerContext(prepared.profile.runner ?? "native", messages);
       } catch (error) {
         failure = redact(error instanceof Error ? error.message : "Job could not be prepared.");
         const profile = getProfile(db, job.profileId);
@@ -351,8 +409,15 @@ export class Scheduler {
       if (!skip && getActiveRun(tx, job.channelId)) skip = "channel_busy";
       if (!skip && !failure) {
         try {
-          this.target(job.profileId, job.channelId, job.browserAccess);
+          this.target(
+            job.profileId,
+            job.channelId,
+            job.browserAccess,
+            job.computerAccess,
+            job.mcpServers,
+          );
           manager.assertCanStart();
+          manager.validateMcpContext(job.profileId, prepared?.estimate);
         } catch (error) {
           failure = redact(error instanceof Error ? error.message : "Target unavailable.");
           disable = true;
@@ -372,6 +437,7 @@ export class Scheduler {
           profileId: job.profileId,
           userMessageId: message.id,
           model: prepared.model,
+          runner: prepared.profile.runner ?? "native",
           terminalMode: prepared.profile.terminalMode,
           context: prepared.estimate,
           includeHistory: job.includeHistory,

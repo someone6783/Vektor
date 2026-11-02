@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { SendMessageResponse, ReasoningEffort } from "@vektor/shared";
+import type { SendMessageResponse, ReasoningEffort, RunnerId } from "@vektor/shared";
 import { ApiError, type ApiClient } from "./api";
 
 export interface QueuedMessage {
@@ -11,6 +11,9 @@ export interface QueuedMessage {
   profileId?: string;
   model?: string;
   reasoning?: ReasoningEffort;
+  runner?: RunnerId;
+  resumeFromRunId?: string;
+  mcpContextIds?: string[];
   error?: string;
   retry: number;
   steer?: boolean;
@@ -61,6 +64,9 @@ export function useMessageQueue(
           head.allowTruncation,
           head.model,
           head.reasoning,
+          head.runner,
+          head.resumeFromRunId,
+          ...(head.mcpContextIds?.length ? ([head.mcpContextIds] as [string[]]) : ([] as [])),
         );
         setItems((value) => value.filter((item) => item.id !== head.id));
         interrupted.current.delete(head.id);

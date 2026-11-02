@@ -8,3 +8,5 @@ apps/web/src-tauri/gen
 release-artifacts
 # Generated standalone preview with bundled JavaScript and CSS.
 docs/ui-designs/implemented.html
+
+apps/web/src-tauri/resources/backend/

@@ -2,7 +2,10 @@ services:
   vektor:
     build:
       context: .
-    image: vektor:local
+      target: api
+    image: vektor-api:local
+    labels:
+      app.vektor.role: api
     ports:
       - "127.0.0.1:8787:8787"
     environment:
@@ -25,6 +28,7 @@ services:
       - vektor-data:/data
     restart: unless-stopped
     init: true
+    shm_size: 256m
     logging:
       driver: json-file
       options:
@@ -42,6 +46,30 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  web:
+    build:
+      context: .
+      target: web
+    image: vektor-web:local
+    ports:
+      - "127.0.0.1:8788:8080"
+    depends_on:
+      vektor:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   vektor-data:

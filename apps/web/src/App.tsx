@@ -1,3 +1,4 @@
+import { connectBrowserSession } from "./lib/session";
 import { ChoicePicker } from "./components/ChoicePicker";
 import { reasoningEffortSchema, type ReasoningEffort } from "@vektor/shared";
 import { useMessageQueue } from "./lib/useMessageQueue";
@@ -10,6 +11,7 @@ import type {
   Message,
   Profile,
   Run,
+  RunnerId,
   SettingsView as SettingsViewData,
 } from "@vektor/shared";
 import { ChatView } from "./components/ChatView";
@@ -30,6 +32,7 @@ const CHANNEL_STORAGE_KEY = "vektor.activeChannel";
 const TERMINAL_EVENTS = new Set(["run.completed", "run.failed", "run.cancelled"]);
 
 function readStoredToken(): string {
+  if (!isTauri() && new URLSearchParams(window.location.hash.slice(1)).has("setup")) return "";
   try {
     return (
       localStorage.getItem(tokenStorageKey()) ??
@@ -89,47 +92,64 @@ function TokenGate({
           </div>
         </div>
 
-        <form
-          className="mt-8 rounded-2xl border border-white/10 bg-white/[0.03] p-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmit();
-          }}
-        >
-          <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-            Access token
-          </label>
-          <input
-            autoFocus
-            type="password"
-            value={draft}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="Paste the token from /data/access-token"
-            autoComplete="off"
-            className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
-          />
-          {error ? (
-            <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-200">
-              {error}
-            </p>
-          ) : null}
+        <p className="mt-6 text-sm leading-6 text-slate-400">
+          {onConnection
+            ? "Choose your local service or Docker connection to sign in automatically."
+            : "Open this workspace with the Vektor Docker installer to sign in automatically. Use its Open option for a new sign-in link."}
+        </p>
+        {onConnection ? (
           <button
-            type="submit"
-            disabled={draft.trim().length === 0}
-            className="mt-4 w-full rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+            type="button"
+            onClick={onConnection}
+            className="mt-4 w-full rounded-lg bg-accent-400 px-4 py-3 text-sm font-semibold text-slate-950"
           >
-            Unlock workspace
+            Set up connection
           </button>
-          <p className="mt-3 text-[10px] leading-4 text-slate-600">
-            The token is stored in this browser only. Docker keeps it at{" "}
-            <code className="font-mono text-slate-500">/data/access-token</code>.
+        ) : null}
+        {error ? (
+          <p role="alert" className="mt-4 text-sm text-rose-200">
+            {error}
           </p>
-          {onConnection ? (
-            <button type="button" onClick={onConnection} className="mt-4 text-xs text-accent-300">
-              Backend connection
+        ) : null}
+        <details className="mt-6 text-xs text-slate-500">
+          <summary className="cursor-pointer">Advanced: access token</summary>
+          <form
+            className="mt-3 rounded-2xl border border-white/10 bg-white/[0.03] p-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmit();
+            }}
+          >
+            <label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Access token
+            </label>
+            <input
+              autoFocus
+              type="password"
+              value={draft}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder="Advanced: enter an access token"
+              autoComplete="off"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
+            />
+            <button
+              type="submit"
+              disabled={draft.trim().length === 0}
+              className="mt-4 w-full rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+            >
+              Unlock workspace
             </button>
-          ) : null}
-        </form>
+            <p className="mt-3 text-[10px] leading-4 text-slate-600">
+              For automatic sign-in, open the workspace from the Vektor installer. Token entry is
+              available for existing installations.
+            </p>
+            {onConnection ? (
+              <button type="button" onClick={onConnection} className="mt-4 text-xs text-accent-300">
+                Backend connection
+              </button>
+            ) : null}
+          </form>
+        </details>
       </div>
     </div>
   );
@@ -140,6 +160,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
   const [emergencyStopped, setEmergencyStopped] = useState(false);
   const [activeRunCount, setActiveRunCount] = useState(0);
   const [token, setToken] = useState(readStoredToken);
+  const [connectingSession, setConnectingSession] = useState(!isTauri() && !token);
   const [tokenDraft, setTokenDraft] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -158,6 +179,29 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
   const [error, setError] = useState<string | null>(null);
   const [booting, setBooting] = useState(false);
   const [online, setOnline] = useState(true);
+
+  const sessionAttempted = useRef(false);
+  useEffect(() => {
+    if (isTauri() || token || sessionAttempted.current) {
+      setConnectingSession(false);
+      return;
+    }
+    let active = true;
+    void connectBrowserSession()
+      .then((connected) => {
+        if (active && connected) setToken("@session");
+      })
+      .catch((error: unknown) => {
+        if (active) setAuthError(String(error));
+      })
+      .finally(() => {
+        sessionAttempted.current = true;
+        if (active) setConnectingSession(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   const client = useMemo(() => (token ? new ApiClient(token) : null), [token]);
 
@@ -275,7 +319,9 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
         // Ignore storage failures.
       }
       bootedRef.current = null;
-      setAuthError("Access token rejected. Paste the token from /data/access-token.");
+      setAuthError(
+        "Sign-in expired. Reconnect from desktop setup or open a new link from the Docker installer.",
+      );
       setToken("");
       setTokenDraft("");
       return;
@@ -612,6 +658,9 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     content: string,
     attachmentIds: string[],
     allowTruncation: boolean,
+    runner?: RunnerId,
+    resumeFromRunId?: string,
+    mcpContextIds?: string[],
   ) => {
     if (!client || !activeChannelId) throw new Error("Select a conversation before sending.");
     messageQueue.enqueue({
@@ -619,9 +668,15 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
       content,
       attachmentIds,
       allowTruncation,
+      runner,
+      resumeFromRunId,
+      mcpContextIds,
       profileId: activeChannel?.profileId ?? activeProfile?.id,
       model: activeProfile?.model,
-      reasoning: reasoningOverrides[activeChannelId] ?? "auto",
+      reasoning:
+        (runner ?? activeProfile?.runner ?? "native") === "native"
+          ? (reasoningOverrides[activeChannelId] ?? "auto")
+          : "auto",
     });
   };
 
@@ -823,6 +878,15 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     }
   }, [client, activeChannelId, reportError]);
 
+  if (connectingSession)
+    return (
+      <main
+        role="status"
+        className="grid min-h-screen place-items-center bg-slate-950 text-slate-300"
+      >
+        Signing in…
+      </main>
+    );
   if (!token || !client) {
     return (
       <TokenGate
@@ -946,8 +1010,11 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             <button
               type="button"
               onClick={() => {
+                sessionAttempted.current = true;
                 try {
                   localStorage.removeItem(tokenStorageKey());
+                  if (!isTauri())
+                    void fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
                 } catch {
                   // Ignore storage failures.
                 }

@@ -28,6 +28,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm --filter @vektor/api exec playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool ffmpeg x11-utils bubblewrap util-linux
       - run: pnpm test
       - run: pnpm build
       - run: pnpm release:pack
@@ -38,9 +39,13 @@ jobs:
           path: release-artifacts/*
           if-no-files-found: error
       - run: docker build -t vektor:phase7-check .
+      - run: docker build --target web -t vektor-web:split-check .
+      - run: python3 scripts/verify-docker-split.py vektor:phase7-check vektor-web:split-check
       - run: python3 scripts/verify-docker-updater.py vektor:phase7-check
+      - run: python3 scripts/verify-docker-updater.py vektor:phase7-check vektor-web:split-check
       - run: python3 scripts/verify-phase7.py
       - run: docker run --rm -i --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/browser-smoke.mjs
+      - run: docker run --rm -i --shm-size=256m --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/mcp-smoke.mjs
 
   desktop:
     strategy:
@@ -74,10 +79,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:packages && pnpm --filter @vektor/web build
       - run: cargo fmt --manifest-path apps/web/src-tauri/Cargo.toml --check
+      - if: matrix.platform == 'linux'
+        run: pnpm --filter @vektor/api exec playwright install-deps chromium
       - run: pnpm desktop:check
       - run: pnpm --filter @vektor/web exec tauri build --bundles ${{ matrix.bundles }}
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
+      - run: node scripts/verify-desktop-service.mjs
+      - name: Validate Windows installer script syntax
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/install.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.platform }}-x64

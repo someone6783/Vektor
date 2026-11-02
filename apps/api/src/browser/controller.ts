@@ -730,7 +730,12 @@ export class PlaywrightBrowser implements BrowserController {
       await context?.close().catch(() => {});
       this.storageReady = false;
       if (this.directory)
-        await rm(this.directory, { recursive: true, force: true }).catch(() => {});
+        await rm(this.directory, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 20,
+        }).catch(() => {});
       this.pages.clear();
     })();
     return this.closing;

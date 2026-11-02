@@ -152,3 +152,13 @@ it("accepts and sends messages when crypto.randomUUID is unavailable", async () 
     vi.stubGlobal("crypto", original);
   }
 });
+
+it("preserves an explicit runner and saved-session choice in the queued request", async () => {
+  const client = new ApiClient("test");
+  vi.spyOn(client, "listMessages").mockResolvedValue(page(false));
+  const send = vi.spyOn(client, "sendMessage").mockResolvedValue(response);
+  const { result } = renderHook(() => useMessageQueue(client, false, vi.fn()));
+  act(() => result.current.enqueue({ ...item, runner: "codex", resumeFromRunId: "previous-run" }));
+  await waitFor(() => expect(send).toHaveBeenCalledOnce());
+  expect(send.mock.calls[0]?.slice(7)).toEqual(["codex", "previous-run"]);
+});

@@ -1,0 +1,1 @@
+ALTER TABLE `scheduled_jobs` ADD `computer_access` text DEFAULT 'off' NOT NULL;

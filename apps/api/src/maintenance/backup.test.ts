@@ -54,6 +54,31 @@ function close() {
 }
 
 describe("consistent offline backups", () => {
+  it("preserves encrypted MCP previews and tool artifacts through offline restore", async () => {
+    const encrypted = encryptSecret("Private MCP context", storage!.secretsKey);
+    await mkdir(join(dataDir, "mcp/contexts"), { recursive: true, mode: 0o700 });
+    await writeFile(join(dataDir, "mcp/contexts/preview.enc"), encrypted, { mode: 0o600 });
+    close();
+    await createBackup(dataDir, backup);
+    const target = join(root, "mcp-restored");
+    await restoreBackup(backup, target);
+    expect(await readFile(join(target, "mcp/contexts/preview.enc"), "utf8")).toBe(encrypted);
+    expect((await stat(join(target, "mcp/contexts/preview.enc"))).mode & 0o077).toBe(0);
+  });
+  it("preserves managed runner executables and encrypted session checkpoints across backup and restore", async () => {
+    await mkdir(join(dataDir, "runners/checkpoints"), { recursive: true, mode: 0o700 });
+    await writeFile(join(dataDir, "runners/agent"), "#!/bin/sh\nexit 0\n", { mode: 0o500 });
+    const encrypted = encryptSecret("private harness state", storage!.secretsKey);
+    await writeFile(join(dataDir, "runners/checkpoints/session.enc"), encrypted, { mode: 0o600 });
+    close();
+    await createBackup(dataDir, backup);
+    const target = join(root, "runner-restored");
+    await restoreBackup(backup, target);
+    expect(await readFile(join(target, "runners/checkpoints/session.enc"), "utf8")).toBe(encrypted);
+    expect((await stat(join(target, "runners/agent"))).mode & 0o100).toBe(0o100);
+    expect((await stat(join(target, "runners/checkpoints/session.enc"))).mode & 0o077).toBe(0);
+  });
+
   it("restores database, immutable files, credentials, executable workspace files and scheduler state into a fresh directory", async () => {
     const token = storage!.accessToken;
     const instance = storage!.instanceId;

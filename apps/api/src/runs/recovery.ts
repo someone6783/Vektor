@@ -49,6 +49,9 @@ export function recoverInterruptedRuns(db: VektorDatabase): string[] {
       });
 
       updateRun(tx, run.id, {
+        ...(run.harness && typeof run.harness === "object"
+          ? { harness: { ...run.harness, state: "interrupted" } }
+          : {}),
         status: "failed",
         error: INTERRUPTED_ERROR,
         endedAt: now,

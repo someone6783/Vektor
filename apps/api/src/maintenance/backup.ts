@@ -59,9 +59,13 @@ function validPath(path: string): boolean {
     !path.includes("\0") &&
     !isAbsolute(path) &&
     path.split("/").every((part) => part !== "" && part !== "." && part !== "..") &&
-    (["vektor.db", "secrets.key", "access-token", "files", "workspace"].includes(path) ||
+    (["vektor.db", "secrets.key", "access-token", "files", "workspace", "runners", "mcp"].includes(
+      path,
+    ) ||
       path.startsWith("files/") ||
-      path.startsWith("workspace/"))
+      path.startsWith("workspace/") ||
+      path.startsWith("runners/") ||
+      path.startsWith("mcp/"))
   );
 }
 async function hash(path: string): Promise<string> {
@@ -114,7 +118,8 @@ async function snapshotEntry(
       await snapshotEntry(source, destination, `${path}/${name}`, entries);
   } else if (stat.isFile()) {
     await copyFile(from, to);
-    const executable = path.startsWith("workspace/") && !!(stat.mode & 0o111);
+    const executable =
+      (path.startsWith("workspace/") || path.startsWith("runners/")) && !!(stat.mode & 0o111);
     await chmod(to, executable ? 0o700 : 0o600);
     entries.push({ path, type: "file", size: stat.size, sha256: await hash(to), executable });
   } else throw new Error(`Backup cannot include special files: ${path}`);
@@ -153,6 +158,14 @@ export async function createBackup(dataDir: string, destination: string): Promis
     });
     for (const path of ["secrets.key", "files", "workspace"])
       await snapshotEntry(dataDir, staging, path, entries);
+    for (const optional of ["runners", "mcp"]) {
+      try {
+        await lstat(join(dataDir, optional));
+        await snapshotEntry(dataDir, staging, optional, entries);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
     try {
       await lstat(join(dataDir, "access-token"));
       await snapshotEntry(dataDir, staging, "access-token", entries);

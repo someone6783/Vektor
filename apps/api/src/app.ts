@@ -1,3 +1,8 @@
+import type { isolatedRunner } from "./runners/isolation.js";
+import { RunnerInstallations } from "./runners/installations.js";
+import { ExternalRunners } from "./runners/service.js";
+import { RunnerSetup } from "./runners/setup.js";
+import { registerRunnerRoutes } from "./routes/runners.js";
 import { RuntimeError } from "./runtime/terminal.js";
 import { listRunningRuns } from "@vektor/db";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
@@ -5,6 +10,7 @@ import { ZodError } from "zod";
 import { makeApiError } from "@vektor/shared";
 import type { Storage } from "./bootstrap.js";
 import type { AppConfig } from "./config.js";
+import { BrowserSessions } from "./plugins/sessions.js";
 import { registerAuth } from "./plugins/auth.js";
 import type { ChatProvider } from "./providers/index.js";
 import { ProviderService } from "./providers/service.js";
@@ -38,8 +44,13 @@ import { BrowserService } from "./browser/service.js";
 import { registerBrowserRoutes } from "./routes/browser.js";
 import type { BrowserController, BrowserSessionOptions } from "./browser/controller.js";
 import type { BrowserDesktop } from "./browser/desktop.js";
+import { ComputerService } from "./computer/service.js";
+import { registerComputerRoutes } from "./routes/computer.js";
+import type { ComputerController, ComputerSessionOptions } from "./computer/controller.js";
+import type { ComputerCapabilities } from "@vektor/shared";
 
 export interface BuildAppOptions {
+  runnerIsolation?: typeof isolatedRunner;
   config: AppConfig;
   storage: Storage;
   logger?: boolean;
@@ -49,6 +60,8 @@ export interface BuildAppOptions {
   updateFetch?: typeof fetch;
   browserFactory?: (options: BrowserSessionOptions) => BrowserController;
   browserDesktop?: BrowserDesktop;
+  computerFactory?: (options: ComputerSessionOptions) => ComputerController;
+  computerCapabilities?: ComputerCapabilities;
 }
 
 declare module "fastify" {
@@ -68,6 +81,9 @@ export async function buildApp({
   updateFetch,
   browserFactory,
   browserDesktop,
+  computerFactory,
+  computerCapabilities,
+  runnerIsolation,
 }: BuildAppOptions): Promise<VektorApp> {
   const providerService = new ProviderService({
     db: storage.db,
@@ -84,7 +100,22 @@ export async function buildApp({
     envToken: config.githubToken,
     fetchImpl: updateFetch,
   });
+  const runnerInstallations = new RunnerInstallations(
+    storage.db,
+    storage.dataDir,
+    storage.secretsKey,
+  );
+  const external = new ExternalRunners(
+    storage.db,
+    runnerInstallations,
+    storage.dataDir,
+    storage.secretsKey,
+    runnerIsolation,
+  );
+  const mcp = new McpService(storage.db, storage.dataDir, storage.secretsKey, config.port);
   const redact = makeRedactor(() => [
+    ...mcp.store.secrets(),
+    ...runnerInstallations.secrets(),
     storage.accessToken,
     storage.secretsKey.toString("hex"),
     storage.secretsKey.toString("base64"),
@@ -92,6 +123,7 @@ export async function buildApp({
     providerService.getKey().key ?? "",
     updates.credential.token ?? "",
   ]);
+  mcp.setRedactor((value) => redact(value, false));
   const logging = logger ? createAppLogger(config, (text) => redact(text, false)) : null;
   const serverOptions: FastifyServerOptions = {
     ...(logging ? { loggerInstance: logging.logger } : { logger: false }),
@@ -126,7 +158,9 @@ export async function buildApp({
       );
   });
 
-  registerAuth(app, storage.accessToken);
+  const sessions = new BrowserSessions(storage.accessToken);
+  registerAuth(app, storage.accessToken, sessions);
+  sessions.register(app);
   registerHealthRoutes(app, storage);
   app.get("/api/backend", async () => ({
     dataDir: storage.dataDir,
@@ -159,23 +193,51 @@ export async function buildApp({
     desktop: browserDesktop,
   });
   await browser.initialize();
+  const computer = new ComputerService({
+    db: storage.db,
+    dataDir: storage.dataDir,
+    redact,
+    factory: computerFactory,
+    ...(computerCapabilities ? { capabilities: computerCapabilities } : {}),
+  });
+  await computer.initialize();
+  const runnerSetup = new RunnerSetup(storage.db);
   const runManager = new RunManager({
+    mcp,
+    external,
+    stopExternal: () => runnerSetup.stop(),
     db: storage.db,
     getChatProvider: () => providerService.getChatProvider(),
     logger: app.log,
     terminal,
     browser,
+    computer,
+    supportsModelTools: (model) =>
+      providerService.getCachedModels().models.find((item) => item.id === model)?.supportsTools,
+    supportsModelImages: (model) =>
+      providerService.getCachedModels().models.find((item) => item.id === model)?.supportsImages,
     redact,
     redactionHoldback: redact.holdback,
     runTimeoutMs: config.runTimeoutMs,
     now: schedulerClock,
   });
 
+  registerRunnerRoutes(app, storage.db, runnerSetup, runnerInstallations, external, runManager);
+  registerMcpRoutes(app, mcp, runManager);
   registerSettingsRoutes(app, providerService, redact);
-  registerProfileRoutes(app, storage.db, (profileId) => runManager.revokeBrowser(profileId));
+  registerProfileRoutes(
+    app,
+    storage.db,
+    (profileId) => runManager.revokeBrowser(profileId),
+    (profileId) => runManager.revokeComputer(profileId),
+    async (profileId) => {
+      await runManager.revokeExternal(profileId);
+      await runManager.revokeMcp({ profileId });
+    },
+  );
   registerChannelRoutes(app, storage.db, (id) => runManager.revokeConversation(id));
   await registerAttachmentRoutes(app, attachments);
-  const context = new ContextService(storage.db, attachments, providerService);
+  const context = new ContextService(storage.db, attachments, providerService, mcp);
   const scheduler = new Scheduler({
     db: storage.db,
     manager: runManager,
@@ -203,6 +265,7 @@ export async function buildApp({
   });
   registerDesktopUpdateRoutes(app, new DesktopReleases(updates, updateFetch));
   registerBrowserRoutes(app, storage.db, runManager);
+  registerComputerRoutes(app, storage.db, runManager);
   if (config.nodeEnv !== "test")
     app.addHook("onReady", async () => {
       updates.start();
@@ -238,3 +301,5 @@ export async function buildApp({
 
   return app;
 }
+import { McpService } from "./mcp/service.js";
+import { registerMcpRoutes } from "./routes/mcp.js";

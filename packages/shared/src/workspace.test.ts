@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   channelSchema,
+  computerInputSchema,
+  computerPermissionsSchema,
   createProfileSchema,
   messagesResponseSchema,
   profileSchema,
@@ -61,6 +63,59 @@ describe("workspace contracts", () => {
 
     expect(channelSchema.parse(channel)).toEqual(channel);
     expect(() => channelSchema.parse({ ...channel, kind: "thread" })).toThrow();
+  });
+
+  it("defaults computer access off and validates isolated desktop permissions", () => {
+    expect(computerPermissionsSchema.parse({})).toEqual({
+      mode: "off",
+      session: "isolated",
+      maxActions: 60,
+      maxDurationMs: 300_000,
+      artifactDays: 7,
+      width: 1280,
+      height: 800,
+      apps: [],
+    });
+    expect(
+      computerPermissionsSchema.parse({
+        mode: "control",
+        apps: [{ name: "Message", command: "/usr/bin/xmessage", args: ["hello"] }],
+      }),
+    ).toMatchObject({ mode: "control", session: "isolated" });
+    expect(() => computerPermissionsSchema.parse({ mode: "interactive" })).toThrow();
+    expect(() => computerPermissionsSchema.parse({ session: "default" })).toThrow();
+    expect(() => computerPermissionsSchema.parse({ width: 320 })).toThrow();
+    expect(() => computerPermissionsSchema.parse({ apps: [{ name: "Only" }] })).toThrow();
+    expect(() =>
+      computerPermissionsSchema.parse({
+        apps: [
+          { name: "A", command: "a" },
+          { name: "B", command: "b" },
+          { name: "C", command: "c" },
+          { name: "D", command: "d" },
+          { name: "E", command: "e" },
+          { name: "F", command: "f" },
+        ],
+      }),
+    ).toThrow();
+    expect(
+      profileSchema.parse({ ...profile, computer: { mode: "observe" } }).computer,
+    ).toMatchObject({ mode: "observe", width: 1280, height: 800 });
+  });
+
+  it("validates computer tool actions strictly", () => {
+    expect(computerInputSchema.parse({ action: "screenshot" })).toEqual({ action: "screenshot" });
+    expect(computerInputSchema.parse({ action: "click", x: 10, y: 20 })).toEqual({
+      action: "click",
+      x: 10,
+      y: 20,
+      button: "left",
+      count: 1,
+    });
+    expect(() => computerInputSchema.parse({ action: "click", x: -1, y: 0 })).toThrow();
+    expect(() => computerInputSchema.parse({ action: "click", x: 1, y: 2, extra: true })).toThrow();
+    expect(() => computerInputSchema.parse({ action: "key", key: "ctrl+a; rm" })).toThrow();
+    expect(() => computerInputSchema.parse({ action: "click", x: 1 })).toThrow();
   });
 
   it("parses a settings view and write-only key updates", () => {

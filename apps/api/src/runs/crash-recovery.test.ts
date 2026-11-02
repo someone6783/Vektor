@@ -1,11 +1,14 @@
+import { fakeCodex } from "../runners/fixtures.test-utils.js";
+import { fakeMcp } from "../mcp/fixtures.test-utils.js";
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, access, rm, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { computerCapabilities } from "../computer/desktop.js";
 import { acquireDataLock } from "../maintenance/data-lock.js";
 
 let directory: string;
@@ -140,6 +143,65 @@ describe("actual API process death and restart", () => {
       await new Promise<void>((resolve) => fixture.close(() => resolve()));
     }
   }, 30_000);
+  it.runIf(computerCapabilities().available)(
+    "terminates the isolated desktop after API death and never replays its pending input",
+    async () => {
+      directory = await mkdtemp(join(tmpdir(), "vektor-desktop-crash-"));
+      await start("computer");
+      const profile = (await api("/api/profiles")).profiles[0];
+      await api(
+        `/api/profiles/${profile.id}`,
+        {
+          computer: {
+            mode: "control",
+            width: 800,
+            height: 600,
+            apps: [{ name: "Fixture", command: "/usr/bin/xmessage", args: ["Crash fixture"] }],
+          },
+        },
+        "PATCH",
+      );
+      const channel = (await api("/api/channels", { name: "Desktop crash", profileId: profile.id }))
+        .channel;
+      const runId = (
+        await api(`/api/channels/${channel.id}/messages`, { content: "Inspect desktop" })
+      ).run.id;
+      await vi.waitFor(async () => expect((await api("/api/runtime")).approvals.length).toBe(1), {
+        timeout: 15000,
+      });
+      const ids = (await readFile(`/proc/${child!.pid}/task/${child!.pid}/children`, "utf8"))
+        .trim()
+        .split(/\s+/);
+      const root = join(
+        tmpdir(),
+        `vektor-computer-${createHash("sha256").update(directory).digest("hex").slice(0, 20)}`,
+      );
+      expect((await readdir(root)).length).toBeGreaterThan(0);
+      await stop("SIGKILL");
+      await vi.waitFor(
+        async () => {
+          for (const id of ids) {
+            try {
+              expect((await readFile(`/proc/${id}/stat`, "utf8")).split(" ")[2]).toBe("Z");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+            }
+          }
+        },
+        { timeout: 10000 },
+      );
+      await start("fast");
+      const details = await api(`/api/runs/${runId}/details`);
+      expect(details.run.status).toBe("failed");
+      expect(
+        details.approvals.every((approval: { status: string }) => approval.status === "cancelled"),
+      ).toBe(true);
+      expect((await api(`/api/runs/${runId}/computer`)).session.active).toBe(false);
+      expect(await readdir(root)).toHaveLength(0);
+      expect((await api("/api/runtime")).activeRuns).toHaveLength(0);
+    },
+    30000,
+  );
   it("recovers streams, usage, scheduled history, approval waits and process groups without replaying commands", async () => {
     directory = await mkdtemp(join(tmpdir(), "vektor-crash-"));
     await start("hanging");
@@ -261,3 +323,159 @@ describe("actual API process death and restart", () => {
     expect((await api(`/api/jobs/${job.id}/runs`)).executions).toHaveLength(1);
   }, 45000);
 });
+
+it("kills external runners and clears private runtime files after API SIGKILL without replaying the prompt", async () => {
+  directory = await mkdtemp(join(tmpdir(), "vektor-external-crash-"));
+  const command = join(directory, "fake-codex.py");
+  await writeFile(command, fakeCodex, { mode: 0o700 });
+  await start("fast");
+  const profileId = (await api("/api/profiles")).profiles[0].id;
+  await api(
+    `/api/profiles/${profileId}`,
+    { runner: "codex", model: "fixture", terminalMode: "full-access", tools: ["terminal"] },
+    "PATCH",
+  );
+  const probe = await api("/api/runners/probe", { interface: "codex-app-server", command });
+  await api("/api/runners/installations", {
+    id: "codex",
+    executableHash: probe.executableHash,
+    trustLocalCodex: true,
+    inferenceHosts: ["api.openai.com"],
+    credentialName: "OPENAI_API_KEY",
+  });
+  await api("/api/runners/installations/codex/credential", { key: "crash-fixture-key" }, "PUT");
+  await api("/api/runners/installations/codex", { enabled: true }, "PATCH");
+  await api(`/api/profiles/${profileId}/runner-grant`, { workspace: true, inference: true }, "PUT");
+  const channelId = (await api("/api/channels", { name: "External crash", profileId })).channel.id;
+  const runId = (
+    await api(`/api/channels/${channelId}/messages`, { content: "Write the approved file" })
+  ).run.id;
+  await vi.waitFor(
+    async () =>
+      expect(
+        (await api("/api/runtime")).approvals.some(
+          (approval: { runId: string }) => approval.runId === runId,
+        ),
+      ).toBe(true),
+    { timeout: 10_000 },
+  );
+  const ids = (await readFile(`/proc/${child!.pid}/task/${child!.pid}/children`, "utf8"))
+    .trim()
+    .split(/\s+/);
+  let supervisorId: string | undefined;
+  let paths: string[] = [];
+  for (const id of ids) {
+    const args = (await readFile(`/proc/${id}/cmdline`, "utf8")).split("\0").filter(Boolean);
+    if (args.some((value) => value.includes("orphanCleanupPaths"))) {
+      const spec = JSON.parse(args.at(-1)!) as { orphanCleanupPaths: string[] };
+      if (spec.orphanCleanupPaths?.length) {
+        supervisorId = id;
+        paths = spec.orphanCleanupPaths;
+        break;
+      }
+    }
+  }
+  expect(supervisorId).toBeDefined();
+  expect(paths).toHaveLength(3);
+  for (const path of paths) await expect(access(path)).resolves.toBeUndefined();
+  await stop("SIGKILL");
+  await vi.waitFor(
+    async () => {
+      for (const path of paths) await expect(access(path)).rejects.toThrow();
+      try {
+        expect((await readFile(`/proc/${supervisorId}/stat`, "utf8")).split(" ")[2]).toBe("Z");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    },
+    { timeout: 10_000 },
+  );
+  await start("fast");
+  const history = await api(`/api/channels/${channelId}/messages`);
+  expect(history.activeRun).toBeNull();
+  expect(history.lastRun.status).toBe("failed");
+  expect(history.lastRun.harness.state).toBe("interrupted");
+  expect((await api("/api/runtime")).approvals).toHaveLength(0);
+  expect((await api(`/api/runs?channelId=${channelId}`)).runs).toHaveLength(1);
+  await expect(access(join(directory, "workspace/hello.txt"))).rejects.toThrow();
+}, 30_000);
+
+it("kills isolated MCP descendants and removes private files after API SIGKILL without replay", async () => {
+  directory = await mkdtemp(join(tmpdir(), "vektor-mcp-crash-"));
+  const command = join(directory, "mcp-server");
+  await writeFile(command, fakeMcp, { mode: 0o700 });
+  await start("mcp");
+  const profileId = (await api("/api/profiles")).profiles[0].id;
+  const server = (
+    await api("/api/mcp/servers", {
+      name: "Crash MCP",
+      transport: "stdio",
+      command,
+      hostBinaryAcknowledged: true,
+    })
+  ).server;
+  await api(`/api/mcp/servers/${server.id}/test`, {});
+  await api(`/api/mcp/servers/${server.id}`, { enabled: true }, "PATCH");
+  await api(
+    `/api/mcp/profiles/${profileId}/servers/${server.id}`,
+    { tools: [{ name: "wait", policy: "read-only" }] },
+    "PUT",
+  );
+  const channelId = (await api("/api/channels", { name: "MCP crash", profileId })).channel.id;
+  const runId = (await api(`/api/channels/${channelId}/messages`, { content: "Call the MCP tool" }))
+    .run.id;
+  await vi.waitFor(async () => expect((await api("/api/runtime")).approvals).toHaveLength(1), {
+    timeout: 10_000,
+  });
+  const approval = (await api("/api/runtime")).approvals[0];
+  await api(`/api/approvals/${approval.id}`, { approved: true });
+  await vi.waitFor(
+    async () =>
+      expect(
+        (await api(`/api/runs/${runId}/details`)).events.some(
+          (e: { type: string; detail?: unknown }) =>
+            e.type === "tool.progress" && JSON.stringify(e.detail).includes("Fixture started"),
+        ),
+      ).toBe(true),
+    { timeout: 10_000 },
+  );
+  const ids = (await readFile(`/proc/${child!.pid}/task/${child!.pid}/children`, "utf8"))
+    .trim()
+    .split(/\s+/);
+  let supervisorId: string | undefined;
+  let paths: string[] = [];
+  for (const id of ids) {
+    const args = (await readFile(`/proc/${id}/cmdline`, "utf8")).split("\0").filter(Boolean);
+    if (args.some((v) => v.includes("orphanCleanupPaths"))) {
+      const spec = JSON.parse(args.at(-1)!) as { orphanCleanupPaths?: string[] };
+      if (spec.orphanCleanupPaths?.some((p) => p.includes("vektor-mcp-home-"))) {
+        supervisorId = id;
+        paths = spec.orphanCleanupPaths;
+        break;
+      }
+    }
+  }
+  expect(supervisorId).toBeDefined();
+  expect(paths).toHaveLength(3);
+  await stop("SIGKILL");
+  await vi.waitFor(
+    async () => {
+      for (const path of paths) await expect(access(path)).rejects.toThrow();
+      try {
+        expect((await readFile(`/proc/${supervisorId}/stat`, "utf8")).split(" ")[2]).toBe("Z");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    },
+    { timeout: 10_000 },
+  );
+  await start("fast");
+  const details = await api(`/api/runs/${runId}/details`);
+  expect(details.run.status).toBe("failed");
+  expect(
+    details.tools.some((t: { status: string }) => t.status === "running" || t.status === "waiting"),
+  ).toBe(false);
+  expect((await api("/api/runtime")).approvals).toHaveLength(0);
+  expect((await api(`/api/runs?channelId=${channelId}`)).runs).toHaveLength(1);
+  expect((await api("/api/mcp")).servers).toHaveLength(1);
+}, 30_000);

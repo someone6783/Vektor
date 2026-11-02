@@ -2,9 +2,12 @@
 services:
   vektor:
     image: ${VEKTOR_IMAGE:-ghcr.io/someone6783/vektor:latest}
+    labels:
+      app.vektor.role: api
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      - VEKTOR_WEB_DIST=/app/no-web
       - VEKTOR_UPDATE_CHECK
       - VEKTOR_GITHUB_TOKEN
       - VEKTOR_BROWSER_ARTIFACT_DAYS
@@ -12,10 +15,44 @@ services:
       - vektor-data:/data
     restart: unless-stopped
     init: true
+    shm_size: 256m
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+  web:
+    image: ${VEKTOR_WEB_IMAGE:-ghcr.io/someone6783/vektor-web:latest}
+    ports:
+      - "127.0.0.1:8788:8080"
+    depends_on:
+      vektor:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   vektor-data:

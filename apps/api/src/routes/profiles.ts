@@ -15,6 +15,8 @@ export function registerProfileRoutes(
   app: FastifyInstance,
   db: VektorDatabase,
   revokeBrowser?: (id: string) => Promise<void>,
+  revokeComputer?: (id: string) => Promise<void>,
+  revokeExternal?: (id: string) => Promise<void>,
 ): void {
   app.get("/api/profiles", async () => ({
     profiles: listProfiles(db).map(toProfile),
@@ -25,6 +27,7 @@ export function registerProfileRoutes(
     const profile = createProfile(db, input);
     appendAudit(db, "profile.created", null, {
       profileId: profile.id,
+      runner: profile.runner,
       terminalMode: profile.terminalMode,
       tools: profile.tools,
     });
@@ -57,11 +60,27 @@ export function registerProfileRoutes(
         .send(makeApiError("not_found", "Profile not found.", { requestId: request.id }));
     }
 
-    if (input.browser !== undefined || input.archived === true) await revokeBrowser?.(profileId);
+    if (input.runner !== undefined && input.runner !== existing.runner)
+      appendAudit(db, "profile.runner_changed", null, {
+        profileId,
+        previousRunner: existing.runner ?? "native",
+        runner: profile.runner,
+      });
     if (
       input.terminalMode !== undefined ||
       input.tools !== undefined ||
-      input.browser !== undefined
+      input.browser !== undefined ||
+      input.computer !== undefined ||
+      input.archived === true
+    )
+      await revokeExternal?.(profileId);
+    if (input.browser !== undefined || input.archived === true) await revokeBrowser?.(profileId);
+    if (input.computer !== undefined || input.archived === true) await revokeComputer?.(profileId);
+    if (
+      input.terminalMode !== undefined ||
+      input.tools !== undefined ||
+      input.browser !== undefined ||
+      input.computer !== undefined
     )
       appendAudit(db, "profile.permissions_changed", null, {
         profileId,
@@ -69,6 +88,7 @@ export function registerProfileRoutes(
         terminalMode: profile.terminalMode,
         tools: profile.tools,
         browser: profile.browser,
+        computer: profile.computer,
       });
     return { profile: toProfile(profile) };
   });
@@ -92,6 +112,8 @@ export function registerProfileRoutes(
 
     archiveProfile(db, profileId);
     await revokeBrowser?.(profileId);
+    await revokeComputer?.(profileId);
+    await revokeExternal?.(profileId);
     appendAudit(db, "profile.archived", null, { profileId });
     return reply.code(204).send();
   });

@@ -10,29 +10,47 @@ Recurring jobs add time-zone-aware schedules, durable execution history, and cha
 The product plan lives in [docs/PLAN.md](docs/PLAN.md). Current work is
 [Phase 5 — Scheduling](docs/PLAN.md#phase-5--scheduling).
 
-## Requirements
+## Requirements for source builds
 
 - Node.js 22.13 or newer (`.nvmrc` pins 22; the PDF parser requires 22.13+)
 - pnpm 10 (`corepack enable` or `npm install -g pnpm@10`)
 - Docker with Compose for the container path
 
-## Run with Docker
+## Install desktop or Docker
+
+Download `install.sh` (Linux) or `install.ps1` (Windows) from the
+[latest release](https://github.com/someone6783/Vektor/releases/latest).
 
 ```bash
-docker compose up --build
+bash install.sh                   # Linux desktop, API and Node included
+bash install.sh --docker          # Separate API and browser UI containers
+bash install.sh --open            # Open an existing Docker workspace, signed in
 ```
 
-Open <http://127.0.0.1:8787>. The container binds to host loopback only and keeps
-its data in the `vektor-data` volume.
+```powershell
+.\install.ps1                      # Windows desktop setup
+.\install.ps1 -Docker              # Separate API and browser UI containers
+.\install.ps1 -Open                # Open an existing Docker workspace, signed in
+```
 
-The access token is generated on first boot:
+The desktop offers **Install local API service** and **Connect to Docker**.
+Both sign in automatically. Closing its window leaves it in the tray while agents
+finish; **Quit Vektor and stop local API** stops the managed local service.
+Docker containers keep running independently. See [installation details](docs/INSTALLING.md).
+
+## Run with Docker from source
 
 ```bash
-docker compose exec vektor cat /data/access-token
+docker compose up -d --build --wait
+docker compose exec -T vektor node --input-type=module < scripts/open-workspace.mjs
 ```
 
-Paste it into the unlock screen. The API requires it on every `/api/*` request;
-`/healthz` is public.
+Open the single-use link printed by the second command. The browser UI runs on
+<http://127.0.0.1:8788> and proxies the separate API on port 8787. Both bind to
+host loopback. Existing data stays in the `vektor-data` volume. Subsequent browser
+visits use an HttpOnly session cookie; run the open command again if sign-in expires.
+The desktop can discover the same API without copying a token. Bearer authentication
+remains available for existing clients; `/healthz` is public.
 
 Without a provider key, chat uses the deterministic stub. To use OpenRouter, open
 **Settings**, paste an OpenRouter key, save it, and run **Test connection** to
@@ -226,221 +244,82 @@ commands are documented in [Operations](docs/OPERATIONS.md).
 
 ### Desktop app (Tauri 2)
 
-The desktop app bundles the same web frontend and connects to a separately running
-local backend. Start Docker first with `docker compose up -d --build`. On first
-launch, **Backend connection** checks and saves `http://127.0.0.1:8787` (or another
-loopback port), then **Open workspace** shows the access-token setup. Read the token
-with `docker compose exec vektor cat /data/access-token` and paste it into the app.
-The Compose service is named `vektor`; use the matching service name if you customize it.
+The Windows installer and Linux .deb/AppImage include the frontend, Node 22, and
+the API, Chromium and native dependencies. First launch offers a per-user local service or
+an existing Docker backend. Credentials are configured automatically through native
+setup. No API token is embedded in the frontend or exposed by an unauthenticated endpoint.
 
-**Backend** in the app header, or **Backend connection…** in the tray, opens connection
-setup again. The screen shows backend version/database health and, after unlocking,
-the actual data/workspace directories and whether execution is on the host or in a
-container. A failed connection check preserves the saved URL. **Use saved connection**
-lets you reopen the workspace while the backend is offline. HTTP and HTTPS URLs must
-use `localhost`, `127.0.0.1`, or `[::1]`; paths, URL credentials and query strings are
-rejected. Native HTTP handles uploads and SSE without relaxing the API's CORS policy.
+The local service uses `systemd --user` on Linux and a current-user Windows login
+task with a windowless native host. It starts on sign-in and restarts after failure.
+It owns a private data directory under Vektor's application data. Port 8787 is preferred;
+if occupied, setup selects another loopback port. Docker setup requires access to a
+local Docker daemon and discovers the API's published port and credential.
 
-Tokens are stored in the desktop webview's local storage, separately for each backend
-URL. Lock clears the saved token and the native tray's in-memory credential. Desktop
-tokens are separate from browser tokens; neither tokens nor provider keys are bundled
-into desktop assets. The app never runs terminal commands itself: permissions and
-host/container warnings refer to the selected backend.
+**Backend** in the app menu or **Backend connection…** in the tray reopens setup.
+Closing the window hides it in the tray. **Open Vektor** restores the existing
+instance. **Pause scheduler**, **Resume scheduler**, and **Emergency stop** use the
+selected backend's authenticated API. **Quit Vektor and stop local API** gracefully
+stops this installation's local service before exiting. External Docker containers
+remain independent. Linux requires an AppIndicator/system-tray host to expose these
+controls; if no tray can be created, normal window close remains available.
 
-Closing the window hides it in the system tray when tray initialization succeeds.
-**Open Vektor** restores it. The tray offers **Pause scheduler**, **Resume scheduler**,
-and **Emergency stop**, authenticated with the unlocked session. Pause affects future
-firings; emergency stop cancels active work and blocks new runs. Resuming the scheduler
-does not clear emergency stop; explicitly resume execution in the workspace. Failed
-tray actions restore the window and display an error. **Quit desktop** exits the app;
-Docker and scheduled jobs keep running. On Linux, the desktop environment needs an
-AppIndicator/system-tray host to expose these controls.
+Enable **Notify when a run finishes** in setup to request OS permission. Notifications
+contain status only and cover recent runs while the unlocked app remains running,
+including while hidden. Durable history remains in the API.
 
-Enable **Notify when a run finishes** in connection setup to request OS permission
-and send a test notification. A native monitor checks recent runs in all channels
-every three seconds while the app is unlocked, including while hidden. The first
-successful poll establishes a baseline without replaying historical completions.
-Notifications show completion/failure/cancellation status without prompts or output.
-They require the desktop process to remain running; this is not an OS push service.
-The monitor reads the latest 30 runs per poll, so a long offline interval or a burst
-of more than 30 runs can omit notifications; durable history remains in Vektor.
-
-Building from source requires Node 22+, pnpm 10.34.9, and stable Rust (1.90+).
-Linux additionally needs:
+Source builds require Node 22, pnpm 10.34.9, Rust 1.90+, and the platform's
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
-sudo apt-get install build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
 pnpm install --frozen-lockfile
 pnpm desktop:dev
+pnpm --filter @vektor/web exec tauri build --bundles deb,appimage  # Linux
+# On Windows: pnpm --filter @vektor/web exec tauri build --bundles nsis
 ```
 
-The dev command starts the Vite frontend; run Docker separately. For an installable
-Linux package use `pnpm desktop:build --bundles deb`. Artifacts are placed under
-`apps/web/src-tauri/target/release/bundle/`. `pnpm desktop:check` runs native tests;
-the normal lint/typecheck/test/build scripts continue to verify the shared web/API
-code. CI also compiles the native Linux app. On macOS/Windows install the platform's
-[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), then select `--bundles app`
-or `--bundles nsis` respectively. The release workflow builds Linux packages and multiarchitecture Docker images;
-see [release operations](docs/RELEASING.md). Native validation is performed on Linux;
-macOS/Windows packaging and signing remain unverified.
+The build hook prepares the API and bundled Node on the target operating system;
+Windows native modules must be built on Windows. Installers are under
+`apps/web/src-tauri/target/release/bundle/`. `pnpm desktop:check` runs Rust tests and
+`node scripts/verify-desktop-service.mjs` checks the prepared runtime and graceful
+shutdown. CI builds and checks both Windows and Linux payloads. See
+[installation](docs/INSTALLING.md) and [release operations](docs/RELEASING.md).
 
-| Command             | What it does                                                   |
-| ------------------- | -------------------------------------------------------------- |
-| `pnpm dev`          | Build workspace packages, then run API and web with watch mode |
-| `pnpm build`        | Build shared packages, API, and web                            |
-| `pnpm typecheck`    | Build packages, then type-check every workspace                |
-| `pnpm test`         | Build packages, then run Vitest suites                         |
-| `pnpm lint`         | ESLint over the repo                                           |
-| `pnpm format`       | Prettier write                                                 |
-| `pnpm format:check` | Prettier check                                                 |
+### Codex and ACP runners
 
-## Layout
+Vektor retains its native OpenRouter loop and supports optional, explicitly enabled
+Codex app-server and verified ACP v1 agents. Settings → Agent runner setup discovers
+installed executables, probes their protocol, verifies/pins their identity, stores a
+separate write-only API key, and enables the agent. Registry browsing never installs
+or launches an agent. Codex is pinned to app-server 0.166.0; ACP setup accepts locally
+installed binaries that match a checksum-verified official platform archive.
 
-```text
-apps/api          Fastify service (health, auth, chat, runs, SSE)
-apps/web          React + Vite + Tailwind workspace
-packages/db       SQLite + Drizzle schema, migrations, repositories
-packages/shared   Zod contracts and SSE helpers
-```
+Each profile needs an agent-specific workspace/inference grant and Full access with
+per-command approvals. No-terminal, Basic, Full Unrestricted, external browser/computer
+control, remote ACP and package-only/unverifiable entries are rejected by these adapters.
+Native chat retains its existing modes and works without any external CLI.
 
-Data directory (default `/data` in production, `.data` in development):
+Agents run in a private Linux filesystem/network namespace. They see an isolated text
+snapshot of the granted workspace; real file changes and terminal commands use Vektor
+approvals. Inference traffic is restricted to configured public hosts. Keys, private
+session checkpoints and source provenance remain separate from OpenRouter.
 
-```text
-vektor.db         SQLite database (WAL)
-access-token      32-byte token, mode 0600
-secrets.key       32-byte AES key for stored provider secrets, mode 0600
-files/            attachment originals, named by UUID
-workspace/        basic terminal boundary and default command working directory
-logs/             reserved for file logs
-```
+The chat composer offers a per-message runner override and explicit saved-session
+resume. History records runner/model/interface, session/turn ids, progress, proposals,
+approvals and available usage. Cancellation, emergency stop, scheduled approval waits
+and crash recovery share Vektor's existing runtime. Restart never replays an interrupted
+prompt or silently switches runners. See [runner operations](docs/OPERATIONS.md#codex-and-acp-runners)
+for setup, packaging, supported boundaries, retention and verification.
 
-## Endpoints
+### MCP plugins
 
-| Endpoint                                 | Auth   | Purpose                                                              |
-| ---------------------------------------- | ------ | -------------------------------------------------------------------- |
-| `GET /healthz`                           | public | status, version, instance id, DB check, uptime                       |
-| `GET /api/backend`                       | bearer | backend data/workspace paths and execution environment               |
-| `GET/PUT /api/settings`                  | bearer | provider state, default model, write-only key                        |
-| `POST /api/settings/provider/test`       | bearer | fetch and cache the OpenRouter model list                            |
-| `GET/POST /api/profiles`                 | bearer | list and create profiles                                             |
-| `PATCH/DELETE /api/profiles/:id`         | bearer | update or archive a profile                                          |
-| `GET/POST /api/channels`                 | bearer | list and create channels or DMs                                      |
-| `PATCH/DELETE /api/channels/:id`         | bearer | rename, retarget, or archive a channel                               |
-| `GET/POST /api/channels/:id/messages`    | bearer | paginated history and sending a message (starts a run)               |
-| `GET/POST /api/channels/:id/attachments` | bearer | list files and limits; upload one multipart file                     |
-| `PATCH/DELETE /api/attachments/:id`      | bearer | include/exclude or permanently remove a file                         |
-| `GET /api/attachments/:id/content`       | bearer | authenticated original download or image preview                     |
-| `POST /api/channels/:id/context`         | bearer | estimate context before sending                                      |
-| `GET /api/runs/:id/events`               | bearer | replay and follow a run's SSE events (`Last-Event-ID` / `?after=`)   |
-| `POST /api/runs/:id/cancel`              | bearer | abort an active run                                                  |
-| `POST /api/runs/:id/retry`               | bearer | rerun the same user turn                                             |
-| `GET /api/runs/:id/context`              | bearer | estimate retry context using current permissions                     |
-| `GET /api/runs`                          | bearer | recent run history, optionally filtered by channel                   |
-| `GET /api/runs/:id/details`              | bearer | saved tool calls, approvals and non-delta timeline                   |
-| `GET /api/runtime`                       | bearer | stop latch, execution environment, active runs and pending approvals |
-| `POST /api/approvals/:id`                | bearer | resolve a pending approval with `{ "approved": true/false }`         |
-| `POST /api/runtime/emergency-stop`       | bearer | stop active work and persist the stop latch                          |
-| `POST /api/runtime/resume`               | bearer | explicitly clear the stop latch                                      |
-| `GET /api/audit`                         | bearer | paginated audit entries (`?before=<id>`)                             |
-| `GET /api/dev/stream`                    | bearer | 20 stub deltas plus completion; supports `Last-Event-ID` / `?after=` |
-| `GET /api/dev/provider`                  | bearer | normalized provider events from the stub or OpenRouter               |
+Settings → MCP plugins adds optional local stdio or remote Streamable HTTP servers.
+Servers remain disabled until explicitly tested/enabled, and each profile grants
+individual tools and context sources. Every tool call requires approval. Local
+servers use isolated workspace snapshots; real file changes require separate review.
+Protected credentials, namespaced tools, bounded schema validation, progress,
+cancellation and audit history apply to native, scheduled, Codex and ACP runs.
 
-The dev endpoints are enabled outside production by default. Production Compose
-disables them; set `VEKTOR_ENABLE_DEV_STREAM=1` only when deliberately running a dev demo.
-
-Scheduling endpoints (all bearer-authenticated):
-
-| Endpoint                         | Purpose                                                                          |
-| -------------------------------- | -------------------------------------------------------------------------------- |
-| `POST /api/jobs/preview`         | normalize friendly/cron input and preview five UTC instants in an IANA time zone |
-| `GET/POST /api/jobs`             | list/create jobs; `?includeDeleted=true` includes retained deleted definitions   |
-| `GET/PATCH/DELETE /api/jobs/:id` | inspect, edit/pause/resume, or soft-delete a job                                 |
-| `POST /api/jobs/:id/run`         | manually execute a job without changing recurrence                               |
-| `GET /api/jobs/:id/runs`         | execution history (`?before=<execution-id>`)                                     |
-| `GET /api/scheduler`             | configured enabled state, global pause state, emergency latch and tick interval  |
-| `POST /api/scheduler/pause`      | persistently pause new job executions                                            |
-| `POST /api/scheduler/resume`     | resume future scheduling without replaying the paused interval                   |
-
-Messages and context requests accept `attachmentIds` (omit for all included files;
-use `[]` for none), `profileId`, `model`, and optional `reasoning` (`auto`, `on`,
-`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`). Sending also accepts
-`allowTruncation`. The model picker and reasoning selector sit beside Send.
-Reasoning choices follow model capabilities; Auto uses provider defaults. Star
-models in the picker to keep favourites at the top, including while searching;
-favourites are saved on this device. Each
-queued message snapshots its model and reasoning choice, and retries retain them.
-The chat composer accepts submissions immediately into a session queue, including
-while a run is active or context estimates are refreshing. It sends them in order
-when the channel is ready. While a run is active, the composer shows **Queue**;
-Enter queues the draft. **Steer** above a queued message moves it to the front,
-stops the active run in that conversation, and sends after the run stops.
-Emergency stop holds the queue; validation failures stay
-visible for retry or removal, with explicit consent before omitting history. The
-queue survives conversation switches but clears on reload or workspace lock.
-Settling a conversation moves it to **Settled** at the bottom of the sidebar.
-Select it to revisit its history, or choose **Restore** from its menu to return it
-to Channels or Direct. Settling preserves messages and attachments.
-
-Replies render text and tool calls in event order, including after reopening a
-conversation. Reasoning text or summaries supplied by the provider appear in a
-collapsible **Thinking** section at their original position and remain available
-in saved history. They are redacted separately and are excluded from the saved
-answer text. Models that do not expose reasoning show only the existing status.
-Settings → Preferences → **Stream replies by paragraph** reveals
-complete paragraphs; a tool call or turn ending reveals any remaining text.
-
-History responses include linked attachments and `lastRun` with the stored context
-estimate and provider usage. Run details accept `?transcript=1` for compact text/tool
-events in their original order. Existing databases migrate automatically on startup.
-
-## Security notes
-
-- The API binds to loopback by default. The container listens on `0.0.0.0` but
-  Compose publishes it only on `127.0.0.1`.
-- Access tokens and the encryption key are generated locally with mode `0600`.
-- The provider key is encrypted at rest and never returned by the API.
-- There are no user accounts. Multi-user is explicitly deferred.
-- Basic terminal mode is a restricted-command guardrail, not a hardened sandbox.
-
-## Release builds and notifications
-
-The root `package.json` owns the app version and release repository metadata.
-`pnpm version:sync` updates shared API/web constants, workspace and desktop versions,
-image labels and release locations; commit those generated changes with a version bump.
-`pnpm version:check` refuses stale metadata.
-
-Settings → About offers optional cached update checks, last checked time, a manual
-refresh and upgrade instructions. The header links to newer stable releases. This
-repository is private: checking defaults off and requires an optional read-only GitHub
-token, stored encrypted or supplied to the backend. There is no automatic installer.
-
-The `Release` workflow verifies existing `v*` tags before building API/web archives,
-a Linux desktop `.deb`, checksums and an amd64/arm64 GHCR image with BuildKit
-provenance. [RELEASING.md](docs/RELEASING.md) covers publication, private registry
-access, upgrades with the existing data volume, and the pending first-release demonstration.
-
-## Managed browser access
-
-Phase 9 adds a browser tool independent of terminal permissions. It defaults off.
-Choose observation or interactive access in profile Settings and grant exact origins;
-local testing requires a separate exact loopback origin/port. Every run gets a fresh
-managed Chromium process. Choose a saved default profile to reuse site logins, or
-a fully separate temporary session for either observation or interactive access. Interactive clicks and file transfers pause for scoped approvals. Network writes
-proceed automatically in visible interactive windows; headless sessions require
-scoped network approvals. Emergency stop closes the session. The run timeline offers
-snapshots, masked screenshots, pause/takeover and artifact deletion.
-
-Host backends need `pnpm browser:install`; Docker includes the pinned engine.
-[Browser operations and boundaries](docs/BROWSER.md) documents setup, private input,
-scheduled declarations, network/file guardrails, retention and verification.
-
-Profiles also choose Headless or Visible window independently of browser permissions
-and saved/separate sessions. A visible window opens on the backend's desktop; the run
-panel offers Open, Focus and private takeover controls. Docker needs an explicitly
-connected display. Existing profiles stay headless. See [browser setup](docs/BROWSER.md).
-
-For automatic update checks and click-to-install desktop/Docker upgrades, see [Updates](docs/UPDATES.md).
-
-Releases include a Windows x64 desktop setup installer and Linux x64 desktop packages.
-The Docker host helper installer enables click-to-install API/Web UI updates on Linux
-or Windows with Docker Desktop; see [setup instructions](docs/UPDATES.md).
+Resources, templates and prompts require preview and explicit message selection.
+They never become system instructions or implicit context. Native chat works without
+MCP. See [MCP setup and supported limits](docs/MCP.md) for local/Docker packaging,
+network rules, grants, context selection, retention and recovery.

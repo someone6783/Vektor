@@ -11,3 +11,4 @@ export * from "./runtime.js";
 export * from "./jobs.js";
 export * from "./usage.js";
 export * from "./browser.js";
+export * from "./computer.js";

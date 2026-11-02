@@ -36,6 +36,13 @@ const samples: RunEvent[] = [
     isError: false,
   },
   {
+    seq: 4,
+    runId: "run-1",
+    type: "tool.progress",
+    toolCallId: "tool-1",
+    detail: { progress: 1, total: 2 },
+  },
+  {
     seq: 5,
     runId: "run-1",
     type: "approval.requested",

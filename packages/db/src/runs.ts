@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gt, lt, max, sql } from "drizzle-orm";
 import type { VektorDatabase } from "./client.js";
+import type { RunnerId } from "./profiles.js";
 import { runEvents, runs } from "./schema.js";
 
 export type RunStatus = "running" | "completed" | "failed" | "cancelled";
@@ -11,7 +12,8 @@ export interface RunRecord {
   profileId: string;
   userMessageId: string;
   model: string;
-  runner: "native" | "cli";
+  runner: RunnerId;
+  harness?: unknown;
   provider: "openrouter" | "stub" | "unknown";
   providerCalls: number;
   jobId: string | null;
@@ -26,6 +28,7 @@ export interface RunRecord {
 }
 
 export interface CreateRunRecordInput {
+  runner?: RunnerId;
   channelId: string;
   profileId: string;
   userMessageId: string;
@@ -58,7 +61,8 @@ function toRecord(row: typeof runs.$inferSelect): RunRecord {
     profileId: row.profileId,
     userMessageId: row.userMessageId,
     model: row.model,
-    runner: row.runner as "native" | "cli",
+    runner: row.runner as RunnerId,
+    harness: row.harnessJson ? (JSON.parse(row.harnessJson) as unknown) : null,
     provider: row.provider as RunRecord["provider"],
     providerCalls: row.providerCalls,
     jobId: row.jobId,
@@ -80,7 +84,8 @@ export function createRun(db: VektorDatabase, input: CreateRunRecordInput): RunR
     profileId: input.profileId,
     userMessageId: input.userMessageId,
     model: input.model,
-    runner: "native" as const,
+    runner: input.runner ?? "native",
+    harnessJson: null,
     provider: "unknown" as const,
     providerCalls: 0,
     jobId: input.jobId ?? null,
@@ -151,6 +156,8 @@ export function listRuns(db: VektorDatabase, channelId?: string, before?: number
 }
 
 export interface UpdateRunRecordInput {
+  model?: string;
+  harness?: unknown;
   provider?: RunRecord["provider"];
   providerCalls?: number;
   status?: RunStatus;
@@ -165,6 +172,8 @@ export function updateRun(
   patch: UpdateRunRecordInput,
 ): RunRecord | undefined {
   const set: Partial<typeof runs.$inferInsert> = {};
+  if (patch.model !== undefined) set.model = patch.model;
+  if (patch.harness !== undefined) set.harnessJson = JSON.stringify(patch.harness);
   if (patch.provider !== undefined) set.provider = patch.provider;
   if (patch.providerCalls !== undefined) set.providerCalls = patch.providerCalls;
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { runnerIdSchema } from "./runners.js";
 
 const runEventBaseSchema = z.object({
   seq: z.number().int().nonnegative(),
@@ -9,7 +10,7 @@ export const runStartedEventSchema = runEventBaseSchema.extend({
   type: z.literal("run.started"),
   conversationId: z.string().nullable(),
   profileId: z.string().nullable(),
-  runner: z.enum(["native", "cli"]),
+  runner: runnerIdSchema,
 });
 
 export const messageDeltaEventSchema = runEventBaseSchema.extend({
@@ -33,6 +34,11 @@ export const toolOutputEventSchema = runEventBaseSchema.extend({
   toolCallId: z.string().min(1),
   output: z.string(),
   isError: z.boolean(),
+});
+export const toolProgressEventSchema = runEventBaseSchema.extend({
+  type: z.literal("tool.progress"),
+  toolCallId: z.string().min(1),
+  detail: z.unknown(),
 });
 
 export const approvalRequestedEventSchema = runEventBaseSchema.extend({
@@ -72,6 +78,7 @@ export const runEventSchema = z.discriminatedUnion("type", [
   reasoningDeltaEventSchema,
   toolRequestedEventSchema,
   toolOutputEventSchema,
+  toolProgressEventSchema,
   approvalRequestedEventSchema,
   usageEventSchema,
   runCompletedEventSchema,
@@ -88,6 +95,7 @@ export const RUN_EVENT_TYPES = [
   "reasoning.delta",
   "tool.requested",
   "tool.output",
+  "tool.progress",
   "approval.requested",
   "usage",
   "run.completed",

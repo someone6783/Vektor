@@ -44,7 +44,7 @@ const ToolCallRow = memo(function ToolCallRow({ tool }: { tool: LiveToolCall }) 
     ? (browserActions[action ?? ""] ?? "Browser")
     : terminal
       ? "Run command"
-      : tool.name;
+      : mcpToolLabel(tool.name, tool.input);
   const status = toolStatuses[tool.status] ?? tool.status;
   let hint = "";
   if (typeof input.url === "string") {
@@ -93,6 +93,9 @@ const ToolCallRow = memo(function ToolCallRow({ tool }: { tool: LiveToolCall }) 
           </svg>
         </summary>
         <div className="tool-call-body">
+          {tool.progress ? (
+            <p className="mb-2 whitespace-pre-wrap text-xs text-slate-400">{tool.progress}</p>
+          ) : null}
           <ToolDetails tool={tool} />
         </div>
       </details>
@@ -176,3 +179,4 @@ export function MessageActivity({
     </>
   );
 }
+import { mcpToolLabel } from "../lib/mcp";

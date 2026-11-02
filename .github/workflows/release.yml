@@ -50,12 +50,17 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm --filter @vektor/api exec playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool ffmpeg x11-utils bubblewrap util-linux
       - run: pnpm test
       - run: pnpm build
       - run: docker build -t vektor:phase7-check --build-arg VCS_REF="$GITHUB_SHA" --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" .
+      - run: docker build --target web -t vektor-web:split-check .
+      - run: python3 scripts/verify-docker-split.py vektor:phase7-check vektor-web:split-check
       - run: python3 scripts/verify-docker-updater.py vektor:phase7-check
+      - run: python3 scripts/verify-docker-updater.py vektor:phase7-check vektor-web:split-check
       - run: python3 scripts/verify-phase7.py
       - run: docker run --rm -i --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/browser-smoke.mjs
+      - run: docker run --rm -i --shm-size=256m --entrypoint node -e VEKTOR_API_ROOT=/app vektor:phase7-check --input-type=module < scripts/mcp-smoke.mjs
       - run: pnpm release:pack
       - run: pnpm release:verify
       - uses: actions/upload-artifact@v7
@@ -102,6 +107,8 @@ jobs:
       - run: pnpm release:validate
       - run: pnpm build:packages
       - run: cargo fmt --manifest-path apps/web/src-tauri/Cargo.toml --check
+      - if: matrix.platform == 'linux'
+        run: pnpm --filter @vektor/api exec playwright install-deps chromium
       - run: pnpm desktop:check
       - name: Require desktop update signing key
         env:
@@ -118,6 +125,14 @@ jobs:
       - name: Verify Windows desktop signature against the shipped public key
         if: matrix.platform == 'windows'
         run: cargo run --locked --manifest-path apps/web/src-tauri/Cargo.toml --example verify-update -- apps/web/src-tauri/target/release/bundle/nsis/*-setup.exe apps/web/src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+      - run: node scripts/verify-desktop-service.mjs
+      - name: Validate Windows installer script syntax
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/install.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.platform }}-x64
@@ -259,6 +274,17 @@ jobs:
           build-args: |
             VCS_REF=${{ steps.metadata.outputs.revision }}
             BUILD_DATE=${{ steps.metadata.outputs.date }}
+      - uses: docker/build-push-action@v7
+        id: web-image
+        with:
+          context: .
+          target: web
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.metadata.outputs.web_tags }}
+          provenance: mode=max
+          build-args: |
+            APP_VERSION=${{ steps.metadata.outputs.version }}
       - name: Add image reference and upgrade steps to release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -270,7 +296,7 @@ jobs:
           node --input-type=module <<'JS'
           import { appendFileSync } from 'node:fs';
           const {RELEASE_IMAGE:image, RELEASE_VERSION:version, IMAGE_DIGEST:digest} = process.env;
-          appendFileSync('/tmp/vektor-release-notes', `\n\nImage: \`${image}:${version}\` (linux/amd64 and linux/arm64).\n\nPinned reference: \`${image}@${digest}\`. BuildKit build provenance is attached to the OCI image index.\n\nBack up your data first. Save the attached compose.yaml in the existing Vektor project directory, preserve the project name and vektor-data volume, then run:\n\n\`\`\`sh\nexport VEKTOR_IMAGE=${image}:${version}\ndocker compose pull && docker compose up -d\n\`\`\`\n\nPrivate GHCR images require docker login ghcr.io with read:packages access. Do not run docker compose down -v. Verify /healthz after upgrading.\n\nThe API archive requires Linux x64 and Node 22: extract it, set VEKTOR_DATA_DIR and VEKTOR_WEB_DIST to absolute paths (web assets are in web/dist), then run node api/dist/server.js. The desktop .deb is Linux x64 and connects to a separately managed backend. The Windows x64 installer and Linux AppImage support signed updates from inside Vektor; .deb upgrades use your package manager. Configure the optional Docker host updater for click-to-install API and Web UI upgrades. Verify assets with SHA256SUMS.\n`);
+          appendFileSync('/tmp/vektor-release-notes', `\n\nImage: \`${image}:${version}\` (linux/amd64 and linux/arm64).\n\nPinned reference: \`${image}@${digest}\`. BuildKit build provenance is attached to the OCI image index.\n\nBack up your data first. Save the attached compose.yaml in the existing Vektor project directory, preserve the project name and vektor-data volume, then run:\n\n\`\`\`sh\nexport VEKTOR_IMAGE=${image}:${version}\nexport VEKTOR_WEB_IMAGE=${image}-web:${version}\ndocker compose pull && docker compose up -d\n\`\`\`\n\nPrivate GHCR images require docker login ghcr.io with read:packages access. Do not run docker compose down -v. Verify /healthz after upgrading.\n\nThe API archive requires Linux x64 and Node 22: extract it, set VEKTOR_DATA_DIR and VEKTOR_WEB_DIST to absolute paths (web assets are in web/dist), then run node api/dist/server.js. The desktop installers include Node and the API for per-user service installation; setup also supports automatic Docker connections. The separate web image is ghcr.io/someone6783/vektor-web with matching version tags. Download install.sh or install.ps1 for guided desktop or Docker installation. The Windows x64 installer and Linux AppImage support signed updates from inside Vektor; .deb upgrades use your package manager. Configure the optional Docker host updater for click-to-install API and Web UI upgrades. Verify assets with SHA256SUMS.\n`);
           JS
           gh release edit "$RELEASE_TAG" --notes-file /tmp/vektor-release-notes
           gh release upload "$RELEASE_TAG" release-artifacts/* --clobber

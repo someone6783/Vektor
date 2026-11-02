@@ -2,6 +2,7 @@ import { z } from "zod";
 import { runSchema } from "./workspace.js";
 import { runEventSchema } from "./run-events.js";
 import { browserStateSchema } from "./browser.js";
+import { computerStateSchema } from "./computer.js";
 
 export const terminalInputSchema = z
   .object({
@@ -61,6 +62,7 @@ export type BackendInfo = z.infer<typeof backendInfoSchema>;
 export const runDetailsSchema = z.object({
   transcript: z.array(runEventSchema).optional(),
   browser: browserStateSchema.optional(),
+  computer: computerStateSchema.optional(),
   run: runSchema,
   tools: z.array(toolCallSchema),
   approvals: z.array(approvalSchema),

@@ -1,12 +1,18 @@
+import { RunnerSetup } from "./RunnerSetup";
 import { useState } from "react";
 import { setChunkedStreaming, useChunkedStreaming } from "../lib/streamingPreference";
 import { AboutView } from "./AboutView";
 import { BrowserProfileCard } from "./BrowserProfileCard";
 import {
+  runnerIdSchema,
   browserPermissionsSchema,
+  computerPermissionsSchema,
   type BrowserPermissions,
+  type ComputerPermissions,
   type ModelInfo,
   type Profile,
+  type RunnerId,
+  type RunnerInstallationView,
   type SettingsView,
   type TerminalMode,
 } from "@vektor/shared";
@@ -36,17 +42,20 @@ function ProfileEditor({
   client,
   profile,
   models,
+  runners = [],
   onSaved,
   onError,
 }: {
   client: ApiClient;
   profile: Profile;
   models: ModelInfo[];
+  runners?: RunnerInstallationView[];
   onSaved: () => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [name, setName] = useState(profile.name);
   const [model, setModel] = useState(profile.model);
+  const [runner, setRunner] = useState<RunnerId>(profile.runner ?? "native");
   const [systemPrompt, setSystemPrompt] = useState(profile.systemPrompt);
   const [temperature, setTemperature] = useState(String(profile.temperature));
   const [maxTokens, setMaxTokens] = useState(String(profile.maxTokens));
@@ -65,6 +74,30 @@ function ProfileEditor({
   const [localAcknowledged, setLocalAcknowledged] = useState(
     initialBrowser.localOrigins.length > 0,
   );
+  const initialComputer = computerPermissionsSchema.parse(profile.computer ?? {});
+  const [computerMode, setComputerMode] = useState<ComputerPermissions["mode"]>(
+    initialComputer.mode,
+  );
+  const [computerWidth, setComputerWidth] = useState(String(initialComputer.width));
+  const [computerHeight, setComputerHeight] = useState(String(initialComputer.height));
+  const [computerAppName, setComputerAppName] = useState(initialComputer.apps[0]?.name ?? "");
+  const [computerCommand, setComputerCommand] = useState(initialComputer.apps[0]?.command ?? "");
+  const [computerArgs, setComputerArgs] = useState(
+    (initialComputer.apps[0]?.args ?? []).join("\n"),
+  );
+  const [additionalComputerApps, setAdditionalComputerApps] = useState(
+    initialComputer.apps
+      .slice(1)
+      .map((app) => ({ name: app.name, command: app.command, argsText: app.args.join("\n") })),
+  );
+  const [computerMaxActions, setComputerMaxActions] = useState(String(initialComputer.maxActions));
+  const [computerMinutes, setComputerMinutes] = useState(
+    String(initialComputer.maxDurationMs / 60_000),
+  );
+  const [computerArtifactDays, setComputerArtifactDays] = useState(
+    String(initialComputer.artifactDays),
+  );
+  const [computerAcknowledged, setComputerAcknowledged] = useState(initialComputer.mode !== "off");
   const [fullAccessAcknowledged, setFullAccessAcknowledged] = useState(
     profile.terminalMode === "full-access",
   );
@@ -87,14 +120,48 @@ function ProfileEditor({
       });
       if (browser.localOrigins.length && !localAcknowledged)
         throw new Error("Acknowledge the scoped local testing grant before saving.");
+      const computer = computerPermissionsSchema.parse({
+        mode: computerMode,
+        width: Math.round(Number(computerWidth) || 1280),
+        height: Math.round(Number(computerHeight) || 800),
+        apps: computerCommand.trim()
+          ? [
+              {
+                name: computerAppName.trim() || "Application",
+                command: computerCommand.trim(),
+                args: computerArgs
+                  .split("\n")
+                  .map((arg) => arg.trim())
+                  .filter(Boolean),
+              },
+            ]
+          : [],
+        maxActions: Number(computerMaxActions),
+        maxDurationMs: Math.round(Number(computerMinutes) * 60_000),
+        artifactDays: Number(computerArtifactDays),
+      });
+      computer.apps.push(
+        ...additionalComputerApps.map((app) => ({
+          name: app.name,
+          command: app.command,
+          args: app.argsText.split("\n").filter(Boolean),
+        })),
+      );
+      computerPermissionsSchema.parse(computer);
+      if (computer.mode !== "off" && !computer.apps.length)
+        throw new Error("Add the application command the isolated desktop should run.");
+      if (computer.mode !== "off" && !computerAcknowledged)
+        throw new Error("Acknowledge the isolated computer access warning before saving.");
       await client.updateProfile(profile.id, {
         name: name.trim() || profile.name,
         model: model.trim() || profile.model,
+        runner,
         systemPrompt,
         temperature: Math.min(2, Math.max(0, Number(temperature) || 0)),
         maxTokens: Math.max(1, Math.round(Number(maxTokens) || 2048)),
         terminalMode,
         browser,
+        computer,
         tools: [
           ...profile.tools.filter((tool) => tool !== "terminal"),
           ...(terminalTool && terminalMode !== "no-terminal" ? ["terminal"] : []),
@@ -155,6 +222,40 @@ function ProfileEditor({
         </div>
       </div>
 
+      <label className="mt-3 block text-xs text-slate-400">
+        Runner
+        <select
+          aria-label={`Runner for ${profile.name}`}
+          value={runner}
+          onChange={(event) => setRunner(runnerIdSchema.parse(event.target.value))}
+          className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 p-2 text-slate-100"
+        >
+          <option value="native">Native · OpenRouter</option>
+          <option value="codex">
+            Codex ·{" "}
+            {runners.find((entry) => entry.id === "codex")?.enabled
+              ? "enabled"
+              : "configure in Agent runner setup"}
+          </option>
+          {runners
+            .filter((entry) => entry.id.startsWith("acp:"))
+            .map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name} · {entry.enabled ? "enabled" : "disabled"}
+              </option>
+            ))}
+          {runner !== "native" &&
+          runner !== "codex" &&
+          !runners.some((entry) => entry.id === runner) ? (
+            <option value={runner}>{runner} · unavailable</option>
+          ) : null}
+        </select>
+        <span className="mt-1 block">
+          Codex uses separate authentication. Unavailable runners reject new runs; select Native to
+          use OpenRouter.
+        </span>
+      </label>
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <label className="text-[10px] uppercase tracking-wide text-slate-500">Model</label>
@@ -165,7 +266,7 @@ function ProfileEditor({
             className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
           />
           <datalist id={`models-${profile.id}`}>
-            {models.map((item) => (
+            {(runner === "native" ? models : []).map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
               </option>
@@ -343,6 +444,200 @@ function ProfileEditor({
         ) : null}
       </div>
 
+      <div className="mt-4 space-y-2 rounded-lg border border-white/10 p-3 text-xs text-slate-400">
+        <label className="block">
+          Computer access
+          <select
+            id={`computer-${profile.id}`}
+            aria-label={`Computer access for ${profile.name}`}
+            value={computerMode}
+            onChange={(event) => {
+              const mode = event.target.value as ComputerPermissions["mode"];
+              if (mode !== "off") setComputerAcknowledged(false);
+              setComputerMode(mode);
+            }}
+            className="ml-3 rounded border border-white/10 bg-slate-950 p-1"
+          >
+            <option value="off">Off</option>
+            <option value="observe">Observation only · screenshots</option>
+            <option value="control">Control · each action requires approval</option>
+          </select>
+        </label>
+        <p>
+          Runs one allowed application in a fresh Xvfb virtual desktop on the backend. This does not
+          control the user&apos;s real desktop. Screenshots and window titles are untrusted. The
+          session closes with the run, cancellation or emergency stop.
+        </p>
+        {computerMode !== "off" ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <label>
+                Width
+                <input
+                  aria-label={`Computer width for ${profile.name}`}
+                  value={computerWidth}
+                  onChange={(event) => setComputerWidth(event.target.value)}
+                  inputMode="numeric"
+                  className="ml-2 w-20 rounded border border-white/10 bg-slate-950 p-1"
+                />
+              </label>
+              <label>
+                Height
+                <input
+                  aria-label={`Computer height for ${profile.name}`}
+                  value={computerHeight}
+                  onChange={(event) => setComputerHeight(event.target.value)}
+                  inputMode="numeric"
+                  className="ml-2 w-20 rounded border border-white/10 bg-slate-950 p-1"
+                />
+              </label>
+            </div>
+            <label className="block">
+              Application name
+              <input
+                aria-label={`Computer application name for ${profile.name}`}
+                value={computerAppName}
+                onChange={(event) => setComputerAppName(event.target.value)}
+                placeholder="Test application"
+                className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
+              />
+            </label>
+            <label className="block">
+              Application command (absolute path)
+              <input
+                aria-label={`Computer application command for ${profile.name}`}
+                value={computerCommand}
+                onChange={(event) => setComputerCommand(event.target.value)}
+                placeholder="/usr/bin/xmessage"
+                className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
+              />
+            </label>
+            <label className="block">
+              Arguments (one per line)
+              <textarea
+                aria-label={`Computer application arguments for ${profile.name}`}
+                value={computerArgs}
+                onChange={(event) => setComputerArgs(event.target.value)}
+                rows={2}
+                placeholder="Phase 10 test"
+                className="mt-1 w-full rounded border border-white/10 bg-slate-950 p-2"
+              />
+            </label>
+            {additionalComputerApps.map((app, index) => (
+              <div key={index} className="space-y-2 rounded border border-white/10 p-2">
+                <label>
+                  Application {index + 2} name
+                  <input
+                    aria-label={`Additional application ${index + 2} name`}
+                    value={app.name}
+                    onChange={(event) =>
+                      setAdditionalComputerApps((values) =>
+                        values.map((value, i) =>
+                          i === index ? { ...value, name: event.target.value } : value,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  Command
+                  <input
+                    aria-label={`Additional application ${index + 2} command`}
+                    value={app.command}
+                    onChange={(event) =>
+                      setAdditionalComputerApps((values) =>
+                        values.map((value, i) =>
+                          i === index ? { ...value, command: event.target.value } : value,
+                        ),
+                      )
+                    }
+                    placeholder="/usr/bin/xmessage"
+                  />
+                </label>
+                <label>
+                  Arguments (one per line)
+                  <textarea
+                    aria-label={`Additional application ${index + 2} arguments`}
+                    value={app.argsText}
+                    onChange={(event) =>
+                      setAdditionalComputerApps((values) =>
+                        values.map((value, i) =>
+                          i === index ? { ...value, argsText: event.target.value } : value,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  onClick={() =>
+                    setAdditionalComputerApps((values) => values.filter((_, i) => i !== index))
+                  }
+                >
+                  Remove application {index + 2}
+                </button>
+              </div>
+            ))}
+            <button
+              disabled={additionalComputerApps.length >= 4}
+              onClick={() =>
+                setAdditionalComputerApps((values) => [
+                  ...values,
+                  { name: "Application", command: "", argsText: "" },
+                ])
+              }
+            >
+              Add allowed application
+            </button>
+            <div className="flex flex-wrap gap-3">
+              <label>
+                Action limit
+                <input
+                  aria-label={`Computer action limit for ${profile.name}`}
+                  type="number"
+                  min="1"
+                  max="200"
+                  value={computerMaxActions}
+                  onChange={(event) => setComputerMaxActions(event.target.value)}
+                />
+              </label>
+              <label>
+                Time limit (minutes)
+                <input
+                  aria-label={`Computer time limit for ${profile.name}`}
+                  type="number"
+                  min="1"
+                  max="30"
+                  value={computerMinutes}
+                  onChange={(event) => setComputerMinutes(event.target.value)}
+                />
+              </label>
+              <label>
+                Screenshot retention (days; 0 disables)
+                <input
+                  aria-label={`Computer screenshot retention for ${profile.name}`}
+                  type="number"
+                  min="0"
+                  max="30"
+                  value={computerArtifactDays}
+                  onChange={(event) => setComputerArtifactDays(event.target.value)}
+                />
+              </label>
+            </div>
+            <label className="flex gap-2 text-amber-200">
+              <input
+                type="checkbox"
+                checked={computerAcknowledged}
+                onChange={(event) => setComputerAcknowledged(event.target.checked)}
+              />
+              I understand the agent can see and control only this isolated virtual desktop, and
+              that every automated input still requires my approval. The application runs with the
+              backend account’s file and network access. Use trusted applications and avoid
+              passwords or payment details; sensitive-field protection is not available yet.
+            </label>
+          </>
+        ) : null}
+      </div>
+
       <div className="mt-3 flex items-center gap-2">
         <p className="text-[11px] leading-5 text-slate-400">
           {terminalMode === "no-terminal"
@@ -408,6 +703,7 @@ export function SettingsView({
   onProfilesChange,
   onError,
 }: SettingsViewProps) {
+  const [runners, setRunners] = useState<RunnerInstallationView[]>([]);
   const chunkedStreaming = useChunkedStreaming();
   const [keyDraft, setKeyDraft] = useState("");
   const [defaultModel, setDefaultModel] = useState(settings.defaultModel);
@@ -655,6 +951,7 @@ export function SettingsView({
                 client={client}
                 profile={profile}
                 models={settings.models}
+                runners={runners}
                 onSaved={onProfilesChange}
                 onError={fail}
               />
@@ -691,8 +988,11 @@ export function SettingsView({
         <UsageView client={client} />
         <BrowserProfileCard client={client} />
         <HealthCard />
+        <RunnerSetup client={client} profiles={profiles} onInstallations={setRunners} />
+        <McpSettings client={client} profiles={profiles} />
         <AboutView client={client} />
       </div>
     </div>
   );
 }
+import { McpSettings } from "./McpSettings";

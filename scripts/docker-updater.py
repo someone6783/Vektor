@@ -128,7 +128,7 @@ class Updater:
             # Preserve the existing service and data volume; refuse source builds or
             # configurations whose image is not controlled by VEKTOR_IMAGE.
             target = f"{IMAGE}:{version}"
-            env = {**os.environ, "VEKTOR_IMAGE": target}
+            env = {**os.environ, "VEKTOR_IMAGE": target, "VEKTOR_WEB_IMAGE": f"{IMAGE}-web:{version}"}
             config = json.loads(run(self.compose + ["config", "--format", "json"], env=env))
             service = config["services"][self.args.service]
             if service.get("image") != target or service.get("build"):
@@ -142,6 +142,21 @@ class Updater:
             if not digests:
                 raise ValueError("Downloaded image has no registry digest.")
             env["VEKTOR_IMAGE"] = digests[0]
+            services = [self.args.service]
+            web = config["services"].get("web")
+            if web:
+                web_target = f"{IMAGE}-web:{version}"
+                if web.get("image") != web_target or web.get("build"):
+                    raise ValueError("The web image must use VEKTOR_WEB_IMAGE with the matching release version.")
+                run(["docker", "pull", web_target])
+                web_image = json.loads(run(["docker", "image", "inspect", web_target]))[0]
+                if web_image.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.version") != version:
+                    raise ValueError("Downloaded web image version does not match the release.")
+                web_digests = [d for d in web_image.get("RepoDigests", []) if d.startswith(IMAGE + "-web@sha256:")]
+                if not web_digests:
+                    raise ValueError("Downloaded web image has no registry digest.")
+                env["VEKTOR_WEB_IMAGE"] = web_digests[0]
+                services.append("web")
             self.update_state("backing_up", "Stopping the backend and backing up its data.")
             run(self.compose + ["stop", "--timeout", "30", self.args.service])
             self.stopped = True
@@ -153,12 +168,24 @@ class Updater:
             atomic_json(backup / "metadata.json", {"previousImage": self.previous, "targetImage": digests[0], "version": version})
             self.update_state("installing", f"Backup saved at {backup}. Installing v{version}.")
             self.replacing = True
-            run(self.compose + ["up", "-d", "--no-deps", "--wait", "--wait-timeout", "120", self.args.service], env=env)
+            run(self.compose + ["up", "-d", "--no-deps", "--wait", "--wait-timeout", "120"] + services, env=env)
             new_container = run(self.compose + ["ps", "-q", self.args.service], env=env)
             health = json.loads(run(["docker", "exec", new_container, "node", "-e",
                 "fetch('http://127.0.0.1:8787/healthz').then(async r => {if(!r.ok) process.exit(1); console.log(JSON.stringify(await r.json()))}).catch(() => process.exit(1))"]))
             if health.get("version") != version:
                 raise ValueError("Backend health version does not match the requested update.")
+            # Installer-managed projects keep their image pins for subsequent restarts.
+            pins = Path(self.args.compose).resolve().parent / "release.env"
+            if pins.exists():
+                if pins.is_symlink() or not pins.is_file():
+                    raise ValueError("Refusing a non-regular release.env file.")
+                temporary = pins.with_name(".release-" + str(uuid.uuid4()) + ".tmp")
+                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w") as output:
+                    output.write("VEKTOR_IMAGE=" + env["VEKTOR_IMAGE"] + "\n")
+                    if web:
+                        output.write("VEKTOR_WEB_IMAGE=" + env["VEKTOR_WEB_IMAGE"] + "\n")
+                os.replace(temporary, pins)
             self.update_state("complete", f"Backend and Web UI updated to v{version}. Reload the page, verify the workspace, then resume execution. Backup: {backup}")
         except Exception as error:
             print(f"Vektor update failed: {error}", file=sys.stderr, flush=True)

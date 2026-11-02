@@ -12,12 +12,14 @@ export const profiles = sqliteTable("profiles", {
   color: text("color").notNull().default("emerald"),
   systemPrompt: text("system_prompt").notNull().default(""),
   model: text("model").notNull(),
+  runner: text("runner").notNull().default("native"),
   paramsJson: text("params_json").notNull().default("{}"),
   terminalMode: text("terminal_mode").notNull().default("no-terminal"),
   toolsJson: text("tools_json").notNull().default("[]"),
   browserJson: text("browser_json")
     .notNull()
     .default('{"mode":"off","allowedOrigins":[],"localOrigins":[]}'),
+  computerJson: text("computer_json").notNull().default('{"mode":"off","apps":[]}'),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
@@ -67,6 +69,7 @@ export const runs = sqliteTable(
     userMessageId: text("user_message_id").notNull(),
     model: text("model").notNull(),
     runner: text("runner").notNull().default("native"),
+    harnessJson: text("harness_json"),
     provider: text("provider").notNull().default("unknown"),
     providerCalls: integer("provider_calls").notNull().default(0),
     jobId: text("job_id"),
@@ -194,6 +197,11 @@ export const scheduledJobs = sqliteTable(
     includeHistory: integer("include_history", { mode: "boolean" }).notNull().default(false),
     allowTruncation: integer("allow_truncation", { mode: "boolean" }).notNull().default(false),
     browserAccess: text("browser_access").notNull().default("off"),
+    computerAccess: text("computer_access").notNull().default("off"),
+    mcpServers: text("mcp_servers_json", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
     nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }),
     leaseOwner: text("lease_owner"),
     leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
@@ -250,3 +258,22 @@ export const browserArtifacts = sqliteTable(
   },
   (table) => [index("browser_artifacts_run_idx").on(table.runId)],
 );
+
+export const computerArtifacts = sqliteTable(
+  "computer_artifacts",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    actionId: text("action_id").notNull(),
+    action: text("action").notNull(),
+    stage: text("stage").notNull(),
+    jpeg: text("jpeg").notNull(),
+    size: integer("size").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("computer_artifacts_run_idx").on(table.runId)],
+);
+import { sql } from "drizzle-orm";

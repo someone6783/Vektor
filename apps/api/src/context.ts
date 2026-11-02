@@ -13,14 +13,16 @@ export class ContextService {
     readonly db: VektorDatabase,
     readonly files: AttachmentService,
     readonly provider: ProviderService,
+    readonly mcp?: McpService,
   ) {}
 
-  prepare(
+  async prepare(
     channelId: string,
     input: ContextRequest,
     defaultProfileId: string | null,
     beforeMessageId?: string,
     includeHistory = true,
+    mcpJobServers?: string[],
   ) {
     const baseProfile = getProfile(this.db, input.profileId ?? defaultProfileId ?? "");
     if (!baseProfile || baseProfile.archivedAt !== null)
@@ -44,10 +46,19 @@ export class ContextService {
       )
       .join("");
     const images = attachments.filter((file) => file.kind === "image");
-    const currentText = input.content + documentText;
+    const mcpContext =
+      (await this.mcp?.selectedContext(profile.id, input.mcpContextIds ?? [])) ?? "";
+    const currentText = input.content + documentText + mcpContext;
     const currentTokens = tokens(currentText) + 6 + images.length * 4096;
     const systemPrompt = runtimeSystemPrompt(profile);
-    const toolDefinitions = toolsForProfile(profile);
+    const toolDefinitions = [
+      ...toolsForProfile(profile),
+      ...(this.mcp?.definitions(
+        profile.id,
+        input.runner ?? profile.runner ?? "native",
+        mcpJobServers,
+      ) ?? []),
+    ];
     const systemTokens =
       (systemPrompt ? tokens(systemPrompt) + 6 : 0) +
       (toolDefinitions.length ? tokens(JSON.stringify(toolDefinitions)) + 6 : 0);
@@ -70,6 +81,10 @@ export class ContextService {
       droppedMessages++;
     }
     const warnings: string[] = [];
+    if ((input.runner ?? profile.runner ?? "native") !== "native")
+      warnings.push(
+        "Vektor estimates the explicitly selected text only. The external agent owns compaction and its context limit; exact usage and billing may be unavailable.",
+      );
     if (!metadata?.contextLength) warnings.push("Context limit unknown; using 8,192 tokens.");
     if (images.length)
       warnings.push(
@@ -106,6 +121,10 @@ export class ContextService {
       availableInputTokens,
       attachmentTokens: tokens(documentText) + images.length * 4096,
       selectedAttachments: attachments.length,
+      selectedAttachmentIds: attachments.map((attachment) => attachment.id),
+      selectedMcpContextIds: input.mcpContextIds ?? [],
+      mcpContextTokens: tokens(mcpContext),
+      ...(this.mcp ? { mcpPolicyHash: this.mcp.store.policyHash(profile.id) } : {}),
       droppedMessages,
       exceedsBudget: inputTokens > availableInputTokens || reservedOutputTokens >= contextWindow,
       requiresTruncation: droppedMessages > 0,
@@ -123,7 +142,7 @@ export class ContextService {
     };
   }
 
-  async messages(prepared: ReturnType<ContextService["prepare"]>): Promise<ChatMessage[]> {
+  async messages(prepared: Awaited<ReturnType<ContextService["prepare"]>>): Promise<ChatMessage[]> {
     if (prepared.images.length && prepared.supportsImages === false)
       throw new AttachmentError(
         "This model does not support images. Select a vision model or exclude the images.",
@@ -158,3 +177,4 @@ export function checkContextBudget(estimate: ContextEstimate, allowTruncation = 
       409,
     );
 }
+import type { McpService } from "./mcp/service.js";

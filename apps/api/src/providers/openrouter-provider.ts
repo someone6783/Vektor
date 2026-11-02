@@ -106,6 +106,9 @@ export class OpenRouterProvider implements ChatProvider {
                 : {}),
             }
           : {}),
+        ...(model.supported_parameters
+          ? { supportsTools: model.supported_parameters.includes("tools") }
+          : {}),
         ...(model.architecture?.input_modalities
           ? { supportsImages: model.architecture.input_modalities.includes("image") }
           : {}),

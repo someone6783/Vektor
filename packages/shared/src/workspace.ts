@@ -2,6 +2,9 @@ import { reasoningEffortSchema } from "./reasoning.js";
 import { z } from "zod";
 import { attachmentSchema, contextEstimateSchema } from "./attachments.js";
 import { browserPermissionsSchema } from "./browser.js";
+import { computerPermissionsSchema } from "./computer.js";
+
+import { harnessStateSchema, runnerIdSchema } from "./runners.js";
 
 const isoDateSchema = z.string().min(1);
 
@@ -35,6 +38,7 @@ export const modelInfoSchema = z.object({
   name: z.string().min(1),
   contextLength: z.number().int().positive().optional(),
   supportsImages: z.boolean().optional(),
+  supportsTools: z.boolean().optional(),
   supportsReasoning: z.boolean().optional(),
   reasoningMandatory: z.boolean().optional(),
   reasoningEfforts: z.array(reasoningEffortSchema).optional(),
@@ -47,12 +51,14 @@ export const profileSchema = z.object({
   name: z.string().min(1),
   color: profileColorSchema,
   systemPrompt: z.string(),
+  runner: runnerIdSchema.optional(),
   model: z.string().min(1),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().int().positive(),
   terminalMode: terminalModeSchema,
   tools: z.array(z.string()),
   browser: browserPermissionsSchema.optional(),
+  computer: computerPermissionsSchema.optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,
   archivedAt: isoDateSchema.nullable(),
@@ -66,6 +72,7 @@ export const conversationExecutionSchema = z
   .object({
     terminalMode: terminalModeSchema.optional(),
     browser: browserPermissionsSchema.optional(),
+    computer: computerPermissionsSchema.optional(),
   })
   .strict();
 export type ConversationExecution = z.infer<typeof conversationExecutionSchema>;
@@ -114,7 +121,8 @@ export const runSchema = z.object({
   profileId: z.string().min(1),
   userMessageId: z.string().min(1),
   model: z.string().min(1),
-  runner: z.enum(["native", "cli"]),
+  runner: runnerIdSchema,
+  harness: harnessStateSchema.nullable().optional(),
   status: runStatusSchema,
   error: z.string().nullable(),
   usage: runUsageSchema.nullable(),
@@ -149,12 +157,14 @@ export const createProfileSchema = z
   .object({
     name: z.string().min(1).max(80),
     model: z.string().min(1).max(200),
+    runner: runnerIdSchema.optional(),
     systemPrompt: z.string().max(20_000).optional(),
     color: profileColorSchema.optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().min(1).max(200_000).optional(),
     terminalMode: terminalModeSchema.optional(),
     browser: browserPermissionsSchema.optional(),
+    computer: computerPermissionsSchema.optional(),
     tools: z.array(z.string().min(1)).max(50).optional(),
   })
   .strict();
@@ -165,12 +175,14 @@ export const updateProfileSchema = z
   .object({
     name: z.string().min(1).max(80).optional(),
     model: z.string().min(1).max(200).optional(),
+    runner: runnerIdSchema.optional(),
     systemPrompt: z.string().max(20_000).optional(),
     color: profileColorSchema.optional(),
     temperature: z.number().min(0).max(2).optional(),
     maxTokens: z.number().int().min(1).max(200_000).optional(),
     terminalMode: terminalModeSchema.optional(),
     browser: browserPermissionsSchema.optional(),
+    computer: computerPermissionsSchema.optional(),
     tools: z.array(z.string().min(1)).max(50).optional(),
     archived: z.boolean().optional(),
   })
@@ -204,10 +216,13 @@ export type UpdateChannelInput = z.infer<typeof updateChannelSchema>;
 export const sendMessageSchema = z
   .object({
     content: z.string().max(100_000),
+    runner: runnerIdSchema.optional(),
+    resumeFromRunId: z.string().uuid().optional(),
     profileId: z.string().min(1).optional(),
     model: z.string().min(1).max(200).optional(),
     reasoning: reasoningEffortSchema.optional(),
     attachmentIds: z.array(z.string().uuid()).max(50).optional(),
+    mcpContextIds: z.array(z.string().uuid()).max(5).optional(),
     allowTruncation: z.boolean().optional(),
   })
   .strict();
