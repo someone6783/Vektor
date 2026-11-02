@@ -49,7 +49,10 @@ import {
 } from "../runtime/policy.js";
 import type { BrowserService } from "../browser/service.js";
 import type { ComputerService } from "../computer/service.js";
-import { RuntimeError, type TerminalExecutor } from "../runtime/terminal.js";
+import { RuntimeError, type TerminalExecutor, type TerminalResult } from "../runtime/terminal.js";
+import { conversationExecution } from "../conversation-execution.js";
+import { SshError, type SshExecutor, type SshExecutionResult } from "../ssh/executor.js";
+import type { SshService } from "../ssh/service.js";
 import { countMessageTokens, countTokens } from "../runtime/tokens.js";
 
 type RunEventInput = RunEvent extends infer E
@@ -107,6 +110,8 @@ export interface RunManagerOptions {
   getChatProvider: () => ChatProvider;
   logger: Logger;
   terminal: TerminalExecutor;
+  /** Optional remote execution over SSH, resolved per stored SSH connection id. */
+  ssh?: SshService;
   browser?: BrowserService;
   computer?: ComputerService;
   supportsModelImages?: (model: string) => boolean | undefined;
@@ -502,6 +507,26 @@ export class RunManager {
       terminalEnabled(current) &&
       terminalEnabled(active.profile)
     );
+  }
+
+  /**
+   * Remote execution target for a conversation. Returns null when the
+   * conversation override does not select an SSH connection.
+   */
+  private sshExecutor(active: ActiveRun): SshExecutor | null {
+    const connectionId = conversationExecution(
+      this.options.db,
+      active.run.channelId,
+    ).sshConnectionId;
+    if (!connectionId || !this.options.ssh) return null;
+    try {
+      return this.options.ssh.chatExecutor(connectionId);
+    } catch (error) {
+      throw new RuntimeError(
+        error instanceof Error ? error.message : "SSH execution target is unavailable.",
+        error instanceof SshError ? error.statusCode : 400,
+      );
+    }
   }
 
   private browserPolicy(active: ActiveRun) {
@@ -1430,7 +1455,7 @@ export class RunManager {
         if (active.finished) return "Command cancelled.";
         if (!approved) throw new RuntimeError("The user denied this command.", 403);
       }
-      const command = await terminal.prepare(active.profile.terminalMode, parsed);
+      const sshExecutor = this.sshExecutor(active);
       if (active.finished) return "Command cancelled.";
       if (signal.aborted) throw new RuntimeError("Command cancelled.", 409);
       if (!this.hasPermission(active))
@@ -1438,28 +1463,45 @@ export class RunManager {
           "Terminal permissions changed. Start a new run to use the updated profile.",
           403,
         );
+      const localCommand = sshExecutor
+        ? null
+        : await terminal.prepare(active.profile.terminalMode, parsed);
+      const remoteCommand =
+        sshExecutor?.prepare(active.profile.terminalMode, parsed) ?? null;
       updateToolCall(db, record.id, "running");
-      appendAudit(db, "tool.started", active.run.id, { toolCallId: record.id, command: parsed });
-      const result = await terminal.execute(command, signal);
+      appendAudit(db, "tool.started", active.run.id, {
+        toolCallId: record.id,
+        command: parsed,
+        remote: Boolean(sshExecutor),
+      });
+      let result: SshExecutionResult | TerminalResult;
+      if (sshExecutor && remoteCommand) result = await sshExecutor.execute(remoteCommand, signal);
+      else if (localCommand) result = await terminal.execute(localCommand, signal);
+      else throw new RuntimeError("Command preparation failed.", 500);
       if (active.finished) return result.output;
-      const output = JSON.stringify(result);
-      updateToolCall(db, record.id, result.isError ? "failed" : "completed", output);
+      const outcome = sshExecutor
+        ? { ...result, output: this.options.redact(result.output) }
+        : result;
+      const output = JSON.stringify(outcome);
+      updateToolCall(db, record.id, outcome.isError ? "failed" : "completed", output);
       this.emit(active, {
         type: "tool.output",
         toolCallId: record.id,
         output,
-        isError: result.isError,
+        isError: outcome.isError,
       });
       appendAudit(db, "tool.finished", active.run.id, {
         toolCallId: record.id,
-        exitCode: result.exitCode,
-        reason: result.reason,
+        exitCode: outcome.exitCode,
+        reason: outcome.reason,
       });
       return output;
     } catch (error) {
       if (active.finished) return "Command cancelled.";
       const output = redact(error instanceof Error ? error.message : "Tool execution failed.");
-      const denied = error instanceof RuntimeError && error.statusCode === 403;
+      const denied =
+        (error instanceof RuntimeError || error instanceof SshError) &&
+        error.statusCode === 403;
       updateToolCall(db, record.id, denied ? "denied" : "failed", output);
       this.emit(active, { type: "tool.output", toolCallId: record.id, output, isError: true });
       appendAudit(db, denied ? "tool.denied" : "tool.failed", active.run.id, {

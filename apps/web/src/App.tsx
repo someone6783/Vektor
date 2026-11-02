@@ -1126,6 +1126,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           channel={activeChannel}
           profile={activeProfile}
           section={executionSection}
+          client={client}
           onClose={() => setExecutionSection(null)}
           onSave={async (execution) => {
             const updated = await client.updateChannel(activeChannel.id, { execution });

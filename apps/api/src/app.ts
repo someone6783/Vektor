@@ -17,6 +17,7 @@ import { ProviderService } from "./providers/service.js";
 import { registerChannelRoutes } from "./routes/channels.js";
 import { registerDevProviderRoutes } from "./routes/dev-provider.js";
 import { registerDevStreamRoutes } from "./routes/dev-stream.js";
+import { registerGitRoutes } from "./routes/git.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerProfileRoutes } from "./routes/profiles.js";
@@ -32,6 +33,8 @@ import { ContextService } from "./context.js";
 import { join } from "node:path";
 import { TerminalExecutor } from "./runtime/terminal.js";
 import { makeRedactor } from "./runtime/redact.js";
+import { SshService } from "./ssh/service.js";
+import { registerSshRoutes } from "./routes/ssh.js";
 import { registerRuntimeRoutes } from "./routes/runtime.js";
 import { Scheduler } from "./scheduling/scheduler.js";
 import { registerJobRoutes } from "./routes/jobs.js";
@@ -113,9 +116,11 @@ export async function buildApp({
     runnerIsolation,
   );
   const mcp = new McpService(storage.db, storage.dataDir, storage.secretsKey, config.port);
+  const ssh = new SshService(storage.db, storage.secretsKey);
   const redact = makeRedactor(() => [
     ...mcp.store.secrets(),
     ...runnerInstallations.secrets(),
+    ...ssh.secrets(),
     storage.accessToken,
     storage.secretsKey.toString("hex"),
     storage.secretsKey.toString("base64"),
@@ -210,6 +215,7 @@ export async function buildApp({
     getChatProvider: () => providerService.getChatProvider(),
     logger: app.log,
     terminal,
+    ssh,
     browser,
     computer,
     supportsModelTools: (model) =>
@@ -225,6 +231,8 @@ export async function buildApp({
   registerRunnerRoutes(app, storage.db, runnerSetup, runnerInstallations, external, runManager);
   registerMcpRoutes(app, mcp, runManager);
   registerSettingsRoutes(app, providerService, redact);
+  registerSshRoutes(app, ssh);
+  registerGitRoutes(app);
   registerProfileRoutes(
     app,
     storage.db,

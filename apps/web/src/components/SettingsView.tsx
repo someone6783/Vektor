@@ -990,9 +990,11 @@ export function SettingsView({
         <HealthCard />
         <RunnerSetup client={client} profiles={profiles} onInstallations={setRunners} />
         <McpSettings client={client} profiles={profiles} />
+        <SshSettings client={client} />
         <AboutView client={client} />
       </div>
     </div>
   );
 }
 import { McpSettings } from "./McpSettings";
+import { SshSettings } from "./SshSettings";

@@ -19,6 +19,8 @@ const paths = {
   arrow: "M12 19V5m-6 6 6-6 6 6",
   close: "m6 6 12 12M6 18 18 6",
   connection: "M8 8 5 11a4 4 0 0 0 6 6l3-3M16 16l3-3a4 4 0 0 0-6-6l-3 3M9 15l6-6",
+  branch:
+    "M6 3v12M18 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM6 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM17.9 9A9 9 0 0 1 9 18",
 };
 
 export function Icon({ name }: { name: keyof typeof paths }) {

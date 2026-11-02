@@ -153,7 +153,9 @@ it.each(["basic", "full-unrestricted"])(
     expect(screen.getByRole("dialog", { name: "Terminal · General" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Terminal access"), { target: { value: terminalMode } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ terminalMode }));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith({ terminalMode, sshConnectionId: null }),
+    );
     expect(profile.terminalMode).toBe("no-terminal");
     await waitFor(() => expect(close).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));

@@ -14,6 +14,14 @@ import {
   computerCapabilitiesSchema,
   computerStateSchema,
   computerArtifactSchema,
+  gitFileResultSchema,
+  gitDiffResultSchema,
+  gitStatusSchema,
+  gitCommitResultSchema,
+  gitPushResultSchema,
+  type GitStatus,
+  type GitCommitResult,
+  type GitPushResult,
   type ComputerInput,
   type ComputerState,
   type BrowserInput,
@@ -61,6 +69,11 @@ import {
   type UpdateChannelInput,
   type UpdateProfileInput,
   type UpdateSettingsInput,
+  sshConnectionSchema,
+  sshTestResultSchema,
+  type SshConnection,
+  type SshConnectionInput,
+  type SshTestResult,
   scheduledJobSchema,
   jobRunSchema,
   schedulePreviewSchema,
@@ -289,6 +302,48 @@ export class ApiClient {
     return backendInfoSchema.parse(await this.request("/api/backend"));
   }
 
+  async gitFile(path: string, file: string) {
+    return gitFileResultSchema.parse(
+      await this.request("/api/git/file", {
+        method: "POST",
+        body: JSON.stringify({ path, file }),
+      }),
+    );
+  }
+
+  async gitDiff(path: string, file: string) {
+    return gitDiffResultSchema.parse(
+      await this.request("/api/git/diff", {
+        method: "POST",
+        body: JSON.stringify({ path, file }),
+      }),
+    );
+  }
+
+  async gitStatus(path: string): Promise<GitStatus> {
+    const result = await this.request<unknown>("/api/git/status", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+    return gitStatusSchema.parse(result);
+  }
+
+  async gitCommit(path: string, message: string, files: string[]): Promise<GitCommitResult> {
+    const result = await this.request<unknown>("/api/git/commit", {
+      method: "POST",
+      body: JSON.stringify({ path, message, files }),
+    });
+    return gitCommitResultSchema.parse(result);
+  }
+
+  async gitPush(path: string): Promise<GitPushResult> {
+    const result = await this.request<unknown>("/api/git/push", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+    return gitPushResultSchema.parse(result);
+  }
+
   async listJobs(includeDeleted = false): Promise<ScheduledJob[]> {
     const response = await this.request<{ jobs: unknown }>(
       `/api/jobs?includeDeleted=${includeDeleted}`,
@@ -494,6 +549,47 @@ export class ApiClient {
   async listModels(): Promise<ModelInfo[]> {
     const response = await this.request<{ models: unknown[] }>("/api/models");
     return response.models.map((model) => modelInfoSchema.parse(model));
+  }
+
+  async sshList(): Promise<SshConnection[]> {
+    const body = await this.request<{ connections: unknown[] }>("/api/ssh");
+    return sshConnectionSchema.array().parse(body.connections);
+  }
+
+  async sshCreate(input: SshConnectionInput): Promise<SshConnection> {
+    const body = await this.request<{ connection: unknown }>("/api/ssh", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return sshConnectionSchema.parse(body.connection);
+  }
+
+  async sshUpdate(id: string, input: Partial<SshConnectionInput>): Promise<SshConnection> {
+    const body = await this.request<{ connection: unknown }>(`/api/ssh/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+    return sshConnectionSchema.parse(body.connection);
+  }
+
+  async sshRemove(id: string): Promise<void> {
+    await this.request<undefined>(`/api/ssh/${id}`, { method: "DELETE" });
+  }
+
+  async sshCredentials(
+    id: string,
+    input: { password?: string | null; passphrase?: string | null },
+  ): Promise<void> {
+    await this.request<undefined>(`/api/ssh/${id}/credentials`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async sshTest(id: string): Promise<SshTestResult> {
+    return sshTestResultSchema.parse(
+      await this.request<unknown>(`/api/ssh/${id}/test`, { method: "POST" }),
+    );
   }
 
   async testProvider(): Promise<{ ok: boolean; models: ModelInfo[] }> {
