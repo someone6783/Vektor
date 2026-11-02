@@ -334,6 +334,22 @@ artifacts are raw executables or tar.gz/tgz, tar.bz2 and tar.xz archives.
    `agent-default` uses its advertised/default model; an explicit model id requires
    an advertised ACP model configuration option. Codex uses the requested API model.
 
+OpenCode uses the existing ACP adapter with runner identity `acp:opencode`. The
+**Set up OpenCode** preset selects ACP v1, `["acp"]` arguments, the OpenCode registry
+entry, `OPENROUTER_API_KEY`, and `openrouter.ai`. Discovery includes `opencode` even
+before a registry refresh. Refresh the registry and install its matching Linux
+binary before probing and verifying; the same archive checksum, executable hash,
+and version checks apply as for other ACP agents. The preset does not launch or
+enable an agent. Host OpenCode logins/configuration are not imported.
+
+For another provider, change the inference hosts and credential variable before
+verification (for example, `OPENCODE_API_KEY` with `opencode.ai` for OpenCode Zen).
+Use an advertised provider/model ID matching that provider. `agent-default` follows
+OpenCode's default selection and does not guarantee use of the preset provider.
+Inference hosts must include all public destinations required by that provider.
+To check a locally installed OpenCode handshake without credentials or inference:
+`VEKTOR_OPENCODE_PROBE_BIN=/absolute/path/opencode pnpm --filter @vektor/api exec vitest run src/runners/probe.test.ts`.
+
 Verification/add, key save, enablement, profile grants and launch are distinct actions.
 An upgrade repeats the probe/verification flow and leaves the entry disabled until
 explicitly enabled again. Changing inference destinations or credential type clears

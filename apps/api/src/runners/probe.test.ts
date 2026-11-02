@@ -90,3 +90,26 @@ it.skipIf(!process.env.VEKTOR_CODEX_PROBE_BIN)(
   },
   25_000,
 );
+
+it.skipIf(!process.env.VEKTOR_OPENCODE_PROBE_BIN)(
+  "initializes real OpenCode ACP without credentials, network or a model request",
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "vektor-opencode-probe-"));
+    const { db, sqlite } = openDatabase(join(directory, "test.db"));
+    try {
+      runMigrations(db);
+      const result = await new RunnerSetup(db).probe({
+        interface: "acp-v1",
+        command: process.env.VEKTOR_OPENCODE_PROBE_BIN!,
+        args: ["acp"],
+      });
+      expect(result.agent?.name.toLowerCase()).toContain("opencode");
+      expect(result.protocolCompatible).toBe(true);
+      expect(result.executionAvailable).toBe(false);
+    } finally {
+      sqlite.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  15_000,
+);

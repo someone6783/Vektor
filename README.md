@@ -292,11 +292,22 @@ shutdown. CI builds and checks both Windows and Linux payloads. See
 ### Codex and ACP runners
 
 Vektor retains its native OpenRouter loop and supports optional, explicitly enabled
-Codex app-server and verified ACP v1 agents. Settings → Agent runner setup discovers
+Codex app-server, OpenCode (ACP), and verified ACP v1 agents. Settings → Agent runner setup discovers
 installed executables, probes their protocol, verifies/pins their identity, stores a
 separate write-only API key, and enables the agent. Registry browsing never installs
 or launches an agent. Codex is pinned to app-server 0.166.0; ACP setup accepts locally
 installed binaries that match a checksum-verified official platform archive.
+
+For OpenCode, click **Set up OpenCode** in runner setup, refresh the official ACP
+registry, and probe the installed binary with `["acp"]` arguments. Verify it against
+OpenCode's registry entry. The preset uses `OPENROUTER_API_KEY` and `openrouter.ai`;
+enter a separate key, or change the credential type and hosts for another provider
+(`OPENCODE_API_KEY` is also supported for OpenCode Zen). Enable it, grant the profile
+access, then select **OpenCode** as the runner. Use an advertised model ID such as
+`openrouter/<model-id>` matching the configured provider; `agent-default` uses
+OpenCode's own default, which may require different inference hosts/credentials.
+The installed version must match the refreshed registry; npm wrapper scripts and
+versions without a matching verified binary cannot be enabled.
 
 Each profile needs an agent-specific workspace/inference grant and Full access with
 per-command approvals. No-terminal, Basic, Full Unrestricted, external browser/computer

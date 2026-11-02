@@ -114,3 +114,35 @@ it("keeps credential saving, agent enablement and profile grants as separate exp
     }),
   );
 });
+
+it("presets OpenCode ACP arguments and a separate OpenRouter credential without launching it", async () => {
+  const probe = {
+    executableHash: "hash",
+    interface: "acp-v1",
+    command: "/usr/bin/opencode",
+    agent: { name: "OpenCode", version: "2.2.5" },
+  };
+  const runnerSetup = vi
+    .fn()
+    .mockResolvedValue({ probes: [probe], installations: [], registry: null });
+  const probeRunner = vi.fn().mockResolvedValue(probe);
+  render(<RunnerSetup client={{ runnerSetup, probeRunner } as unknown as ApiClient} />);
+  fireEvent.click(screen.getByRole("button", { name: "Set up OpenCode" }));
+  expect(probeRunner).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Runner probe interface")).toHaveValue("acp-v1");
+  expect(screen.getByLabelText("Agent arguments")).toHaveValue('["acp"]');
+  fireEvent.change(screen.getByLabelText("Agent executable path"), {
+    target: { value: "/usr/bin/opencode" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Probe installed agent" }));
+  await waitFor(() =>
+    expect(probeRunner).toHaveBeenCalledWith({
+      interface: "acp-v1",
+      command: "/usr/bin/opencode",
+      args: ["acp"],
+    }),
+  );
+  expect(await screen.findByLabelText("Agent registry identity")).toHaveValue("acp:opencode");
+  expect(screen.getByLabelText("Agent credential type")).toHaveValue("OPENROUTER_API_KEY");
+  expect(screen.getByLabelText("Agent inference hosts")).toHaveValue("openrouter.ai");
+});

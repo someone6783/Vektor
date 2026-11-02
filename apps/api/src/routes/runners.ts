@@ -43,6 +43,7 @@ export function registerRunnerRoutes(
   app.get("/api/runners/discover", async () => {
     const names = new Set([
       "codex",
+      "opencode",
       ...(catalog
         .snapshot()
         ?.agents.flatMap((agent) =>

@@ -358,118 +358,131 @@ async function acpFixture() {
   });
 }
 describe("ACP agents use the same Vektor execution gate", () => {
-  it("completes the explicit probe, official-artifact verification, credential, enable and grant flow before executing ACP", async () => {
-    const command = join(directory, "verified-acp.py");
-    writeFileSync(command, fakeAcp, { mode: 0o700 });
-    const archive = spawnSync("/usr/bin/tar", ["-czf", "-", "-C", directory, "./verified-acp.py"]);
-    expect(archive.status).toBe(0);
-    const entry = registryEntrySchema.parse({
-      id: "verified-acp",
-      name: "Verified fixture ACP",
-      version: "1.0.0",
-      description: "Controlled ACP conformance agent",
-      authors: ["Vektor tests"],
-      license: "MIT",
-      repository: "https://example.com/acp",
-      distribution: {
-        binary: {
-          [process.arch === "arm64" ? "linux-aarch64" : "linux-x86_64"]: {
-            archive: "https://example.com/agent.tar.gz",
-            cmd: "./verified-acp.py",
-            sha256: createHash("sha256").update(archive.stdout).digest("hex"),
+  it.each(["verified-acp", "opencode"])(
+    "verifies, enables and executes %s through the complete setup flow",
+    async (registryId) => {
+      const args = registryId === "opencode" ? ["acp"] : [];
+      const credentialName = registryId === "opencode" ? "OPENROUTER_API_KEY" : "ANTHROPIC_API_KEY";
+      const host = registryId === "opencode" ? "openrouter.ai" : "api.anthropic.com";
+      const command = join(directory, "verified-acp.py");
+      writeFileSync(command, fakeAcp, { mode: 0o700 });
+      const archive = spawnSync("/usr/bin/tar", [
+        "-czf",
+        "-",
+        "-C",
+        directory,
+        "./verified-acp.py",
+      ]);
+      expect(archive.status).toBe(0);
+      const entry = registryEntrySchema.parse({
+        id: registryId,
+        name: registryId === "opencode" ? "OpenCode" : "Verified fixture ACP",
+        version: "1.0.0",
+        description: "Controlled ACP conformance agent",
+        authors: ["Vektor tests"],
+        license: "MIT",
+        repository: "https://example.com/acp",
+        distribution: {
+          binary: {
+            [process.arch === "arm64" ? "linux-aarch64" : "linux-x86_64"]: {
+              archive: "https://example.com/agent.tar.gz",
+              cmd: "./verified-acp.py",
+              args,
+              sha256: createHash("sha256").update(archive.stdout).digest("hex"),
+            },
           },
         },
-      },
-    });
-    setSetting(storage.db, "runner.registry.snapshot", {
-      source: "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
-      checkedAt: new Date().toISOString(),
-      hash: "0".repeat(64),
-      agents: [entry],
-    });
-    const probe = await app.inject({
-      method: "POST",
-      url: "/api/runners/probe",
-      headers,
-      payload: { interface: "acp-v1", command, args: [] },
-    });
-    expect(probe.statusCode).toBe(200);
-    vi.spyOn(BrowserNetwork.prototype, "request").mockResolvedValue({
-      status: 200,
-      headers: {},
-      body: archive.stdout,
-    });
-    const configured = await app.inject({
-      method: "POST",
-      url: "/api/runners/installations",
-      headers,
-      payload: {
-        id: "acp:verified-acp",
+      });
+      setSetting(storage.db, "runner.registry.snapshot", {
+        source: "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+        checkedAt: new Date().toISOString(),
+        hash: "0".repeat(64),
+        agents: [entry],
+      });
+      const probe = await app.inject({
+        method: "POST",
+        url: "/api/runners/probe",
+        headers,
+        payload: { interface: "acp-v1", command, args },
+      });
+      expect(probe.statusCode).toBe(200);
+      vi.spyOn(BrowserNetwork.prototype, "request").mockResolvedValue({
+        status: 200,
+        headers: {},
+        body: archive.stdout,
+      });
+      const configured = await app.inject({
+        method: "POST",
+        url: "/api/runners/installations",
+        headers,
+        payload: {
+          id: `acp:${registryId}`,
+          executableHash: probe.json().executableHash,
+          inferenceHosts: [host],
+          credentialName,
+        },
+      });
+      expect(configured.statusCode, configured.payload).toBe(201);
+      expect(configured.json().installation.enabled).toBe(false);
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: `/api/runners/installations/acp%3A${registryId}/credential`,
+            headers,
+            payload: { key: "verified-acp-test-key" },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await app.inject({
+            method: "PATCH",
+            url: `/api/runners/installations/acp%3A${registryId}`,
+            headers,
+            payload: { enabled: true },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: `/api/profiles/${profileId}/runner-grant`,
+            headers,
+            payload: { runner: `acp:${registryId}`, workspace: true, inference: true },
+          })
+        ).statusCode,
+      ).toBe(200);
+      await app.inject({
+        method: "PATCH",
+        url: `/api/profiles/${profileId}`,
+        headers,
+        payload: { runner: `acp:${registryId}`, model: "agent-default" },
+      });
+      const setup = runnerSetupSchema.parse(
+        (await app.inject({ method: "GET", url: "/api/runners", headers })).json(),
+      );
+      expect(setup.installations.find((agent) => agent.id === `acp:${registryId}`)).toMatchObject({
+        enabled: true,
+        credentialConfigured: true,
+        source: "https://example.com/acp",
         executableHash: probe.json().executableHash,
-        inferenceHosts: ["api.anthropic.com"],
-        credentialName: "ANTHROPIC_API_KEY",
-      },
-    });
-    expect(configured.statusCode, configured.payload).toBe(201);
-    expect(configured.json().installation.enabled).toBe(false);
-    expect(
-      (
-        await app.inject({
-          method: "PUT",
-          url: "/api/runners/installations/acp%3Averified-acp/credential",
-          headers,
-          payload: { key: "verified-acp-test-key" },
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(
-      (
-        await app.inject({
-          method: "PATCH",
-          url: "/api/runners/installations/acp%3Averified-acp",
-          headers,
-          payload: { enabled: true },
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(
-      (
-        await app.inject({
-          method: "PUT",
-          url: `/api/profiles/${profileId}/runner-grant`,
-          headers,
-          payload: { runner: "acp:verified-acp", workspace: true, inference: true },
-        })
-      ).statusCode,
-    ).toBe(200);
-    await app.inject({
-      method: "PATCH",
-      url: `/api/profiles/${profileId}`,
-      headers,
-      payload: { runner: "acp:verified-acp", model: "agent-default" },
-    });
-    const setup = runnerSetupSchema.parse(
-      (await app.inject({ method: "GET", url: "/api/runners", headers })).json(),
-    );
-    expect(setup.installations.find((agent) => agent.id === "acp:verified-acp")).toMatchObject({
-      enabled: true,
-      credentialConfigured: true,
-      source: "https://example.com/acp",
-      executableHash: probe.json().executableHash,
-    });
-    const id = await send("STAGED");
-    const pending = await approval(id);
-    await app.inject({
-      method: "POST",
-      url: `/api/approvals/${pending.id}`,
-      headers,
-      payload: { approved: true },
-    });
-    await finish(id);
-    expect(readFileSync(join(directory, "workspace/staged.txt"), "utf8")).toBe(
-      "Proposed staged content",
-    );
-  });
+      });
+      const id = await send("STAGED");
+      const pending = await approval(id);
+      await app.inject({
+        method: "POST",
+        url: `/api/approvals/${pending.id}`,
+        headers,
+        payload: { approved: true },
+      });
+      await finish(id);
+      expect(readFileSync(join(directory, "workspace/staged.txt"), "utf8")).toBe(
+        "Proposed staged content",
+      );
+    },
+  );
 
   it("streams an ACP task, approves client file writes and records its real interface", async () => {
     await acpFixture();

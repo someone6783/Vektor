@@ -115,6 +115,15 @@ export function RunnerSetup({
   const [hosts, setHosts] = useState("api.openai.com");
   const [credentialName, setCredentialName] = useState("OPENAI_API_KEY");
   const [trust, setTrust] = useState(false);
+  function useOpenCode() {
+    setKind("acp-v1");
+    setArgs('["acp"]');
+    setEntryId("acp:opencode");
+    setHosts("openrouter.ai");
+    setCredentialName("OPENROUTER_API_KEY");
+    setSelectedProbe("");
+    setTrust(false);
+  }
   async function action(work: () => Promise<unknown>) {
     setBusy(true);
     setError("");
@@ -133,10 +142,10 @@ export function RunnerSetup({
     <section className="mt-6 rounded-xl border border-white/10 bg-slate-900 p-4">
       <h2 className="text-sm font-semibold">Agent runner setup</h2>
       <p className="mt-2 text-xs text-slate-400">
-        Native chat uses OpenRouter. Codex and verified ACP agents use separate credentials and an
-        isolated Linux session. Only approved Vektor tools can reach the real workspace. Grant
-        workspace and inference access separately to each profile; Full access with per-action
-        approvals is currently required.
+        Native chat uses OpenRouter. Codex, OpenCode and verified ACP agents use separate
+        credentials and an isolated Linux session. Only approved Vektor tools can reach the real
+        workspace. Grant workspace and inference access separately to each profile; Full access with
+        per-action approvals is currently required.
       </p>
       <div className="mt-3 flex flex-wrap gap-3 text-xs">
         <button disabled={busy} onClick={() => void action(async () => {})}>
@@ -154,6 +163,20 @@ export function RunnerSetup({
           Find installed executables
         </button>
       </div>
+      <div className="mt-3 text-xs">
+        <button disabled={busy} onClick={useOpenCode}>
+          Set up OpenCode
+        </button>
+        {entryId === "acp:opencode" ? (
+          <p className="mt-2 text-slate-400">
+            OpenCode uses ACP with arguments ["acp"]. Refresh the official registry, then probe the
+            matching installed OpenCode binary. The preset uses a separate OpenRouter key and
+            openrouter.ai; change the credential type and inference hosts for another provider.
+            After enabling and granting access, select OpenCode in the profile and use agent-default
+            or an advertised provider/model ID.
+          </p>
+        ) : null}
+      </div>
       {error ? (
         <p role="alert" className="mt-2 text-xs text-rose-300">
           {error}
@@ -163,7 +186,12 @@ export function RunnerSetup({
         <ul className="mt-2 text-xs">
           {discovered.map((entry) => (
             <li key={entry.command}>
-              <button onClick={() => setCommand(entry.command)}>
+              <button
+                onClick={() => {
+                  if (entry.name === "opencode") useOpenCode();
+                  setCommand(entry.command);
+                }}
+              >
                 {entry.name}: {entry.command} · Use path
               </button>
             </li>
@@ -203,7 +231,9 @@ export function RunnerSetup({
             required
             value={command}
             onChange={(event) => setCommand(event.target.value)}
-            placeholder="/usr/local/bin/codex"
+            placeholder={
+              entryId === "acp:opencode" ? "/usr/local/bin/opencode" : "/usr/local/bin/codex"
+            }
           />
         </label>
         {kind === "acp-v1" ? (
@@ -303,6 +333,10 @@ export function RunnerSetup({
               }}
             >
               <option value="codex">Codex · managed app-server</option>
+              {!data.registry?.agents.some((entry) => entry.id === "opencode") &&
+              entryId === "acp:opencode" ? (
+                <option value="acp:opencode">OpenCode · refresh registry to verify</option>
+              ) : null}
               {data.registry?.agents
                 .filter((entry) => entry.id !== "codex-acp")
                 .map((entry) => (
@@ -329,11 +363,16 @@ export function RunnerSetup({
               value={credentialName}
               onChange={(event) => setCredentialName(event.target.value)}
             >
-              {["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AMP_API_KEY", "MISTRAL_API_KEY"].map(
-                (name) => (
-                  <option key={name}>{name}</option>
-                ),
-              )}
+              {[
+                "OPENAI_API_KEY",
+                "OPENROUTER_API_KEY",
+                "OPENCODE_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "AMP_API_KEY",
+                "MISTRAL_API_KEY",
+              ].map((name) => (
+                <option key={name}>{name}</option>
+              ))}
             </select>
           </label>
           {entryId === "codex" ? (
