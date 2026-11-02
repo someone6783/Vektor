@@ -164,6 +164,7 @@ try {
   await page.getByRole("button", { name: "Terminal settings", exact: true }).click();
   await page.getByLabel("Terminal access", { exact: true }).selectOption("basic");
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
   assert.equal(
     (await api("/api/channels")).channels.find((item) => item.id === channel.id).execution
       .terminalMode,
@@ -172,6 +173,7 @@ try {
   await page.getByRole("button", { name: "Browser settings", exact: true }).click();
   await page.getByRole("combobox", { name: /Browser access/ }).selectOption("observe");
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("dialog").waitFor({ state: "hidden" });
   assert.equal(
     (await api("/api/channels")).channels.find((item) => item.id === channel.id).execution.browser
       .mode,
@@ -180,7 +182,10 @@ try {
   checks.push("conversation terminal and browser permissions persist");
   const navigate = async (name) => {
     const back = page.getByRole("button", { name: "Back to chat", exact: true });
-    if (await back.isVisible()) await back.click();
+    if (await back.isVisible()) {
+      await back.click();
+      await page.getByRole("dialog").waitFor({ state: "hidden" });
+    }
     await page.getByLabel("Workspace actions", { exact: true }).click();
     await page.getByRole("button", { name, exact: true }).click();
   };
