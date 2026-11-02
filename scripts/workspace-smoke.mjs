@@ -39,7 +39,12 @@ const provider = {
     );
     if (prompt.includes("Cancel this controlled task") && !slowTurnStarted) {
       slowTurnStarted = true;
-      yield { type: "text.delta", text: "Controlled cancellation.\n\n" };
+      // Leave the credential-redaction holdback populated while making the first
+      // complete paragraph visible before this controlled long-running turn ends.
+      yield {
+        type: "text.delta",
+        text: "Controlled cancellation.\n\n" + "Public fixture output. ".repeat(32),
+      };
       for (let i = 0; i < 100; i++) {
         if (request.signal?.aborted) return;
         await setTimeout(100);
