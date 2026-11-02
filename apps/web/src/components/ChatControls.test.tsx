@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Channel, Profile } from "@vektor/shared";
@@ -17,6 +17,7 @@ vi.mock("./RunTimeline", () => ({ RunTimeline: () => null }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 const channel: Channel = {
   id: "chat",
@@ -236,4 +237,36 @@ it("keeps settled conversations at the bottom, opens their history and offers Re
     "aria-current",
     "page",
   );
+});
+
+it("closes the context overlay when a wide workspace becomes narrow", () => {
+  const media = Object.assign(new EventTarget(), { matches: true });
+  vi.stubGlobal("matchMedia", () => media);
+  render(
+    <ChatView
+      client={new ApiClient("test")}
+      channel={channel}
+      profile={profile}
+      lastRun={null}
+      messages={[]}
+      live={null}
+      loading={false}
+      loadingMore={false}
+      hasMore={false}
+      error={null}
+      onSend={vi.fn()}
+      onStop={vi.fn()}
+      onRetry={vi.fn()}
+      onLoadMore={vi.fn()}
+    />,
+  );
+  const context = screen.getByLabelText("Workspace context");
+  expect(context).not.toHaveAttribute("hidden");
+  act(() => {
+    media.matches = false;
+    media.dispatchEvent(new Event("change"));
+  });
+  expect(context).toHaveAttribute("hidden");
+  fireEvent.click(screen.getByRole("button", { name: "Show context" }));
+  expect(context).not.toHaveAttribute("hidden");
 });

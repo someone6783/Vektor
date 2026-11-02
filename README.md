@@ -239,6 +239,11 @@ editing/history available. The default is `1`. `VEKTOR_SCHEDULER_TICK_MS` defaul
 
 ## Scripts
 
+Run `pnpm test` for the application and script suites. After `pnpm build`,
+`pnpm test:workspace` exercises the production UI against a disposable API: automatic
+sign-in, chat, files, permissions, profiles, schedules, stop/regenerate and mobile navigation.
+It uses local fixtures without paid inference.
+
 Backup/restore, rotating logs, usage reports, crash recovery and safe upgrade/rollback
 commands are documented in [Operations](docs/OPERATIONS.md).
 

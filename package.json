@@ -36,7 +36,8 @@
     "typecheck": "pnpm build:packages && pnpm -r typecheck",
     "test": "pnpm build:packages && node --test scripts/release.test.mjs && python3 scripts/docker-updater.test.py && python3 scripts/install-docker-helper.test.py && python3 scripts/install.test.py && pnpm -r test",
     "clean": "pnpm -r --if-present clean",
-    "desktop:prepare": "node scripts/prepare-desktop.mjs"
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "test:workspace": "node scripts/workspace-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

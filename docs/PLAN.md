@@ -1,6 +1,6 @@
 # Vektor Product Plan
 
-Status: v0.8 · 2026-11-01
+Status: v0.9 · 2026-11-02
 Approval: Scope and Phase 0 accepted on 2026-10-31. Implementation may begin with Phase 1. OCR remains deferred, and v1 uses a single local access token.
 
 ## Product summary
@@ -650,10 +650,6 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 
 ## Explicitly deferred
 
-- Browser use/automation until Phase 9 (planned after v1).
-- Computer use and desktop automation until Phase 10 (planned after v1).
-- Codex harness, hybrid runners, and the ACP agent registry until Phase 11 (late plan, after v1).
-- MCP plugin support until Phase 12 (late plan, after v1).
 - Multi-user accounts and collaboration.
 - Visual workflow builder.
 - Distributed microservices.
@@ -663,7 +659,7 @@ Exit criteria: a user can connect and disconnect an integration, review its gran
 - Marketplace/plugin ecosystem, including automatic discovery, installation, and distribution of third-party plugins.
 - Complex multi-agent planning graphs.
 
-Also deferred: conversation threads and reactions, OCR for scanned PDFs, native providers other than OpenRouter in v1, and a bundled desktop backend. Browser use, computer use, the Codex harness, the ACP agent registry, and explicitly configured MCP servers are now scheduled post-v1 work, rather than permanently excluded capabilities; none changes the first usable release definition below.
+Also deferred: conversation threads and reactions, OCR for scanned PDFs, and native providers other than OpenRouter. Browser use, isolated computer use, the Codex harness, ACP agents, explicitly configured MCP servers, and the optional bundled desktop API are now implemented. Their availability still depends on the configured grants, operating system and isolation capabilities; the first usable release definition below records the original v1 scope.
 
 ## Definition of the first usable release
 

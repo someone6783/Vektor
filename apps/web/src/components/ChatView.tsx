@@ -135,6 +135,13 @@ export function ChatView({
     () =>
       typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1101px)").matches,
   );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const desktop = window.matchMedia("(min-width: 1101px)");
+    const updateContext = () => setContextOpen(desktop.matches);
+    desktop.addEventListener("change", updateContext);
+    return () => desktop.removeEventListener("change", updateContext);
+  }, []);
   const chunkedStreaming = useChunkedStreaming();
   const liveText = useStreamedText(live, chunkedStreaming);
   const liveLength = live?.tools.length ?? 0;

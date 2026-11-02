@@ -28,9 +28,12 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm --filter @vektor/api exec playwright install --with-deps chromium
-      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool ffmpeg x11-utils bubblewrap util-linux
+      - run: sudo apt-get update && sudo apt-get install -y xvfb xdotool ffmpeg x11-utils bubblewrap util-linux apparmor
+      - name: Verify isolated execution support on the CI host
+        run: node scripts/ci-isolation.mjs
       - run: pnpm test
       - run: pnpm build
+      - run: node scripts/workspace-smoke.mjs
       - run: pnpm release:pack
       - run: pnpm release:verify
       - uses: actions/upload-artifact@v7
