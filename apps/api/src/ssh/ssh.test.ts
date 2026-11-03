@@ -55,20 +55,14 @@ describe("ssh connection storage and routes", () => {
     await h.api(`/api/ssh/${created.id}/credentials`, { password }, "PUT");
     const view = JSON.stringify(await h.api("/api/ssh"));
     expect(view).not.toContain(password);
-    expect(
-      String(getSetting(h.storage.db, `ssh.secrets.${created.id}`)),
-    ).not.toContain(password);
+    expect(String(getSetting(h.storage.db, `ssh.secrets.${created.id}`))).not.toContain(password);
     const encryptedRecord = getSetting(h.storage.db, `ssh.secrets.${created.id}`);
     expect(typeof encryptedRecord).toBe("string");
     const service = new SshService(h.storage.db, h.storage.secretsKey);
     expect(service.secrets()).toContain(password);
 
     const updated = (
-      await h.api(
-        `/api/ssh/${created.id}`,
-        { name: "Build server 2", port: 2200 },
-        "PUT",
-      )
+      await h.api(`/api/ssh/${created.id}`, { name: "Build server 2", port: 2200 }, "PUT")
     ).connection;
     expect(updated).toMatchObject({ name: "Build server 2", port: 2200, hasPassword: true });
   });
@@ -117,9 +111,7 @@ describe("ssh connection storage and routes", () => {
     const created = (await h.api("/api/ssh", keyConnection)).connection;
     await h.api(`/api/ssh/${created.id}/credentials`, { passphrase: "pass-phrase-0001" }, "PUT");
     await h.api(`/api/ssh/${created.id}`, undefined, "DELETE");
-    expect(
-      getSetting(h.storage.db, `ssh.secrets.${created.id}`),
-    ).toBeUndefined();
+    expect(getSetting(h.storage.db, `ssh.secrets.${created.id}`)).toBeUndefined();
     const list = await h.api("/api/ssh");
     expect(list.connections).toHaveLength(0);
   });
@@ -130,7 +122,11 @@ describe("remote command preparation", () => {
     expect(shellQuote("safe/name-1.0")).toBe("safe/name-1.0");
     expect(shellQuote("a b; rm")).toBe("'a b; rm'");
     expect(shellQuote("it's")).toBe(`'it'\\''s'`);
-    const input = terminalInputSchema.parse({ command: "cat", args: ["notes file.txt"], cwd: "notes" });
+    const input = terminalInputSchema.parse({
+      command: "cat",
+      args: ["notes file.txt"],
+      cwd: "notes",
+    });
     expect(buildRemoteCommand(input, "notes")).toBe("cd notes && cat 'notes file.txt'");
     expect(expandHomeDir("~/ssh/id_ed25519").startsWith("/")).toBe(true);
   });

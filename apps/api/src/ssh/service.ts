@@ -38,9 +38,7 @@ export class SshService {
   }
 
   list(): SshConnection[] {
-    return z
-      .array(sshConnectionSchema)
-      .parse(getSetting(this.db, CONNECTIONS_KEY) ?? []);
+    return z.array(sshConnectionSchema).parse(getSetting(this.db, CONNECTIONS_KEY) ?? []);
   }
 
   /** Decrypted secret values, only used to redact logging and tool output. */

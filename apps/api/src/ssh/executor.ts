@@ -140,7 +140,8 @@ export class SshExecutor {
         reason = "timeout";
         stream?.close();
         connection?.end();
-      }, spec.timeoutMs);      const onAbort = () => {
+      }, spec.timeoutMs);
+      const onAbort = () => {
         reason = "cancelled";
         stream?.close();
         connection?.end();

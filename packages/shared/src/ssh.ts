@@ -64,10 +64,9 @@ export const sshSecretSchema = z
     passphrase: z.string().max(16000).nullable().optional(),
   })
   .strict()
-  .refine(
-    (value) => value.password !== undefined || value.passphrase !== undefined,
-    { message: "Provide a password or a key passphrase." },
-  );
+  .refine((value) => value.password !== undefined || value.passphrase !== undefined, {
+    message: "Provide a password or a key passphrase.",
+  });
 
 export type SshSecretInput = z.infer<typeof sshSecretSchema>;
 

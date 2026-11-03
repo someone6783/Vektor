@@ -1466,8 +1466,7 @@ export class RunManager {
       const localCommand = sshExecutor
         ? null
         : await terminal.prepare(active.profile.terminalMode, parsed);
-      const remoteCommand =
-        sshExecutor?.prepare(active.profile.terminalMode, parsed) ?? null;
+      const remoteCommand = sshExecutor?.prepare(active.profile.terminalMode, parsed) ?? null;
       updateToolCall(db, record.id, "running");
       appendAudit(db, "tool.started", active.run.id, {
         toolCallId: record.id,
@@ -1500,8 +1499,7 @@ export class RunManager {
       if (active.finished) return "Command cancelled.";
       const output = redact(error instanceof Error ? error.message : "Tool execution failed.");
       const denied =
-        (error instanceof RuntimeError || error instanceof SshError) &&
-        error.statusCode === 403;
+        (error instanceof RuntimeError || error instanceof SshError) && error.statusCode === 403;
       updateToolCall(db, record.id, denied ? "denied" : "failed", output);
       this.emit(active, { type: "tool.output", toolCallId: record.id, output, isError: true });
       appendAudit(db, denied ? "tool.denied" : "tool.failed", active.run.id, {

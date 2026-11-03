@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  type SshAuthType,
-  type SshConnection,
-  type SshConnectionInput,
-} from "@vektor/shared";
+import { type SshAuthType, type SshConnection, type SshConnectionInput } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 
 const field = "rounded border border-white/15 bg-slate-950 p-2 text-sm";
@@ -151,9 +147,7 @@ export function SshSettings({ client }: { client: ApiClient }) {
               <select
                 className={`${field} mt-1 block w-full`}
                 value={draft.authType}
-                onChange={(e) =>
-                  setDraft({ ...draft, authType: e.target.value as SshAuthType })
-                }
+                onChange={(e) => setDraft({ ...draft, authType: e.target.value as SshAuthType })}
               >
                 <option value="key">SSH key on this computer</option>
                 <option value="password">Password</option>
@@ -195,8 +189,8 @@ export function SshSettings({ client }: { client: ApiClient }) {
                 onChange={(e) => setPassword(e.target.value)}
               />
               <span className="text-xs text-slate-400">
-                Stored with AES-256-GCM encryption and never returned by the API. Typing a
-                different value replaces the stored password.
+                Stored with AES-256-GCM encryption and never returned by the API. Typing a different
+                value replaces the stored password.
               </span>
             </label>
           )}
@@ -286,7 +280,11 @@ function ConnectionCard({
           ? `SSH key · ${connection.keyPath ?? "no key path"}${connection.hasPassphrase ? " · passphrase stored" : ""}`
           : `Password authentication · ${connection.hasPassword ? "password stored" : "no password stored"}`}
       </p>
-      {test ? <p className={`text-xs ${test.ok ? "text-emerald-300" : "text-rose-300"}`}>{test.message}</p> : null}
+      {test ? (
+        <p className={`text-xs ${test.ok ? "text-emerald-300" : "text-rose-300"}`}>
+          {test.message}
+        </p>
+      ) : null}
       <details className="text-xs">
         <summary className="cursor-pointer">Replace stored password or passphrase</summary>
         <div className="mt-2 space-y-2">
