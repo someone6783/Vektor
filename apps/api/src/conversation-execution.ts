@@ -12,9 +12,10 @@ export function conversationProfile(
   profile: ProfileRecord,
 ): ProfileRecord {
   const overrides = conversationExecution(db, channelId);
+  const { sshConnectionId: _sshConnectionId, ...profileOverrides } = overrides;
   return {
     ...profile,
-    ...overrides,
+    ...profileOverrides,
     tools:
       overrides.terminalMode === undefined
         ? profile.tools

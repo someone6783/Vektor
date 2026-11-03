@@ -705,6 +705,31 @@ meter {
   font-size: 11px;
   padding-inline: 8px;
 }
+.git-file-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  padding-block: 4px;
+}
+.git-file-list li {
+  padding-block: 2px;
+  padding-inline: 8px;
+}
+.git-file-list li:hover {
+  background: color-mix(in srgb, var(--ui-accent) 8%, transparent);
+}
+.git-status-code {
+  flex: none;
+  min-width: 24px;
+  text-align: center;
+  color: var(--ui-muted);
+  background: color-mix(in srgb, var(--ui-border) 40%, transparent);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
 .sidebar-toggle {
   display: none;
 }
@@ -1531,4 +1556,86 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-tabs-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.workspace-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  gap: 3px;
+  border-bottom: 1px solid var(--ui-border);
+}
+.workspace-tab {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px 6px 0 0;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+.workspace-tab[data-active="true"] {
+  color: var(--ui-accent);
+  background: var(--ui-surface);
+  border-bottom-color: var(--ui-accent);
+}
+.workspace-tab [role="tab"] {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 7px 9px;
+}
+.workspace-tab > button:last-child:not([role="tab"]) {
+  padding: 4px;
+}
+.file-viewer {
+  min-width: 0;
+}
+.file-viewer-path {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.file-viewer-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-block: 12px;
+}
+.file-viewer-toolbar button {
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.file-viewer-toolbar [aria-pressed="true"] {
+  color: var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+.file-viewer-content {
+  max-height: 65vh;
+  overflow: auto;
+  margin-top: 12px;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.7;
+  tab-size: 4;
+  background: var(--ui-bg);
+}
+.diff-added {
+  color: #86efac;
+  background: #14532d40;
+}
+.diff-removed {
+  color: #fda4af;
+  background: #88133740;
+}
+.diff-hunk {
+  color: #7dd3fc;
 }

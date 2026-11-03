@@ -71,6 +71,8 @@ export const channelKindSchema = z.enum(["channel", "dm"]);
 export const conversationExecutionSchema = z
   .object({
     terminalMode: terminalModeSchema.optional(),
+    /** Send terminal commands to a stored SSH connection instead of this machine. */
+    sshConnectionId: z.string().uuid().nullable().optional(),
     browser: browserPermissionsSchema.optional(),
     computer: computerPermissionsSchema.optional(),
   })

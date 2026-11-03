@@ -1,33 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   browserPermissionsSchema,
   type Channel,
   type ConversationExecution,
   type Profile,
+  type SshConnection,
   type TerminalMode,
   type BrowserPermissions,
 } from "@vektor/shared";
 import { Modal } from "./Modal";
+import type { ApiClient } from "../lib/api";
 
 export function ConversationSettings({
   channel,
   profile,
   section,
+  client,
   onSave,
   onClose,
 }: {
   channel: Channel;
   profile: Profile;
   section: "terminal" | "browser";
+  client?: ApiClient;
   onSave: (execution: ConversationExecution) => Promise<void>;
   onClose: () => void;
 }) {
   const [terminal, setTerminal] = useState(profile.terminalMode);
+  const [sshConnections, setSshConnections] = useState<SshConnection[]>([]);
+  const [sshTarget, setSshTarget] = useState<string>(channel.execution?.sshConnectionId ?? "");
   const [browser, setBrowser] = useState(browserPermissionsSchema.parse(profile.browser ?? {}));
   const [origins, setOrigins] = useState(browser.allowedOrigins.join("\n"));
   const [localOrigins, setLocalOrigins] = useState(browser.localOrigins.join("\n"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (section !== "terminal" || !client) return;
+    void client
+      .sshList()
+      .then(setSshConnections)
+      .catch(() => setSshConnections([]));
+  }, [client, section]);
   return (
     <Modal
       title={`${section === "terminal" ? "Terminal" : "Browser"} · ${channel.name}`}
@@ -42,7 +55,7 @@ export function ConversationSettings({
           try {
             const execution =
               section === "terminal"
-                ? { terminalMode: terminal }
+                ? { terminalMode: terminal, sshConnectionId: sshTarget || null }
                 : {
                     browser: browserPermissionsSchema.parse({
                       ...browser,
@@ -81,6 +94,30 @@ export function ConversationSettings({
                 <option value="full-unrestricted">Full Unrestricted · no approvals</option>
               </select>
             </label>
+            {terminal !== "no-terminal" ? (
+              <label>
+                Run commands on
+                <select
+                  aria-label="SSH execution target"
+                  value={typeof sshTarget === "string" ? sshTarget : ""}
+                  onChange={(event) => setSshTarget(event.target.value)}
+                >
+                  <option value="">This computer</option>
+                  {sshConnections.map((connection) => (
+                    <option key={connection.id} value={connection.id}>
+                      {connection.name} · {connection.username}@{connection.host}
+                    </option>
+                  ))}
+                </select>
+                {sshTarget ? (
+                  <span className="text-xs">
+                    Commands run over SSH on the selected machine and require its approval mode
+                    above. Only basic paths relative to the remote login directory are allowed in
+                    Workspace commands mode.
+                  </span>
+                ) : null}
+              </label>
+            ) : null}
           </>
         ) : (
           <>

@@ -14,3 +14,5 @@ export * from "./computer.js";
 export * from "./reasoning.js";
 export * from "./runners.js";
 export * from "./mcp.js";
+export * from "./git.js";
+export * from "./ssh.js";

@@ -14,6 +14,7 @@ import type {
 } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { ContextComposer } from "./ContextComposer";
+import { WorkspaceTabs } from "./WorkspaceTabs";
 import { MessageAttachments } from "./Attachments";
 import { RunTimeline } from "./RunTimeline";
 import { Icon } from "./Icon";
@@ -135,6 +136,16 @@ export function ChatView({
     () =>
       typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1101px)").matches,
   );
+  const [contextTab, setContextTab] = useState<string>("context");
+  const toggleTab = (tab: "context" | "git") => {
+    if (!contextOpen) {
+      setContextOpen(true);
+      setContextTab(tab);
+      return;
+    }
+    if (contextTab !== tab) setContextTab(tab);
+    else setContextOpen(false);
+  };
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const desktop = window.matchMedia("(min-width: 1101px)");
@@ -212,13 +223,24 @@ export function ChatView({
         <button
           type="button"
           className="header-control"
-          aria-label={contextOpen ? "Hide context" : "Show context"}
+          aria-label="Show context"
           aria-controls="workspace-context"
-          aria-expanded={contextOpen}
-          onClick={() => setContextOpen((open) => !open)}
+          aria-expanded={contextOpen && contextTab === "context"}
+          onClick={() => toggleTab("context")}
         >
           <Icon name="panel" />
           Context
+        </button>
+        <button
+          type="button"
+          className="header-control"
+          aria-label="Show git changes"
+          aria-controls="workspace-context"
+          aria-expanded={contextOpen && contextTab === "git"}
+          onClick={() => toggleTab("git")}
+        >
+          <Icon name="branch" />
+          Git
         </button>
       </header>
       <div className="chat-layout">
@@ -409,20 +431,21 @@ export function ChatView({
           aria-label="Workspace context"
           hidden={!contextOpen}
         >
-          <div className="context-heading">
-            <h2>Workspace context</h2>
-            <button type="button" aria-label="Close context" onClick={() => setContextOpen(false)}>
-              <Icon name="close" />
-            </button>
-          </div>
-          <RunTimeline
-            key={channel.id}
+          <WorkspaceTabs
             client={client}
-            channelId={channel.id}
-            version={messages.length}
-            onRetry={onRetry}
-          />
-          <div ref={setContextTarget} />
+            activeTab={contextTab}
+            onSelect={setContextTab}
+            onClose={() => setContextOpen(false)}
+          >
+            <RunTimeline
+              key={channel.id}
+              client={client}
+              channelId={channel.id}
+              version={messages.length}
+              onRetry={onRetry}
+            />
+            <div ref={setContextTarget} />
+          </WorkspaceTabs>
         </aside>
       </div>
     </section>
