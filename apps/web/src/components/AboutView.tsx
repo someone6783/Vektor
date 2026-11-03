@@ -3,6 +3,7 @@ import { APP_VERSION, type UpdateCheck, type UpdatePreferences } from "@vektor/s
 import type { ApiClient } from "../lib/api";
 import { InstallUpdates } from "./InstallUpdates";
 import { ReleaseLink } from "./ReleaseLink";
+import { Logo } from "./Logo";
 
 const errors = {
   token_required: "A read-only GitHub token is required for this private repository.",
@@ -45,7 +46,10 @@ export function AboutView({ client }: { client: ApiClient }) {
   };
   return (
     <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
-      <h2 className="text-sm font-medium text-slate-200">About Vektor</h2>
+      <div className="flex items-center gap-2.5">
+        <Logo />
+        <h2 className="text-sm font-medium text-slate-200">About Vektor</h2>
+      </div>
       <p className="mt-2 text-xs text-slate-400">
         App v{APP_VERSION}
         {info ? ` · Backend v${info.currentVersion}` : ""}

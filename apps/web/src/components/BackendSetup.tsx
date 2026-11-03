@@ -7,6 +7,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { backendUrl, normalizeBackend } from "../lib/transport";
 import { saveDesktopConnection, type DesktopConnection } from "../lib/desktop";
+import { Logo } from "./Logo";
 
 export function BackendSetup({
   onConnected,
@@ -54,7 +55,10 @@ export function BackendSetup({
   return (
     <main className="management-page grid min-h-screen place-items-center overflow-y-auto bg-slate-950 p-6 text-slate-100">
       <section className="w-full max-w-xl rounded-2xl border border-white/10 bg-slate-900/60 p-6">
-        <div className="mb-5 text-sm font-semibold text-accent-300">Vektor</div>
+        <div className="mb-5 flex items-center gap-2.5 text-sm font-semibold text-accent-300">
+          <Logo />
+          <span>Vektor</span>
+        </div>
         <h1 className="text-2xl font-semibold">Set up your workspace</h1>
         <p className="mt-2 text-sm text-slate-400">
           Choose where your agents run. Sign-in is configured automatically.

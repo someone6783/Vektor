@@ -6,6 +6,7 @@ import { ChatView } from "./components/ChatView";
 import { Sidebar } from "./components/Sidebar";
 import { OverflowMenu } from "./components/OverflowMenu";
 import { ThemePicker } from "./components/ThemePicker";
+import { Logo } from "./components/Logo";
 import { ApiClient } from "./lib/api";
 import { applyTheme, readTheme } from "./lib/theme";
 import "./index.css";
@@ -189,9 +190,7 @@ function DesignPreview() {
             ☰
           </button>
           <div className="flex items-center gap-2.5">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent-400 text-sm font-bold text-slate-950">
-              V
-            </div>
+            <Logo />
             <strong className="text-sm">Vektor</strong>
           </div>
           <span className="text-xs text-slate-400">Personal workspace</span>

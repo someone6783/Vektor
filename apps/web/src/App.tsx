@@ -20,6 +20,7 @@ import { Sidebar } from "./components/Sidebar";
 import { RuntimeControls } from "./components/RuntimeControls";
 import { UpdateIndicator } from "./components/UpdateIndicator";
 import { Icon } from "./components/Icon";
+import { Logo } from "./components/Logo";
 import { ThemePicker } from "./components/ThemePicker";
 import { AuditView } from "./components/AuditView";
 import { SchedulesView } from "./components/SchedulesView";
@@ -83,9 +84,7 @@ function TokenGate({
           <ThemePicker />
         </div>
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-accent-400 text-lg font-bold text-slate-950">
-            V
-          </div>
+          <Logo className="h-10 w-10" />
           <div>
             <div className="text-sm font-semibold tracking-wide">Vektor</div>
             <div className="text-xs text-slate-500">Connect to your local workspace</div>
@@ -937,9 +936,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           </button>
         ) : null}
         <div className="flex items-center gap-2.5">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent-400 text-sm font-bold text-slate-950">
-            V
-          </div>
+          <Logo />
           <span className="text-sm font-semibold tracking-wide">Vektor</span>
         </div>
 
