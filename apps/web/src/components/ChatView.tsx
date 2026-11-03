@@ -104,7 +104,12 @@ function MessageRow({
         ) : null}
         {message.role === "assistant" && message.runId ? (
           <div className="mt-3 flex gap-2">
-            <button type="button" disabled={retryDisabled} onClick={() => onRetry(message.runId!)}>
+            <button
+              type="button"
+              className="message-action"
+              disabled={retryDisabled}
+              onClick={() => onRetry(message.runId!)}
+            >
               <Icon name="refresh" /> Regenerate
             </button>
           </div>

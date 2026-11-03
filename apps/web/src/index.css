@@ -1142,8 +1142,9 @@ body {
   }
 }
 
-/* Header controls share the same outline and fit narrow windows. */
-.header-control {
+/* Header and message controls share the same compact outline. */
+.header-control,
+.message-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1156,6 +1157,12 @@ body {
   background: var(--ui-surface);
   color: var(--ui-text);
   font-size: 12px;
+}
+.message-action:hover:not(:disabled) {
+  border-color: var(--ui-accent);
+}
+.message-action:disabled {
+  opacity: 0.4;
 }
 .conversation-model {
   min-width: 0;
