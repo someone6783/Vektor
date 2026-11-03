@@ -1639,3 +1639,206 @@ body {
 .diff-hunk {
   color: #7dd3fc;
 }
+
+/* Use the same form geometry and palette on every page, including native selects. */
+select {
+  appearance: none;
+  color-scheme: dark;
+  border: 1px solid var(--ui-control-border);
+  border-radius: 7px;
+  min-height: 36px;
+  padding: 7px 32px 7px 10px;
+  background-color: var(--ui-canvas);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23adbed5' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--ui-text);
+  font: inherit;
+  max-width: 100%;
+}
+select option {
+  background: var(--ui-surface);
+  color: var(--ui-text);
+}
+.management-page
+  :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea) {
+  min-height: 36px;
+  border: 1px solid var(--ui-control-border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: var(--ui-canvas);
+  color: var(--ui-text);
+  color-scheme: dark;
+}
+.management-page button:not([style*="var(--profile-"]) {
+  border: 1px solid var(--ui-control-border);
+  border-radius: 7px;
+  padding: 6px 10px;
+  min-height: 32px;
+}
+.management-page button:hover:not(:disabled) {
+  background-color: var(--ui-raised);
+}
+.management-page :is(button, input, textarea, select):disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.runner-setup {
+  font-size: 13px;
+}
+.runner-setup h3 {
+  font-weight: 600;
+}
+.runner-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-top: 16px;
+  border-top: 1px solid var(--ui-border);
+}
+.runner-form > label:not(:has(input[type="checkbox"])) {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+.runner-form > label :is(input:not([type="checkbox"]), select) {
+  width: 100%;
+  margin: 0;
+}
+.runner-form > :is(p, h3, button, label:has(input[type="checkbox"])) {
+  grid-column: 1 / -1;
+}
+.runner-grant,
+.runner-registry li,
+.runner-discovery li {
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ui-canvas);
+}
+.runner-grant > span {
+  font-weight: 600;
+}
+.runner-grant label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.runner-registry,
+.runner-discovery {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+.runner-registry li p + p {
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.mcp-profile-field {
+  max-width: 320px;
+}
+.mcp-settings :is(input, select, textarea) {
+  font-size: 13px;
+}
+.mcp-settings textarea {
+  min-height: 72px;
+}
+.runner-picker {
+  max-width: 230px;
+  font-size: 12px;
+}
+.runner-picker .choice-trigger {
+  border-color: var(--ui-control-border);
+}
+.mcp-toolbar-target {
+  display: flex;
+}
+.mcp-context-menu > summary {
+  list-style: none;
+  white-space: nowrap;
+}
+.mcp-context-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.mcp-context-panel {
+  z-index: 75;
+  width: 400px;
+  padding: 16px;
+  border: 1px solid var(--ui-control-border);
+  border-radius: 9px;
+  background: var(--ui-surface);
+  box-shadow: 0 12px 32px #0006;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.mcp-context-panel button {
+  border: 1px solid var(--ui-control-border);
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.mcp-context-panel > div {
+  border-top: 1px solid var(--ui-border);
+  padding-top: 10px;
+}
+@media (max-width: 640px) {
+  .runner-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .runner-actions > button {
+    flex: 1 1 140px;
+  }
+  .runner-grant > select {
+    width: 100%;
+  }
+  .runner-picker {
+    max-width: 190px;
+  }
+}
+
+.native-runner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 10px;
+}
+.native-runner-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  background: var(--ui-canvas);
+  font-size: 12px;
+}
+.native-runner-card h3 {
+  font-size: 14px;
+}
+.native-runner-card code {
+  font-size: 11px;
+}
+.runner-advanced {
+  margin-top: 20px;
+  border-top: 1px solid var(--ui-border);
+  padding-top: 12px;
+}
+.runner-advanced > summary,
+.runner-diagnostics > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ui-muted);
+  list-style: none;
+}
+.runner-advanced > summary::before,
+.runner-diagnostics > summary::before {
+  content: "+";
+}
+.runner-advanced[open] > summary::before,
+.runner-diagnostics[open] > summary::before {
+  content: "−";
+}
+@media (max-width: 640px) {
+  .native-runner-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

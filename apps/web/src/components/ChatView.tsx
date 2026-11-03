@@ -1,3 +1,4 @@
+import { ChoicePicker } from "./ChoicePicker";
 import { ModelPicker } from "./ModelPicker";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChunkedStreaming } from "../lib/streamingPreference";
@@ -131,6 +132,22 @@ export function ChatView({
     setRunnerError("");
   }, [channel?.id, profile?.id]);
   const effectiveRunner = runnerOverride ?? profile?.runner ?? "native";
+  const [mcpToolbarTarget, setMcpToolbarTarget] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    void client
+      .runnerSetup()
+      .then((setup) => {
+        if (active) setAvailableRunners(setup.installations);
+      })
+      .catch((error) => {
+        if (active)
+          setRunnerError(error instanceof Error ? error.message : "Runner setup unavailable.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, profile?.id]);
   const [contextTarget, setContextTarget] = useState<HTMLDivElement | null>(null);
   const [contextOpen, setContextOpen] = useState(
     () =>
@@ -210,6 +227,28 @@ export function ChatView({
           <Icon name="terminal" />
           <span className="header-control-label">Terminal</span>
         </button>
+        <ChoicePicker
+          label="Runner for this message"
+          className="runner-picker"
+          prefix={<Icon name="terminal" />}
+          value={runnerOverride ?? "profile"}
+          options={[
+            { value: "profile", label: `Profile runner · ${profile.runner ?? "native"}` },
+            { value: "native", label: "Native · this message" },
+            { value: "codex", label: "Codex · this message" },
+            ...availableRunners
+              .filter((entry) => entry.id.startsWith("acp:"))
+              .map((entry) => ({
+                value: entry.id,
+                label: `${entry.name} · ${entry.enabled ? "enabled" : "disabled"}`,
+              })),
+          ]}
+          onChange={(value) => {
+            setRunnerOverride(value === "profile" ? undefined : (value as RunnerId));
+            setResume(false);
+          }}
+        />
+        <div className="mcp-toolbar-target" ref={setMcpToolbarTarget} />
         <button
           type="button"
           className="header-control"
@@ -326,40 +365,6 @@ export function ChatView({
             <ContextComposer
               modelControls={
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <select
-                    aria-label="Runner for this message"
-                    className="rounded border border-white/10 bg-slate-950 p-1"
-                    value={runnerOverride ?? "profile"}
-                    onFocus={() => {
-                      void client
-                        .runnerSetup()
-                        .then((setup) => setAvailableRunners(setup.installations))
-                        .catch((error) =>
-                          setRunnerError(
-                            error instanceof Error ? error.message : "Runner setup unavailable.",
-                          ),
-                        );
-                    }}
-                    onChange={(event) => {
-                      setRunnerOverride(
-                        event.target.value === "profile"
-                          ? undefined
-                          : (event.target.value as RunnerId),
-                      );
-                      setResume(false);
-                    }}
-                  >
-                    <option value="profile">Profile runner · {profile.runner ?? "native"}</option>
-                    <option value="native">Native · this message</option>
-                    <option value="codex">Codex · this message</option>
-                    {availableRunners
-                      .filter((entry) => entry.id.startsWith("acp:"))
-                      .map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.name} · {entry.enabled ? "enabled" : "disabled"}
-                        </option>
-                      ))}
-                  </select>
                   {effectiveRunner === "native" ? (
                     <ModelPicker
                       client={client}
@@ -396,6 +401,7 @@ export function ChatView({
                   {runnerError ? <span role="alert">{runnerError}</span> : null}
                 </div>
               }
+              mcpToolbarTarget={mcpToolbarTarget}
               contextTarget={contextTarget}
               activeRunCount={activeRunCount}
               key={channel.id}

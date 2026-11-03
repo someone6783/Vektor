@@ -445,6 +445,12 @@ export class ApiClient {
     };
   }
 
+  async connectRunner(runner: "codex" | "opencode") {
+    await this.request("/api/runners/connect", {
+      method: "POST",
+      body: JSON.stringify({ runner }),
+    });
+  }
   async discoverRunners() {
     return this.request<{ executables: Array<{ name: string; command: string }> }>(
       "/api/runners/discover",

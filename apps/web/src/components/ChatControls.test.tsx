@@ -51,6 +51,12 @@ it("offers every available model and shortcuts to terminal and browser settings"
     { id: "two", name: "Two" },
     { id: "remote", name: "Remote model" },
   ]);
+  vi.spyOn(client, "runnerSetup").mockResolvedValue({
+    installations: [],
+    probes: [],
+    grants: [],
+    registry: null,
+  });
   const change = vi.fn();
   const settings = vi.fn();
   render(
@@ -77,6 +83,14 @@ it("offers every available model and shortcuts to terminal and browser settings"
       onExecutionSettings={settings}
     />,
   );
+  const runner = screen.getByLabelText("Runner for this message");
+  expect(runner.closest("header")).toContainElement(screen.getByLabelText("Terminal settings"));
+  expect(screen.getByTestId("composer-controls")).not.toContainElement(runner);
+  fireEvent.click(runner);
+  fireEvent.click(screen.getByRole("option", { name: "Codex · this message" }));
+  expect(screen.getByLabelText("External runner model")).toBeInTheDocument();
+  fireEvent.click(runner);
+  fireEvent.click(screen.getByRole("option", { name: "Profile runner · native" }));
   const picker = screen.getByLabelText("Conversation model").closest("details")!;
   expect(screen.getByTestId("composer-controls")).toContainElement(picker);
   picker.open = true;
@@ -153,9 +167,7 @@ it.each(["basic", "full-unrestricted"])(
     expect(screen.getByRole("dialog", { name: "Terminal · General" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Terminal access"), { target: { value: terminalMode } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(save).toHaveBeenCalledWith({ terminalMode, sshConnectionId: null }),
-    );
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ terminalMode, sshConnectionId: null }));
     expect(profile.terminalMode).toBe("no-terminal");
     await waitFor(() => expect(close).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));

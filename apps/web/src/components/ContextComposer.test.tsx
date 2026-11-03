@@ -97,9 +97,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setup(activeRunCount = 0, busy = false) {
+function setup(activeRunCount = 0, busy = false, mcpToolbarTarget: HTMLElement | null = null) {
   return render(
     <ContextComposer
+      mcpToolbarTarget={mcpToolbarTarget}
       activeRunCount={activeRunCount}
       client={client}
       channel={channel}
@@ -368,7 +369,12 @@ it("previews prepared MCP context and sends only explicitly selected items", asy
     preview = vi
       .spyOn(client, "mcpContext")
       .mockResolvedValue({ text: "Explicit untrusted MCP text" });
-  setup();
+  const toolbar = document.createElement("div");
+  document.body.append(toolbar);
+  setup(0, false, toolbar);
+  const trigger = screen.getByLabelText("MCP context");
+  expect(toolbar).toContainElement(trigger);
+  fireEvent.click(trigger);
   expect(load).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Load prepared MCP context" }));
   const selection = await screen.findByLabelText(/resource: fixture:\/\/notes/);
@@ -386,4 +392,7 @@ it("previews prepared MCP context and sends only explicitly selected items", asy
       source.id,
     ]),
   );
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
+  toolbar.remove();
 });

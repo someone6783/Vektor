@@ -48,6 +48,7 @@ export const runnerInstallationSchema = z.object({
   inferenceHosts: z.array(z.string()),
   credentialName: z.string(),
   credentialConfigured: z.boolean(),
+  authKind: z.enum(["separate-api-key", "native-account"]).optional(),
   compatible: z.boolean().optional(),
   compatibilityReason: z.string().optional(),
   health: z

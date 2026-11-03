@@ -110,7 +110,7 @@ export function BrowserPanel({
   return (
     <section
       aria-label="Managed browser"
-      className="my-3 space-y-2 rounded-lg border border-sky-400/20 p-3"
+      className="management-page my-3 space-y-2 rounded-lg border border-sky-400/20 p-3"
     >
       <p className="font-medium text-sky-300">
         Managed browser ·{" "}

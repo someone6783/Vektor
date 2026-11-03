@@ -802,7 +802,7 @@ export function SettingsView({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+    <div className="settings-page management-page min-h-0 flex-1 overflow-y-auto px-6 py-6">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-400">
@@ -987,11 +987,11 @@ export function SettingsView({
 
         <UsageView client={client} />
         <BrowserProfileCard client={client} />
-        <HealthCard />
         <RunnerSetup client={client} profiles={profiles} onInstallations={setRunners} />
         <McpSettings client={client} profiles={profiles} />
         <SshSettings client={client} />
         <AboutView client={client} />
+        <HealthCard />
       </div>
     </div>
   );

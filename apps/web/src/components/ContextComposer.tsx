@@ -1,3 +1,4 @@
+import { useAnchoredMenu } from "../lib/useAnchoredMenu";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { OverflowMenu } from "./OverflowMenu";
@@ -15,6 +16,7 @@ import { AttachmentPreview } from "./Attachments";
 
 interface Props {
   modelControls?: ReactNode;
+  mcpToolbarTarget?: HTMLElement | null;
   contextTarget?: HTMLElement | null;
   activeRunCount?: number;
   executionStopped?: boolean;
@@ -37,6 +39,7 @@ interface Props {
 
 export function ContextComposer({
   modelControls,
+  mcpToolbarTarget = null,
   contextTarget = null,
   activeRunCount = 0,
   executionStopped = false,
@@ -242,6 +245,81 @@ export function ContextComposer({
     </ul>
   ) : null;
 
+  const mcpMenu = (
+    <McpContextMenu count={mcpSelected.length}>
+      <p className="my-2">
+        Prepare and preview resources or prompts in Settings → MCP plugins, then explicitly select
+        them for this message.
+      </p>
+      <button
+        type="button"
+        className="rounded border border-white/10 px-2 py-1"
+        onClick={() => {
+          void client
+            .mcpContexts(profile.id)
+            .then(setMcpContexts)
+            .catch((cause) => setError(cause.message));
+        }}
+      >
+        Load prepared MCP context
+      </button>
+      {mcpContexts.map((item) => (
+        <div key={item.id} className="my-2 flex flex-wrap items-center gap-2">
+          <label>
+            <input
+              type="checkbox"
+              checked={mcpSelected.includes(item.id)}
+              disabled={!mcpSelected.includes(item.id) && mcpSelected.length >= 5}
+              onChange={(e) =>
+                setMcpSelected(
+                  e.target.checked
+                    ? [...mcpSelected, item.id]
+                    : mcpSelected.filter((id) => id !== item.id),
+                )
+              }
+            />{" "}
+            {item.kind}: {item.name} · {Math.ceil(item.size / 1024)} KB
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              void client
+                .mcpContext(item.id)
+                .then((r) => setMcpPreview(r.text))
+                .catch((cause) => setError(cause.message));
+            }}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void client
+                .removeMcpContext(item.id)
+                .then(() => {
+                  setMcpSelected((v) => v.filter((id) => id !== item.id));
+                  setMcpContexts((v) => v.filter((c) => c.id !== item.id));
+                })
+                .catch((cause) => setError(cause.message));
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ))}
+      {mcpPreview !== null ? (
+        <div>
+          <pre className="my-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">
+            {mcpPreview}
+          </pre>
+          <button type="button" onClick={() => setMcpPreview(null)}>
+            Close MCP preview
+          </button>
+        </div>
+      ) : null}
+    </McpContextMenu>
+  );
+
   return (
     <div
       onDragOver={(event) => {
@@ -300,79 +378,7 @@ export function ContextComposer({
           placeholder={`Message ${channel.kind === "dm" ? "@" : "#"}${channel.name}`}
           className="w-full resize-none bg-transparent px-2 py-1 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-600"
         />
-        <details className="my-2 text-xs text-slate-400">
-          <summary className="cursor-pointer">MCP context · {mcpSelected.length} selected</summary>
-          <p className="my-2">
-            Prepare and preview resources or prompts in Settings → MCP plugins, then explicitly
-            select them for this message.
-          </p>
-          <button
-            type="button"
-            className="rounded border border-white/10 px-2 py-1"
-            onClick={() => {
-              void client
-                .mcpContexts(profile.id)
-                .then(setMcpContexts)
-                .catch((cause) => setError(cause.message));
-            }}
-          >
-            Load prepared MCP context
-          </button>
-          {mcpContexts.map((item) => (
-            <div key={item.id} className="my-2 flex flex-wrap items-center gap-2">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={mcpSelected.includes(item.id)}
-                  disabled={!mcpSelected.includes(item.id) && mcpSelected.length >= 5}
-                  onChange={(e) =>
-                    setMcpSelected(
-                      e.target.checked
-                        ? [...mcpSelected, item.id]
-                        : mcpSelected.filter((id) => id !== item.id),
-                    )
-                  }
-                />{" "}
-                {item.kind}: {item.name} · {Math.ceil(item.size / 1024)} KB
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  void client
-                    .mcpContext(item.id)
-                    .then((r) => setMcpPreview(r.text))
-                    .catch((cause) => setError(cause.message));
-                }}
-              >
-                Preview
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void client
-                    .removeMcpContext(item.id)
-                    .then(() => {
-                      setMcpSelected((v) => v.filter((id) => id !== item.id));
-                      setMcpContexts((v) => v.filter((c) => c.id !== item.id));
-                    })
-                    .catch((cause) => setError(cause.message));
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          ))}
-          {mcpPreview !== null ? (
-            <div>
-              <pre className="my-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">
-                {mcpPreview}
-              </pre>
-              <button type="button" onClick={() => setMcpPreview(null)}>
-                Close MCP preview
-              </button>
-            </div>
-          ) : null}
-        </details>
+        {!mcpToolbarTarget ? mcpMenu : null}
         {estimate?.exceedsBudget ? (
           <p role="alert" className="mt-2 text-rose-300">
             Context is too large. Exclude files, shorten the message, lower max output tokens, or
@@ -500,6 +506,7 @@ export function ContextComposer({
         </span>
         <span className="ml-auto hidden sm:inline">Enter sends · Shift+Enter adds a line</span>
       </footer>
+      {mcpToolbarTarget ? createPortal(mcpMenu, mcpToolbarTarget) : null}
       {contextTarget
         ? createPortal(
             <>
@@ -565,5 +572,34 @@ export function ContextComposer({
         <AttachmentPreview file={preview} client={client} onClose={() => setPreview(null)} />
       ) : null}
     </div>
+  );
+}
+
+function McpContextMenu({ count, children }: { count: number; children: ReactNode }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useAnchoredMenu(ref);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) ref.current.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, []);
+  return (
+    <details
+      className="mcp-context-menu"
+      ref={ref}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector("summary")?.focus();
+        }
+      }}
+    >
+      <summary className="header-control" aria-label="MCP context" title="MCP context">
+        <Icon name="file" /> MCP context{count ? ` · ${count}` : ""}
+      </summary>
+      <div className="mcp-context-panel">{children}</div>
+    </details>
   );
 }

@@ -304,7 +304,35 @@ unavailable. There is no automatic `npx`/`uvx` installation, package upgrade or 
 ACP transport. ZIP distributions are currently unavailable; supported platform
 artifacts are raw executables or tar.gz/tgz, tar.bz2 and tar.xz archives.
 
-### Explicit setup
+### Quick connection
+
+Use **Connect Codex** or **Connect OpenCode** in Settings → Agent runner setup.
+The button detects the local executable, performs the isolated handshake and
+verification, imports the CLI's saved account, and enables the runner. It does not
+install software or start a task. Profile workspace/account grants remain separate.
+
+Sign in on the backend machine first (`codex login` or OpenCode `/connect`). Codex
+requires file-based credentials in `$CODEX_HOME/auth.json` or `~/.codex/auth.json`;
+keyring-only accounts must switch to file credential storage. OpenCode accounts
+come from `$XDG_DATA_HOME/opencode/auth.json` or `~/.local/share/opencode/auth.json`.
+No sign-in data is returned to the frontend. Imported credentials are encrypted,
+written to the isolated home for a run, refreshed when the agent updates them, and
+removed before checkpointing. Reconnect to import later host account changes.
+
+OpenCode imports supported OpenAI, Anthropic, Google, OpenCode and OpenRouter
+accounts and derives a fixed inference/refresh host allowlist. It does not copy host
+plugins, MCP servers or executable configuration. Custom providers use manual setup.
+Codex uses its built-in OpenAI provider, including ChatGPT sign-in, instead of
+Vektor's separate API-key provider. Neither quick connection requires OpenRouter.
+Version pins, official OpenCode archive verification, isolation and per-tool approvals
+remain enforced. Connection does not validate model entitlement; a successful turn does.
+
+Detection runs as the backend user, including inside Docker. PATH and common user
+bin directories are searched; supported npm launchers resolve to their native binary.
+The backend must have its own installed executable and sign-in; a desktop host's
+installation is not automatically available in a container.
+
+### Advanced manual setup
 
 1. Open Settings → Agent runner setup and **Load setup**. **Find installed
    executables** only checks paths; it does not launch them. For ACP, explicitly
@@ -334,19 +362,13 @@ artifacts are raw executables or tar.gz/tgz, tar.bz2 and tar.xz archives.
    `agent-default` uses its advertised/default model; an explicit model id requires
    an advertised ACP model configuration option. Codex uses the requested API model.
 
-OpenCode uses the existing ACP adapter with runner identity `acp:opencode`. The
-**Set up OpenCode** preset selects ACP v1, `["acp"]` arguments, the OpenCode registry
-entry, `OPENROUTER_API_KEY`, and `openrouter.ai`. Discovery includes `opencode` even
-before a registry refresh. Refresh the registry and install its matching Linux
-binary before probing and verifying; the same archive checksum, executable hash,
-and version checks apply as for other ACP agents. The preset does not launch or
-enable an agent. Host OpenCode logins/configuration are not imported.
+OpenCode uses ACP runner identity `acp:opencode`. The manual **Set up OpenCode**
+preset fills ACP v1, `["acp"]`, the registry identity and an OpenAI API-key default.
+Choose another provider's key variable and inference hosts when needed. Manual setup
+keeps verification, credentials and enablement as separate actions; quick connection
+handles them together using the installed CLI's account.
 
-For another provider, change the inference hosts and credential variable before
-verification (for example, `OPENCODE_API_KEY` with `opencode.ai` for OpenCode Zen).
-Use an advertised provider/model ID matching that provider. `agent-default` follows
-OpenCode's default selection and does not guarantee use of the preset provider.
-Inference hosts must include all public destinations required by that provider.
+Use an advertised provider/model ID, or `agent-default` for OpenCode's default.
 To check a locally installed OpenCode handshake without credentials or inference:
 `VEKTOR_OPENCODE_PROBE_BIN=/absolute/path/opencode pnpm --filter @vektor/api exec vitest run src/runners/probe.test.ts`.
 

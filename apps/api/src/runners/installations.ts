@@ -1,3 +1,4 @@
+import { accountSecrets } from "./native.js";
 import { runnerIdSchema } from "@vektor/shared";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -41,6 +42,7 @@ export const installationSchema = z.object({
   enabled: z.boolean(),
   inferenceHosts: z.array(z.string()),
   credentialName: z.string(),
+  authKind: z.enum(["separate-api-key", "native-account"]).optional(),
 });
 export type Installation = z.infer<typeof installationSchema>;
 export const configureRunnerSchema = z
@@ -48,11 +50,12 @@ export const configureRunnerSchema = z
     id: z.string().regex(/^(codex|acp:[a-z0-9][a-z0-9._-]{0,99})$/),
     executableHash: z.string().regex(/^[a-f0-9]{64}$/),
     trustLocalCodex: z.literal(true).optional(),
+    authKind: z.enum(["separate-api-key", "native-account"]).optional(),
     // A fixed host allowlist is a separate grant from browser network access.
     inferenceHosts: z
       .array(z.string().regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}$/))
       .min(1)
-      .max(5),
+      .max(20),
     credentialName: z.enum([
       "OPENAI_API_KEY",
       "OPENROUTER_API_KEY",
@@ -267,6 +270,8 @@ export class RunnerInstallations {
     let sourceHash: string;
     let name: string;
     let args: string[];
+    if (input.authKind === "native-account" && !["codex", "acp:opencode"].includes(input.id))
+      throw new RuntimeError("Native accounts are supported only for Codex and OpenCode.", 409);
     if (input.id === "codex") {
       if (!input.trustLocalCodex || probe.agent.version !== "0.166.0")
         throw new RuntimeError(
@@ -275,7 +280,14 @@ export class RunnerInstallations {
         );
       if (
         input.credentialName !== "OPENAI_API_KEY" ||
-        input.inferenceHosts.some((host) => host !== "api.openai.com")
+        input.inferenceHosts.some(
+          (host) =>
+            !(
+              input.authKind === "native-account"
+                ? ["api.openai.com", "chatgpt.com", "auth.openai.com"]
+                : ["api.openai.com"]
+            ).includes(host),
+        )
       )
         throw new RuntimeError(
           "Codex supports separate OpenAI API-key authentication and api.openai.com egress only.",
@@ -327,6 +339,10 @@ export class RunnerInstallations {
         "-c",
         "model_providers.vektor.stream_max_retries=0",
       ];
+      if (input.authKind === "native-account") {
+        args = args.slice(0, args.indexOf('model_provider="vektor"') - 1);
+        args.push("-c", 'cli_auth_credentials_store="file"');
+      }
     } else {
       const registryId = input.id.slice(4);
       if (registryId === "codex-acp")
@@ -385,10 +401,12 @@ export class RunnerInstallations {
       enabled: false,
       inferenceHosts: input.inferenceHosts,
       credentialName: input.credentialName,
+      ...(input.authKind ? { authKind: input.authKind } : {}),
     };
     if (
       previous &&
-      (previous.credentialName !== installation.credentialName ||
+      (previous.authKind !== installation.authKind ||
+        previous.credentialName !== installation.credentialName ||
         JSON.stringify(previous.inferenceHosts) !== JSON.stringify(installation.inferenceHosts))
     ) {
       this.credential(previous.id);
@@ -481,8 +499,17 @@ export class RunnerInstallations {
     );
     appendAudit(this.db, "runner.credential_changed", null, { id, configured: key !== null });
   }
+  refreshNativeCredential(id: string, previous: string, next: string): void {
+    if (this.get(id)?.authKind !== "native-account" || this.credential(id) !== previous) return;
+    this.priorSecrets.add(next);
+    setSetting(this.db, `runner.credentials.${id}`, encryptSecret(next, this.secretsKey));
+  }
   secrets(): string[] {
-    return [...this.list().map((entry) => this.credential(entry.id) ?? ""), ...this.priorSecrets];
+    const values = [
+      ...this.list().map((entry) => this.credential(entry.id) ?? ""),
+      ...this.priorSecrets,
+    ];
+    return [...values, ...values.flatMap(accountSecrets)];
   }
   async verifyExecutable(entry: Installation): Promise<void> {
     if ((await executableHash(entry.command)) !== entry.executableHash)

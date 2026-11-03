@@ -113,7 +113,7 @@ export function ComputerPanel({
   return (
     <section
       aria-label="Isolated computer"
-      className="my-3 space-y-2 rounded-lg border border-violet-400/20 p-3"
+      className="management-page my-3 space-y-2 rounded-lg border border-violet-400/20 p-3"
     >
       <p className="font-medium text-violet-300">
         Isolated computer · {state?.mode ?? "off"} · {state?.app ?? "no app"}

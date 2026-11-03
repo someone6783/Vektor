@@ -34,7 +34,7 @@ export function AuditView({ client }: { client: ApiClient }) {
     };
   }, [client]);
   return (
-    <section className="min-h-0 flex-1 overflow-auto p-6">
+    <section className="management-page min-h-0 flex-1 overflow-auto p-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Audit log</h1>
         <button

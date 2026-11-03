@@ -1,3 +1,9 @@
+import {
+  nativeAuthPath,
+  parseNativeAccount,
+  refreshedNativeAccount,
+  stageNativeAccount,
+} from "./native.js";
 import { conversationProfile } from "../conversation-execution.js";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -325,7 +331,11 @@ export class ExternalRunners {
       }
       return result;
     };
+    const credential = this.installations.credential(entry.id)!;
+    const nativeAccount =
+      entry.authKind === "native-account" ? parseNativeAccount(credential) : undefined;
     try {
+      if (nativeAccount) await stageNativeAccount(home, nativeAccount);
       let brokerSocket: string | undefined;
       if (entry.interface === "acp-v1" && input.mcpTools?.length) {
         mcpBroker = new McpBroker(
@@ -346,7 +356,11 @@ export class ExternalRunners {
         command: entry.command,
         args: entry.args,
         hosts: entry.inferenceHosts,
-        credentials: { [entry.credentialName]: this.installations.credential(entry.id)! },
+        credentials: nativeAccount
+          ? nativeAccount.runner === "opencode"
+            ? { OPENCODE_DISABLE_AUTOUPDATE: "true", OPENCODE_DISABLE_MODELS_FETCH: "true" }
+            : {}
+          : { [entry.credentialName]: credential },
         signal: input.signal,
         home,
         stage: stage.directory,
@@ -545,6 +559,20 @@ export class ExternalRunners {
       await Promise.allSettled([...terminal.values()].map((record) => record.done));
       await isolated?.close();
       try {
+        if (nativeAccount) {
+          if (!input.signal.aborted) {
+            try {
+              this.installations.refreshNativeCredential(
+                entry.id,
+                credential,
+                await refreshedNativeAccount(home, nativeAccount),
+              );
+            } catch {
+              /* Keep the previous account if the agent did not write valid auth. */
+            }
+          }
+          await rm(nativeAuthPath(home, nativeAccount.runner), { force: true });
+        }
         if (completed && !input.signal.aborted) {
           await this.snapshots.save(input.run.id, home);
           checkpointed = true;

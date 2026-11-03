@@ -7,7 +7,7 @@ import type { ApiClient } from "../lib/api";
 afterEach(cleanup);
 
 describe("runner setup", () => {
-  it("loads only on explicit action and never executes registry metadata", async () => {
+  it("loads status without probing executables or executing registry metadata", async () => {
     const runnerSetup = vi.fn().mockResolvedValue({
       probes: [],
       registry: {
@@ -27,7 +27,7 @@ describe("runner setup", () => {
     });
     const probeRunner = vi.fn();
     render(<RunnerSetup client={{ runnerSetup, probeRunner } as unknown as ApiClient} />);
-    expect(runnerSetup).not.toHaveBeenCalled();
+    expect(runnerSetup).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Load setup" }));
     expect(await screen.findByText(/Test agent · 1.0.0/)).toBeInTheDocument();
     expect(screen.getByText(/Unverified \/ unavailable/)).toBeInTheDocument();
@@ -35,7 +35,18 @@ describe("runner setup", () => {
   });
   it("requires an absolute executable path and shows probe failures without enabling execution", async () => {
     const probeRunner = vi.fn().mockRejectedValue(new Error("Unsupported agent version"));
-    render(<RunnerSetup client={{ probeRunner } as unknown as ApiClient} />);
+    render(
+      <RunnerSetup
+        client={
+          {
+            probeRunner,
+            runnerSetup: vi
+              .fn()
+              .mockResolvedValue({ probes: [], installations: [], registry: null }),
+          } as unknown as ApiClient
+        }
+      />,
+    );
     const submit = screen.getByRole("button", { name: "Probe installed agent" });
     expect(submit).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Agent executable path"), {
@@ -115,7 +126,7 @@ it("keeps credential saving, agent enablement and profile grants as separate exp
   );
 });
 
-it("presets OpenCode ACP arguments and a separate OpenRouter credential without launching it", async () => {
+it("keeps manual OpenCode setup available without an OpenRouter default", async () => {
   const probe = {
     executableHash: "hash",
     interface: "acp-v1",
@@ -143,6 +154,45 @@ it("presets OpenCode ACP arguments and a separate OpenRouter credential without 
     }),
   );
   expect(await screen.findByLabelText("Agent registry identity")).toHaveValue("acp:opencode");
-  expect(screen.getByLabelText("Agent credential type")).toHaveValue("OPENROUTER_API_KEY");
-  expect(screen.getByLabelText("Agent inference hosts")).toHaveValue("openrouter.ai");
+  expect(screen.getByLabelText("Agent credential type")).toHaveValue("OPENAI_API_KEY");
+  expect(screen.getByLabelText("Agent inference hosts")).toHaveValue("api.openai.com");
+});
+
+it.each(["codex", "opencode"] as const)(
+  "connects %s with one action and no credential fields",
+  async (runner) => {
+    const connectRunner = vi.fn().mockResolvedValue(undefined);
+    const runnerSetup = vi
+      .fn()
+      .mockResolvedValue({ probes: [], installations: [], registry: null });
+    const configureRunner = vi.fn();
+    render(
+      <RunnerSetup
+        client={{ connectRunner, runnerSetup, configureRunner } as unknown as ApiClient}
+      />,
+    );
+    const advanced = screen.getByText("Advanced setup").closest("details");
+    expect(advanced).not.toHaveAttribute("open");
+    fireEvent.click(
+      screen.getByRole("button", { name: `Connect ${runner === "codex" ? "Codex" : "OpenCode"}` }),
+    );
+    await waitFor(() => expect(connectRunner).toHaveBeenCalledWith(runner));
+    expect(await screen.findByRole("status")).toHaveTextContent("connected");
+    expect(configureRunner).not.toHaveBeenCalled();
+  },
+);
+it("shows actionable native sign-in failures without claiming connection succeeded", async () => {
+  render(
+    <RunnerSetup
+      client={
+        {
+          runnerSetup: vi.fn().mockResolvedValue({ probes: [], installations: [], registry: null }),
+          connectRunner: vi.fn().mockRejectedValue(new Error("Run codex login, then reconnect.")),
+        } as unknown as ApiClient
+      }
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Connect Codex" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("codex login");
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });

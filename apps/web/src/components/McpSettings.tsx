@@ -404,8 +404,8 @@ export function McpSettings({ client, profiles }: { client: ApiClient; profiles:
     setEnvironment("{}");
   };
   return (
-    <section className="space-y-4 rounded-xl border border-white/10 bg-slate-900/40 p-5">
-      <h3 className="text-lg font-semibold">MCP plugins</h3>
+    <section className="mcp-settings space-y-4 rounded-2xl border border-white/10 bg-white/[0.02] p-5">
+      <h3 className="text-sm font-semibold">MCP plugins</h3>
       <p className="text-sm text-slate-400">
         Connect your own optional tool and context servers. Servers start only when explicitly
         tested or used. Native chat works without plugins.
@@ -420,10 +420,10 @@ export function McpSettings({ client, profiles }: { client: ApiClient; profiles:
       ) : null}
       {setup ? (
         <>
-          <label className="block text-sm">
+          <label className="mcp-profile-field block text-sm">
             Profile for MCP grants
             <select
-              className={`${field} ml-2`}
+              className={`${field} mt-1 block w-full`}
               value={profileId}
               onChange={(e) => setProfileId(e.target.value)}
             >

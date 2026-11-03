@@ -17,7 +17,16 @@ for line in sys.stdin:
   send({'id':m['id'],'result':{'turn':{'id':'turn'}}})
   text=m['params']['input'][0]['text'].rsplit('[user]',1)[-1]
   if 'CRASH' in text:sys.exit(7)
-  if 'ISOLATION' in text:
+  if 'NATIVE_AUTH' in text:
+   auth=json.load(open(os.path.join(os.environ['HOME'],'.codex/auth.json')))
+   assert auth['tokens']['access_token']=='native-access-fixture'
+   assert not os.environ.get('OPENAI_API_KEY')
+   assert not os.path.exists('/home/aaron')
+   auth['tokens']['access_token']='native-refreshed-fixture'
+   json.dump(auth,open(os.path.join(os.environ['HOME'],'.codex/auth.json'),'w'))
+   event('item/agentMessage/delta',delta='NATIVE ACCOUNT READY')
+   event('turn/completed',turn={'id':'turn','status':'completed'})
+  elif 'ISOLATION' in text:
    failures=[]
    if os.path.exists('/data') or os.path.exists('/home/aaron') or os.environ.get('VEKTOR_ACCESS_TOKEN'):failures.append('host leak')
    try:socket.create_connection(('1.1.1.1',443),timeout=.1);failures.append('direct network')
@@ -40,6 +49,10 @@ for line in sys.stdin:
  m=json.loads(line);method=m.get('method')
  if method=='initialize':send({'id':m['id'],'result':{'protocolVersion':1,'agentInfo':{'name':'fixture-acp','version':'1.0.0'},'agentCapabilities':{'loadSession':True},'authMethods':[{'id':'api-key','name':'API key'}]}})
  elif method=='session/new':
+  if os.environ.get('OPENCODE_DISABLE_AUTOUPDATE'):
+   auth=json.load(open(os.path.join(os.environ['HOME'],'.local/share/opencode/auth.json')))
+   assert auth['anthropic']['key']=='native-anthropic-fixture'
+   assert not os.environ.get('OPENROUTER_API_KEY') and not os.environ.get('OPENAI_API_KEY')
   open(os.path.join(os.environ['HOME'],'state'),'w').write('ACP private history')
   send({'id':m['id'],'result':{'sessionId':'acp-session'}})
  elif method=='session/load':

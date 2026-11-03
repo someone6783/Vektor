@@ -1,3 +1,4 @@
+import { discoverNativeRunners, readNativeAccount } from "../runners/native.js";
 import type { FastifyInstance } from "fastify";
 import { getProfile, listProfiles, type VektorDatabase } from "@vektor/db";
 import { access, stat } from "node:fs/promises";
@@ -32,7 +33,7 @@ export function registerRunnerRoutes(
       ...installations.compatibility(entry),
       health: installations.health(entry.id),
       credentialConfigured: !!installations.credential(entry.id),
-      authKind: "separate-api-key",
+      authKind: entry.authKind ?? "separate-api-key",
       billing: "agent account/provider; separate from OpenRouter",
     })),
     grants: listProfiles(db).map((profile) => ({
@@ -50,8 +51,9 @@ export function registerRunnerRoutes(
           Object.values(agent.distribution.binary ?? {}).map((target) => basename(target.cmd)),
         ) ?? []),
     ]);
-    const found: Array<{ name: string; command: string }> = [];
+    const found: Array<{ name: string; command: string }> = await discoverNativeRunners();
     for (const name of names) {
+      if (found.some((entry) => entry.name === name)) continue;
       if (!/^[a-zA-Z0-9._-]+$/.test(name) || name === "." || name === "..") continue;
       for (const directory of (process.env.PATH ?? "/usr/bin:/bin").split(":")) {
         if (!directory.startsWith("/")) continue;
@@ -67,6 +69,50 @@ export function registerRunnerRoutes(
       }
     }
     return { executables: found };
+  });
+  app.post("/api/runners/connect", async (request) => {
+    manager.assertCanStart();
+    const { runner } = z
+      .object({ runner: z.enum(["codex", "opencode"]) })
+      .strict()
+      .parse(request.body);
+    if (configuring) throw new RuntimeError("Another agent verification is active.", 409);
+    configuring = true;
+    try {
+      const executable = (await discoverNativeRunners()).find((entry) => entry.name === runner);
+      if (!executable)
+        throw new RuntimeError(
+          `Install ${runner === "codex" ? "Codex" : "OpenCode"} on the backend machine, then connect again.`,
+          409,
+        );
+      const account = await readNativeAccount(runner);
+      const probe = await setup.probe({
+        interface: runner === "codex" ? "codex-app-server" : "acp-v1",
+        command: executable.command,
+        args: runner === "codex" ? [] : ["acp"],
+      });
+      if (runner === "opencode") await catalog.sync();
+      manager.assertCanStart();
+      const id = runner === "codex" ? "codex" : "acp:opencode";
+      await manager.revokeExternalRunner(id);
+      const entry = await installations.configure(
+        {
+          id,
+          executableHash: probe.executableHash,
+          ...(runner === "codex" ? { trustLocalCodex: true as const } : {}),
+          inferenceHosts: account.hosts,
+          credentialName: "OPENAI_API_KEY",
+          authKind: "native-account",
+        },
+        setup.results(),
+      );
+      manager.assertCanStart();
+      installations.setCredential(entry.id, JSON.stringify(account));
+      installations.enable(entry.id, true);
+      return { connected: true };
+    } finally {
+      configuring = false;
+    }
   });
   app.post("/api/runners/installations", async (request, reply) => {
     manager.assertCanStart();

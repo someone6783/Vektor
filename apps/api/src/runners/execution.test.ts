@@ -1,8 +1,11 @@
+import * as native from "./native.js";
+import { HarnessSnapshots } from "./snapshots.js";
+import { RunnerInstallations } from "./installations.js";
 import { spawnSync } from "node:child_process";
 import { BrowserNetwork } from "../browser/network.js";
 import { runnerSetupSchema } from "@vektor/shared";
 import { fakeCodex, fakeAcp } from "./fixtures.test-utils.js";
-import { registryEntrySchema } from "./catalog.js";
+import { AgentCatalog, registryEntrySchema } from "./catalog.js";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -358,9 +361,11 @@ async function acpFixture() {
   });
 }
 describe("ACP agents use the same Vektor execution gate", () => {
-  it.each(["verified-acp", "opencode"])(
+  it.each(["verified-acp", "opencode", "opencode-native"])(
     "verifies, enables and executes %s through the complete setup flow",
     async (registryId) => {
+      const nativeConnection = registryId === "opencode-native";
+      if (nativeConnection) registryId = "opencode";
       const args = registryId === "opencode" ? ["acp"] : [];
       const credentialName = registryId === "opencode" ? "OPENROUTER_API_KEY" : "ANTHROPIC_API_KEY";
       const host = registryId === "opencode" ? "openrouter.ai" : "api.anthropic.com";
@@ -411,39 +416,63 @@ describe("ACP agents use the same Vektor execution gate", () => {
         headers: {},
         body: archive.stdout,
       });
-      const configured = await app.inject({
-        method: "POST",
-        url: "/api/runners/installations",
-        headers,
-        payload: {
-          id: `acp:${registryId}`,
-          executableHash: probe.json().executableHash,
-          inferenceHosts: [host],
-          credentialName,
-        },
-      });
-      expect(configured.statusCode, configured.payload).toBe(201);
-      expect(configured.json().installation.enabled).toBe(false);
-      expect(
-        (
-          await app.inject({
-            method: "PUT",
-            url: `/api/runners/installations/acp%3A${registryId}/credential`,
-            headers,
-            payload: { key: "verified-acp-test-key" },
-          })
-        ).statusCode,
-      ).toBe(200);
-      expect(
-        (
-          await app.inject({
-            method: "PATCH",
-            url: `/api/runners/installations/acp%3A${registryId}`,
-            headers,
-            payload: { enabled: true },
-          })
-        ).statusCode,
-      ).toBe(200);
+      if (nativeConnection) {
+        vi.spyOn(native, "discoverNativeRunners").mockResolvedValue([
+          { name: "opencode", command },
+        ]);
+        vi.spyOn(native, "readNativeAccount").mockResolvedValue({
+          runner: "opencode",
+          auth: { anthropic: { type: "api", key: "native-anthropic-fixture" } },
+          hosts: ["api.anthropic.com"],
+        });
+        vi.spyOn(AgentCatalog.prototype, "sync").mockImplementation(async function (
+          this: AgentCatalog,
+        ) {
+          return this.snapshot()!;
+        });
+        const connected = await app.inject({
+          method: "POST",
+          url: "/api/runners/connect",
+          headers,
+          payload: { runner: "opencode" },
+        });
+        expect(connected.statusCode, connected.payload).toBe(200);
+        expect(connected.json()).toEqual({ connected: true });
+      } else {
+        const configured = await app.inject({
+          method: "POST",
+          url: "/api/runners/installations",
+          headers,
+          payload: {
+            id: `acp:${registryId}`,
+            executableHash: probe.json().executableHash,
+            inferenceHosts: [host],
+            credentialName,
+          },
+        });
+        expect(configured.statusCode, configured.payload).toBe(201);
+        expect(configured.json().installation.enabled).toBe(false);
+        expect(
+          (
+            await app.inject({
+              method: "PUT",
+              url: `/api/runners/installations/acp%3A${registryId}/credential`,
+              headers,
+              payload: { key: "verified-acp-test-key" },
+            })
+          ).statusCode,
+        ).toBe(200);
+        expect(
+          (
+            await app.inject({
+              method: "PATCH",
+              url: `/api/runners/installations/acp%3A${registryId}`,
+              headers,
+              payload: { enabled: true },
+            })
+          ).statusCode,
+        ).toBe(200);
+      }
       expect(
         (
           await app.inject({
@@ -602,5 +631,73 @@ describe("ACP agents use the same Vektor execution gate", () => {
           message.runId === native.json().run.id && message.content === "Native still works.",
       ),
     ).toBe(true);
+  });
+});
+
+describe("native agent connection", () => {
+  it("connects Codex in one request, encrypts its account and runs using native auth in isolation", async () => {
+    vi.spyOn(native, "discoverNativeRunners").mockResolvedValue([
+      { name: "codex", command: join(directory, "agent.py") },
+    ]);
+    vi.spyOn(native, "readNativeAccount").mockResolvedValue({
+      runner: "codex",
+      auth: {
+        tokens: { access_token: "native-access-fixture", refresh_token: "native-refresh-fixture" },
+      },
+      hosts: ["api.openai.com", "chatgpt.com", "auth.openai.com"],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runners/connect",
+      headers,
+      payload: { runner: "codex" },
+    });
+    expect(response.statusCode, response.payload).toBe(200);
+    expect(response.json()).toEqual({ connected: true });
+    const installs = new RunnerInstallations(storage.db, directory, storage.secretsKey);
+    expect(installs.get("codex")).toMatchObject({ enabled: true, authKind: "native-account" });
+    expect(installs.get("codex")!.args).not.toContain('model_provider="vektor"');
+    expect(installs.get("codex")!.args).toContain("features.shell_tool=false");
+    const view = await app.inject({ method: "GET", url: "/api/runners", headers });
+    expect(view.payload).not.toContain("native-access-fixture");
+    expect(getSetting(storage.db, "runner.credentials.codex")).not.toContain(
+      "native-access-fixture",
+    );
+    expect(installs.secrets()).toContain("native-refresh-fixture");
+    const id = await send("NATIVE_AUTH");
+    await finish(id);
+    expect(installs.credential("codex")).toContain("native-refreshed-fixture");
+    const snapshot = new HarnessSnapshots(directory, storage.secretsKey);
+    const restored = await snapshot.home(id);
+    expect(existsSync(join(restored, ".codex/auth.json"))).toBe(false);
+    rmSync(restored, { recursive: true, force: true });
+    expect(nativeRequests).toBe(0);
+  });
+  it("preserves an existing installation if native sign-in is missing", async () => {
+    vi.spyOn(native, "discoverNativeRunners").mockResolvedValue([
+      { name: "codex", command: join(directory, "agent.py") },
+    ]);
+    vi.spyOn(native, "readNativeAccount").mockRejectedValue(new Error("Sign in with codex login"));
+    const before = getSetting(storage.db, "runner.installations");
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runners/connect",
+      headers,
+      payload: { runner: "codex" },
+    });
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(getSetting(storage.db, "runner.installations")).toEqual(before);
+  });
+  it("honors emergency stop before native detection or account import", async () => {
+    const discover = vi.spyOn(native, "discoverNativeRunners");
+    await app.inject({ method: "POST", url: "/api/runtime/emergency-stop", headers });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runners/connect",
+      headers,
+      payload: { runner: "codex" },
+    });
+    expect(response.statusCode).toBe(423);
+    expect(discover).not.toHaveBeenCalled();
   });
 });

@@ -291,23 +291,23 @@ shutdown. CI builds and checks both Windows and Linux payloads. See
 
 ### Codex and ACP runners
 
-Vektor retains its native OpenRouter loop and supports optional, explicitly enabled
-Codex app-server, OpenCode (ACP), and verified ACP v1 agents. Settings → Agent runner setup discovers
-installed executables, probes their protocol, verifies/pins their identity, stores a
-separate write-only API key, and enables the agent. Registry browsing never installs
-or launches an agent. Codex is pinned to app-server 0.166.0; ACP setup accepts locally
-installed binaries that match a checksum-verified official platform archive.
+Settings → Agent runner setup offers **Connect Codex** and **Connect OpenCode**.
+One action finds the installed executable, verifies it, imports its saved sign-in
+and enables it. Codex uses its ChatGPT account or API key; OpenCode uses its own
+provider accounts. Neither requires Vektor's OpenRouter settings.
 
-For OpenCode, click **Set up OpenCode** in runner setup, refresh the official ACP
-registry, and probe the installed binary with `["acp"]` arguments. Verify it against
-OpenCode's registry entry. The preset uses `OPENROUTER_API_KEY` and `openrouter.ai`;
-enter a separate key, or change the credential type and hosts for another provider
-(`OPENCODE_API_KEY` is also supported for OpenCode Zen). Enable it, grant the profile
-access, then select **OpenCode** as the runner. Use an advertised model ID such as
-`openrouter/<model-id>` matching the configured provider; `agent-default` uses
-OpenCode's own default, which may require different inference hosts/credentials.
-The installed version must match the refreshed registry; npm wrapper scripts and
-versions without a matching verified binary cannot be enabled.
+Sign in on the backend machine first: `codex login` (file credential storage) or
+OpenCode's `/connect`. Detection checks PATH and common user installation locations,
+including native binaries behind npm launchers. Docker detects inside the container,
+not on the desktop host. Codex remains pinned to app-server 0.166.0; OpenCode must
+match its checksum-verified official ACP registry binary. Unsupported installations
+show an error. **Advanced setup** contains manual paths, other ACP agents, separate
+API keys and registry diagnostics.
+
+Imported accounts are encrypted, staged only in each isolated runner home and
+removed before session checkpoints. Host plugins and executable configuration are
+not imported. Supported OpenCode account providers are OpenAI, Anthropic, Google,
+OpenCode and OpenRouter; custom providers use Advanced setup.
 
 Each profile needs an agent-specific workspace/inference grant and Full access with
 per-command approvals. No-terminal, Basic, Full Unrestricted, external browser/computer

@@ -52,7 +52,7 @@ export function BackendSetup({
     }
   };
   return (
-    <main className="grid min-h-screen place-items-center overflow-y-auto bg-slate-950 p-6 text-slate-100">
+    <main className="management-page grid min-h-screen place-items-center overflow-y-auto bg-slate-950 p-6 text-slate-100">
       <section className="w-full max-w-xl rounded-2xl border border-white/10 bg-slate-900/60 p-6">
         <div className="mb-5 text-sm font-semibold text-accent-300">Vektor</div>
         <h1 className="text-2xl font-semibold">Set up your workspace</h1>
