@@ -145,7 +145,9 @@ export function Sidebar({
   const [busy, setBusy] = useState(false);
 
   const rooms = channels.filter((channel) => !channel.archivedAt && channel.kind === "channel");
-  const dms = channels.filter((channel) => !channel.archivedAt && channel.kind === "dm");
+  const dms = channels
+    .filter((channel) => !channel.archivedAt && channel.kind === "dm")
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
   const settled = channels
     .filter((channel) => channel.archivedAt !== null)
