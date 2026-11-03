@@ -20,14 +20,14 @@ export function ChoicePicker({
   disabled?: boolean;
   title?: string;
 }) {
-  const ref = useRef<HTMLDetailsElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const id = useId();
   const [open, setOpen] = useState(false);
-  useAnchoredMenu(ref, true);
+  useAnchoredMenu(ref, true, open && !disabled);
   const selected = options.find((option) => option.value === value);
   const close = () => {
     setOpen(false);
-    ref.current?.querySelector("summary")?.focus();
+    ref.current?.querySelector<HTMLButtonElement>(".choice-trigger")?.focus();
   };
   useEffect(() => {
     if (open)
@@ -38,17 +38,29 @@ export function ChoicePicker({
       )?.focus();
   }, [open]);
   useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+  useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
+    const dismissOnBlur = () => setOpen(false);
+    // Dismiss before outside controls can stop the event from reaching the document.
+    document.addEventListener("pointerdown", dismiss, true);
+    window.addEventListener("blur", dismissOnBlur);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss, true);
+      window.removeEventListener("blur", dismissOnBlur);
+    };
   }, []);
   return (
-    <details
+    <div
       ref={ref}
       className={`choice-picker ${className}`}
-      open={open && !disabled}
+      data-open={open && !disabled}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
           event.preventDefault();
@@ -77,7 +89,8 @@ export function ChoicePicker({
         items[index]?.focus();
       }}
     >
-      <summary
+      <button
+        type="button"
         className="choice-trigger"
         aria-label={label}
         aria-haspopup="listbox"
@@ -86,6 +99,7 @@ export function ChoicePicker({
         aria-disabled={disabled}
         title={title}
         tabIndex={disabled ? -1 : 0}
+        disabled={disabled}
         onClick={(event) => {
           event.preventDefault();
           if (!disabled) setOpen((value) => !value);
@@ -105,7 +119,7 @@ export function ChoicePicker({
         >
           <path d="m6 9 6 6 6-6" />
         </svg>
-      </summary>
+      </button>
       <div className="choice-menu" hidden={!open || disabled}>
         <div id={id} role="listbox" aria-label={`${label} options`}>
           {options.map((option) => (
@@ -130,6 +144,6 @@ export function ChoicePicker({
           ))}
         </div>
       </div>
-    </details>
+    </div>
   );
 }

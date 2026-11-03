@@ -12,6 +12,36 @@ const profile = {
   tools: [],
   runner: "native",
 } as unknown as Profile;
+it("closes the Display dropdown immediately when pressing the origins field in Browser settings", () => {
+  render(
+    <ConversationSettings
+      channel={channel}
+      profile={{
+        ...profile,
+        browser: {
+          mode: "interactive",
+          session: "separate",
+          display: "headless",
+          allowedOrigins: ["*"],
+          localOrigins: [],
+        },
+      }}
+      section="browser"
+      onSave={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  const display = screen.getByLabelText("Display");
+  const origins = screen.getByLabelText("Allowed website origins");
+  for (let i = 0; i < 3; i++) {
+    fireEvent.click(display);
+    expect(screen.getByRole("option", { name: "Visible window" })).toBeVisible();
+    fireEvent.pointerDown(origins);
+    fireEvent.click(origins);
+    expect(display).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  }
+});
 function setup(fail = false) {
   const order: string[] = [];
   const runnerGrant = vi.fn().mockImplementation(async () => {

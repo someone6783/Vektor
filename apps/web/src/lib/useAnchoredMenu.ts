@@ -1,18 +1,19 @@
-import { useEffect, type RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 
-/** Keep a details panel beside its trigger and inside the visible viewport. */
+/** Keep a popup beside its trigger and inside the visible viewport before painting. */
 export function useAnchoredMenu(
-  ref: RefObject<HTMLDetailsElement | null>,
+  ref: RefObject<HTMLElement | null>,
   matchTriggerWidth = false,
+  open?: boolean,
 ) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     const details = ref.current;
     if (!details) return;
     const panel = details.querySelector<HTMLElement>(":scope > div");
-    const trigger = details.querySelector("summary");
+    const trigger = details.querySelector("summary, .choice-trigger");
     if (!panel || !trigger) return;
     const place = () => {
-      if (!details.open) return;
+      if (!(open ?? (details instanceof HTMLDetailsElement && details.open))) return;
       const bounds = trigger.getBoundingClientRect();
       const viewport = window.visualViewport;
       const width = viewport?.width ?? window.innerWidth;
@@ -36,6 +37,7 @@ export function useAnchoredMenu(
       panel.style.right = "auto";
       panel.style.top = `${upwards ? bounds.top - size.height - gap : bounds.bottom + gap}px`;
     };
+    place();
     details.addEventListener("toggle", place);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
@@ -49,5 +51,5 @@ export function useAnchoredMenu(
       window.visualViewport?.removeEventListener("resize", place);
       observer?.disconnect();
     };
-  }, [ref, matchTriggerWidth]);
+  }, [ref, matchTriggerWidth, open]);
 }

@@ -1385,12 +1385,10 @@ body {
   background: var(--ui-surface);
   list-style: none;
   cursor: pointer;
-}
-.choice-trigger::-webkit-details-marker {
-  display: none;
-}
-.choice-trigger::marker {
-  content: "";
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 .choice-trigger[aria-disabled="true"] {
   opacity: 0.5;
@@ -1402,7 +1400,7 @@ body {
   outline-offset: -1px;
   background: var(--ui-raised);
 }
-.choice-picker[open] > .choice-trigger {
+.choice-picker[data-open="true"] > .choice-trigger {
   border-color: var(--ui-accent);
   background: var(--ui-raised);
 }
@@ -1483,7 +1481,7 @@ body {
 .action-menu-content .choice-trigger:hover {
   background: var(--ui-raised);
 }
-.action-menu-content .choice-picker[open] > .choice-trigger {
+.action-menu-content .choice-picker[data-open="true"] > .choice-trigger {
   border-color: var(--ui-accent);
   background: var(--ui-raised);
 }
