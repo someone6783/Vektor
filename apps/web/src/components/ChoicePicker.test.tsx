@@ -57,3 +57,32 @@ it("dismisses outside the menu and never opens a disabled picker", () => {
   fireEvent.click(screen.getByLabelText("Choice"));
   expect(screen.queryByRole("option")).not.toBeInTheDocument();
 });
+
+it("skips disabled options during keyboard navigation and prevents selecting them", () => {
+  const change = vi.fn();
+  render(
+    <ChoicePicker
+      label="Access"
+      value="off"
+      options={[
+        { value: "off", label: "Off", disabled: true },
+        { value: "approved", label: "Approved commands" },
+        { value: "unrestricted", label: "Unrestricted", disabled: true },
+        { value: "other", label: "Other allowed" },
+      ]}
+      onChange={change}
+    />,
+  );
+  const trigger = screen.getByLabelText("Access");
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  expect(screen.getByRole("option", { name: "Approved commands" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("option", { name: "Unrestricted" }));
+  expect(change).not.toHaveBeenCalled();
+  fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+  expect(screen.getByRole("option", { name: "Other allowed" })).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Home" });
+  expect(screen.getByRole("option", { name: "Approved commands" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("option", { name: "Approved commands" }));
+  expect(change).toHaveBeenCalledWith("approved");
+  expect(trigger).toHaveFocus();
+});

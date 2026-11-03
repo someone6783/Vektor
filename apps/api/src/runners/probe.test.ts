@@ -113,3 +113,59 @@ it.skipIf(!process.env.VEKTOR_OPENCODE_PROBE_BIN)(
   },
   15_000,
 );
+
+it.skipIf(!process.env.VEKTOR_OPENCODE_PROBE_BIN)(
+  "creates a real OpenCode free-model session without saved login or API keys",
+  async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { isolatedRunner } = await import("./isolation.js");
+    const { stageNativeAccount } = await import("./native.js");
+    const { AcpSession } = await import("./protocol.js");
+    const home = await mkdtemp("/dev/shm/vektor-opencode-free-");
+    let isolated: Awaited<ReturnType<typeof isolatedRunner>> | undefined;
+    let session: InstanceType<typeof AcpSession> | undefined;
+    try {
+      await stageNativeAccount(home, { runner: "opencode", auth: {}, hosts: ["opencode.ai"] });
+      isolated = await isolatedRunner({
+        command: process.env.VEKTOR_OPENCODE_PROBE_BIN!,
+        args: ["acp"],
+        hosts: ["opencode.ai"],
+        credentials: { OPENCODE_DISABLE_AUTOUPDATE: "true", OPENCODE_DISABLE_MODELS_FETCH: "true" },
+        signal: AbortSignal.timeout(30000),
+        home,
+      });
+      session = new AcpSession({ ...isolated, timeoutMs: 20000, event: () => {} });
+      await session.initialize();
+      expect(await session.create("/workspace")).toBeTruthy();
+      expect(await session.selectModel("agent-default")).toMatch(/^opencode\//);
+    } finally {
+      await session?.close();
+      await isolated?.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  },
+  35000,
+);
+
+it.skipIf(!process.env.VEKTOR_CODEX_PROBE_BIN)(
+  "loads the installed Codex model catalog without a workspace or inference request",
+  async () => {
+    const { isolatedProbe } = await import("./setup.js");
+    const { CodexSession } = await import("./protocol.js");
+    const session = new CodexSession({
+      ...isolatedProbe(process.env.VEKTOR_CODEX_PROBE_BIN!, ["app-server", "--listen", "stdio://"]),
+      timeoutMs: 10000,
+      event: () => {},
+    });
+    try {
+      await session.initialize();
+      const result = await session.models();
+      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models.some((model) => model.id === result.defaultModel)).toBe(true);
+      expect(result.models.every((model) => model.name.length > 0)).toBe(true);
+    } finally {
+      await session.close();
+    }
+  },
+  15000,
+);

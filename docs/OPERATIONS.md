@@ -311,7 +311,8 @@ The button detects the local executable, performs the isolated handshake and
 verification, imports the CLI's saved account, and enables the runner. It does not
 install software or start a task. Profile workspace/account grants remain separate.
 
-Sign in on the backend machine first (`codex login` or OpenCode `/connect`). Codex
+OpenCode works without saved credentials using its free models. `/connect` is only
+needed for authenticated providers. Codex needs `codex login` on the backend and
 requires file-based credentials in `$CODEX_HOME/auth.json` or `~/.codex/auth.json`;
 keyring-only accounts must switch to file credential storage. OpenCode accounts
 come from `$XDG_DATA_HOME/opencode/auth.json` or `~/.local/share/opencode/auth.json`.
@@ -320,7 +321,9 @@ written to the isolated home for a run, refreshed when the agent updates them, a
 removed before checkpointing. Reconnect to import later host account changes.
 
 OpenCode imports supported OpenAI, Anthropic, Google, OpenCode and OpenRouter
-accounts and derives a fixed inference/refresh host allowlist. It does not copy host
+accounts and derives a fixed inference/refresh host allowlist. Its free `opencode`
+provider remains enabled even when there are no saved accounts. Select `agent-default`
+to let OpenCode choose an available model; free model IDs are not hardcoded. It does not copy host
 plugins, MCP servers or executable configuration. Custom providers use manual setup.
 Codex uses its built-in OpenAI provider, including ChatGPT sign-in, instead of
 Vektor's separate API-key provider. Neither quick connection requires OpenRouter.
@@ -329,7 +332,7 @@ remain enforced. Connection does not validate model entitlement; a successful tu
 
 Detection runs as the backend user, including inside Docker. PATH and common user
 bin directories are searched; supported npm launchers resolve to their native binary.
-The backend must have its own installed executable and sign-in; a desktop host's
+The backend must have its own installed executable (and sign-in for paid providers); a desktop host's
 installation is not automatically available in a container.
 
 ### Advanced manual setup

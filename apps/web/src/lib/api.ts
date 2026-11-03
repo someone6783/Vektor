@@ -446,10 +446,18 @@ export class ApiClient {
   }
 
   async connectRunner(runner: "codex" | "opencode") {
-    await this.request("/api/runners/connect", {
-      method: "POST",
-      body: JSON.stringify({ runner }),
-    });
+    try {
+      await this.request("/api/runners/connect", {
+        method: "POST",
+        body: JSON.stringify({ runner }),
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404)
+        throw new Error(
+          "The connected API is outdated. Restart Vektor to update its local service, or update your Docker backend.",
+        );
+      throw error;
+    }
   }
   async discoverRunners() {
     return this.request<{ executables: Array<{ name: string; command: string }> }>(
@@ -552,6 +560,15 @@ export class ApiClient {
     );
   }
 
+  async listRunnerModels(runner: string): Promise<{ models: ModelInfo[]; defaultModel: string }> {
+    const response = await this.request<{ models: unknown[]; defaultModel: string }>(
+      `/api/runners/${encodeURIComponent(runner)}/models`,
+    );
+    const models = response.models.map((model) => modelInfoSchema.parse(model));
+    if (!models.some((model) => model.id === response.defaultModel))
+      throw new Error("Agent returned an invalid default model.");
+    return { models, defaultModel: response.defaultModel };
+  }
   async listModels(): Promise<ModelInfo[]> {
     const response = await this.request<{ models: unknown[] }>("/api/models");
     return response.models.map((model) => modelInfoSchema.parse(model));

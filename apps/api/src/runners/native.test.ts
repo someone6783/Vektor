@@ -17,7 +17,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
-const env = { PATH: "/nonexistent" };
+const env = { PATH: "/nonexistent", SHELL: "/nonexistent-shell" };
 it("discovers common user installs without running them", async () => {
   await mkdir(join(home, ".local/bin"), { recursive: true });
   await writeFile(join(home, ".local/bin/codex"), "fake native executable", { mode: 0o700 });
@@ -74,7 +74,7 @@ it("uses OpenCode provider accounts without requiring OpenRouter or copying exec
   const stage = join(home, "stage");
   await stageNativeAccount(stage, account);
   expect(JSON.parse(await readFile(join(stage, ".config/opencode/opencode.json"), "utf8"))).toEqual(
-    { enabled_providers: ["anthropic"] },
+    { enabled_providers: ["opencode", "anthropic"] },
   );
 });
 it("reports missing sign-in and rejects oversized account files", async () => {
@@ -92,4 +92,55 @@ it("refuses account refresh through links outside the isolated home", async () =
   await mkdir(stage);
   await symlink(outside, join(stage, ".codex"));
   await expect(refreshedNativeAccount(stage, account)).rejects.toThrow("Invalid account location");
+});
+
+it("finds a shell-only installation despite a minimal desktop service PATH", async () => {
+  const bin = join(home, "custom-tools");
+  await mkdir(bin);
+  await writeFile(join(bin, "opencode"), "native fixture", { mode: 0o700 });
+  const shell = join(home, "login-shell");
+  await writeFile(
+    shell,
+    `#!/bin/sh
+[ "$1" = "-ilc" ] || exit 1
+printf 'startup noise\\n'
+export PATH="${bin}"
+exec /bin/sh -c "$2"
+`,
+    { mode: 0o700 },
+  );
+  expect(await discoverNativeRunners(home, { ...env, SHELL: shell })).toEqual([
+    { name: "opencode", command: join(bin, "opencode") },
+  ]);
+});
+it("falls back to user bins if the login shell fails", async () => {
+  await mkdir(join(home, ".bun/bin"), { recursive: true });
+  await writeFile(join(home, ".bun/bin/opencode"), "native fixture", { mode: 0o700 });
+  expect(await discoverNativeRunners(home, env)).toEqual([
+    { name: "opencode", command: join(home, ".bun/bin/opencode") },
+  ]);
+});
+
+it("connects OpenCode without an account file and stages its free model provider", async () => {
+  const account = await readNativeAccount("opencode", home, env);
+  expect(account).toEqual({ runner: "opencode", auth: {}, hosts: ["opencode.ai"] });
+  const stage = join(home, "free-model-session");
+  await stageNativeAccount(stage, account);
+  expect(JSON.parse(await readFile(nativeAuthPath(stage, "opencode"), "utf8"))).toEqual({});
+  expect(JSON.parse(await readFile(join(stage, ".config/opencode/opencode.json"), "utf8"))).toEqual(
+    { enabled_providers: ["opencode"] },
+  );
+  expect(accountSecrets(JSON.stringify(account))).toEqual([]);
+});
+it("keeps free OpenCode models available with an empty or unsupported account file", async () => {
+  const authPath = nativeAuthPath(home, "opencode");
+  await mkdir(join(authPath, ".."), { recursive: true });
+  for (const auth of [{}, { custom: { type: "api", key: "unimported-custom-key" } }]) {
+    await writeFile(authPath, JSON.stringify(auth));
+    expect(await readNativeAccount("opencode", home, env)).toEqual({
+      runner: "opencode",
+      auth: {},
+      hosts: ["opencode.ai"],
+    });
+  }
 });

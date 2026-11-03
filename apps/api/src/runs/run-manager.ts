@@ -1143,6 +1143,8 @@ export class RunManager {
                 : { type: "reasoning.delta", text },
             );
           }
+        } else if (event.type === "context") {
+          this.emit(active, { type: "context.updated", context: event.context });
         } else if (event.type === "usage") {
           const usage = harnessUsage(event.detail);
           if (usage) {

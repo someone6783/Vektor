@@ -1,7 +1,7 @@
 import { ChoicePicker } from "./ChoicePicker";
 import { Icon } from "./Icon";
 import { useEffect, useRef, useState } from "react";
-import { type ModelInfo, type ReasoningEffort } from "@vektor/shared";
+import { type ModelInfo, type ReasoningEffort, type RunnerId } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
 import { useAnchoredMenu } from "../lib/useAnchoredMenu";
 
@@ -19,6 +19,8 @@ export function ModelPicker({
   client,
   model,
   models,
+  runner = "native",
+  label = "Conversation model",
   onChange,
   reasoning = "auto",
   onReasoningChange,
@@ -26,6 +28,8 @@ export function ModelPicker({
   client: ApiClient;
   model: string;
   models: ModelInfo[];
+  runner?: RunnerId;
+  label?: string;
   onChange?: (model: string) => void;
   reasoning?: ReasoningEffort;
   onReasoningChange?: (value: ReasoningEffort) => void;
@@ -47,7 +51,9 @@ export function ModelPicker({
     window.addEventListener("storage", sync);
     return () => window.removeEventListener("storage", sync);
   }, []);
-  const [catalog, setCatalog] = useState(models);
+  const [catalog, setCatalog] = useState(runner === "native" ? models : []);
+  const selection = useRef({ model, onChange });
+  selection.current = { model, onChange };
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -56,13 +62,27 @@ export function ModelPicker({
     let active = true;
     setLoading(true);
     setError("");
-    client
-      .listModels()
+    setCatalog(runner === "native" ? models : []);
+    const request =
+      runner === "native"
+        ? client.listModels().then((models) => ({ models, defaultModel: "" }))
+        : client.listRunnerModels(runner);
+    request
       .then((next) => {
-        if (active) setCatalog(next);
+        if (!active) return;
+        setCatalog(next.models);
+        if (runner !== "native" && !next.models.some((item) => item.id === selection.current.model))
+          selection.current.onChange?.(next.defaultModel);
       })
-      .catch(() => {
-        if (active) setError("Couldn’t load models.");
+      .catch((cause) => {
+        if (active)
+          setError(
+            runner === "native"
+              ? "Couldn’t load models."
+              : cause instanceof Error
+                ? cause.message
+                : "Couldn’t load agent models.",
+          );
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -70,7 +90,7 @@ export function ModelPicker({
     return () => {
       active = false;
     };
-  }, [client, refresh]);
+  }, [client, runner, refresh]);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       if (menu.current && !menu.current.contains(event.target as Node)) menu.current.open = false;
@@ -78,9 +98,10 @@ export function ModelPicker({
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
   }, []);
-  const items = catalog.some((item) => item.id === model)
-    ? catalog
-    : [{ id: model, name: model }, ...catalog];
+  const items =
+    runner !== "native" || catalog.some((item) => item.id === model)
+      ? catalog
+      : [{ id: model, name: model }, ...catalog];
   const filtered = items
     .filter((item) => `${item.id} ${item.name}`.toLowerCase().includes(query.toLowerCase()))
     .sort(
@@ -129,8 +150,14 @@ export function ModelPicker({
           if (event.currentTarget.open) event.currentTarget.querySelector("input")?.focus();
         }}
       >
-        <summary className="header-control" aria-label="Conversation model" title={model}>
-          <span>{model}</span>
+        <summary className="header-control" aria-label={label} title={model}>
+          <span>
+            {runner !== "native" && loading
+              ? "Loading agent models…"
+              : runner === "native"
+                ? model
+                : (selected?.name ?? model)}
+          </span>
           <span aria-hidden="true">▾</span>
         </summary>
         <div className="model-menu">
@@ -193,20 +220,22 @@ export function ModelPicker({
           </div>
         </div>
       </details>
-      <ChoicePicker
-        label="Reasoning effort"
-        value={effective}
-        className="reasoning-picker"
-        title={
-          selected?.supportsReasoning === false
-            ? "This model does not support reasoning controls"
-            : "Reasoning effort"
-        }
-        disabled={selected?.supportsReasoning === false || !onReasoningChange}
-        prefix={<span className="choice-prefix">Reasoning</span>}
-        options={available.map((value) => ({ value, label: reasoningLabels[value] }))}
-        onChange={(value) => onReasoningChange?.(value as ReasoningEffort)}
-      />
+      {runner === "native" ? (
+        <ChoicePicker
+          label="Reasoning effort"
+          value={effective}
+          className="reasoning-picker"
+          title={
+            selected?.supportsReasoning === false
+              ? "This model does not support reasoning controls"
+              : "Reasoning effort"
+          }
+          disabled={selected?.supportsReasoning === false || !onReasoningChange}
+          prefix={<span className="choice-prefix">Reasoning</span>}
+          options={available.map((value) => ({ value, label: reasoningLabels[value] }))}
+          onChange={(value) => onReasoningChange?.(value as ReasoningEffort)}
+        />
+      ) : null}
     </div>
   );
 }

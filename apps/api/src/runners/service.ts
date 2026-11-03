@@ -1,3 +1,4 @@
+import { codexContext, rememberContextWindow } from "./context.js";
 import {
   nativeAuthPath,
   parseNativeAccount,
@@ -5,7 +6,7 @@ import {
   stageNativeAccount,
 } from "./native.js";
 import { conversationProfile } from "../conversation-execution.js";
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
@@ -23,6 +24,7 @@ import {
   RUNNER_CONTRACT_VERSION,
   harnessStateSchema,
   runnerIdSchema,
+  type ModelInfo,
   type HarnessState,
   type RunUsage,
 } from "@vektor/shared";
@@ -49,11 +51,108 @@ export interface HarnessExecution {
   redact: (value: string) => string;
   permission: (kind: "command" | "file", detail: unknown, signal: AbortSignal) => Promise<boolean>;
 }
+type RunnerModels = { models: ModelInfo[]; defaultModel: string };
 export class ExternalRunners {
   private readonly running = new Map<
     string,
     { controller: AbortController; done: Promise<void> }
   >();
+  private readonly modelRequests = new Map<
+    string,
+    { runner: string; controller: AbortController; done: Promise<RunnerModels> }
+  >();
+  private readonly modelCache = new Map<
+    string,
+    { key: string; expires: number; value: RunnerModels }
+  >();
+  async models(identity: string): Promise<RunnerModels> {
+    const entry = this.installations.get(identity);
+    if (!entry?.enabled)
+      throw new RuntimeError("Connect and enable this agent in Settings first.", 409);
+    const compatibility = this.installations.compatibility(entry);
+    if (!compatibility.compatible)
+      throw new RuntimeError("Re-verify this agent in Settings before loading models.", 409);
+    const key = JSON.stringify([
+      entry.executableHash,
+      entry.args,
+      entry.inferenceHosts,
+      entry.authKind,
+      getSetting(this.db, `runner.authVersion.${identity}`),
+    ]);
+    const cached = this.modelCache.get(identity);
+    if (cached?.key === key && cached.expires > Date.now()) return cached.value;
+    if (this.running.size + this.modelRequests.size >= 4)
+      throw new RuntimeError("Agent discovery is busy. Retry shortly.", 409);
+    const requestId = randomUUID();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(25000)]);
+    const done = this.readModels(entry, signal);
+    this.modelRequests.set(requestId, { runner: identity, controller, done });
+    try {
+      const value = await done;
+      signal.throwIfAborted();
+      this.modelCache.set(identity, { key, expires: Date.now() + 30000, value });
+      return value;
+    } finally {
+      this.modelRequests.delete(requestId);
+    }
+  }
+  private async readModels(entry: Installation, signal: AbortSignal): Promise<RunnerModels> {
+    await this.installations.verifyExecutable(entry);
+    const credential = this.installations.credential(entry.id);
+    if (!credential)
+      throw new RuntimeError("Reconnect this agent in Settings to load its models.", 409);
+    const account =
+      entry.authKind === "native-account" ? parseNativeAccount(credential) : undefined;
+    const home = await mkdtemp("/dev/shm/vektor-models-");
+    let isolated: Awaited<ReturnType<typeof isolatedRunner>> | undefined;
+    let session: CodexSession | AcpSession | undefined;
+    try {
+      if (account) await stageNativeAccount(home, account);
+      isolated = await this.isolate({
+        command: entry.command,
+        args: entry.args,
+        hosts: entry.inferenceHosts,
+        credentials: account
+          ? account.runner === "opencode"
+            ? { OPENCODE_DISABLE_AUTOUPDATE: "true", OPENCODE_DISABLE_MODELS_FETCH: "true" }
+            : {}
+          : { [entry.credentialName]: credential },
+        signal,
+        home,
+      });
+      const options = { ...isolated, signal, timeoutMs: 20000, event: () => {} };
+      if (entry.interface === "codex-app-server") {
+        const codex = new CodexSession(options);
+        session = codex;
+        const version = await codex.initialize();
+        if (!version.includes(entry.version))
+          throw new RuntimeError("Codex version changed. Reconnect it in Settings.", 409);
+        return await codex.models();
+      }
+      const acp = new AcpSession(options);
+      session = acp;
+      if ((await acp.initialize()).version !== entry.version)
+        throw new RuntimeError("Agent version changed. Reconnect it in Settings.", 409);
+      await acp.create("/workspace");
+      return acp.models();
+    } finally {
+      await session?.close();
+      if (account && !signal.aborted) {
+        try {
+          this.installations.refreshNativeCredential(
+            entry.id,
+            credential,
+            await refreshedNativeAccount(home, account),
+          );
+        } catch {
+          /* Keep the prior account if the agent did not write valid auth. */
+        }
+      }
+      await isolated?.close();
+      await rm(home, { recursive: true, force: true });
+    }
+  }
   readonly workspace: RunnerWorkspace;
   readonly snapshots: HarnessSnapshots;
   constructor(
@@ -82,8 +181,9 @@ export class ExternalRunners {
       );
     if (profile.terminalMode !== "full-access" || !profile.tools.includes("terminal"))
       throw new RuntimeError(
-        "External runners currently require Full access with the terminal tool enabled. No-terminal, Basic and Full Unrestricted mappings are unsupported.",
+        `${entry.name} needs Full access with approvals. Review permissions to continue.`,
         409,
+        "runner_permissions",
       );
     if (
       (profile.browser?.mode && profile.browser.mode !== "off") ||
@@ -96,8 +196,9 @@ export class ExternalRunners {
     const grant = this.installations.grant(profile.id);
     if (grant.runner !== entry.id || !grant.workspace || !grant.inference)
       throw new RuntimeError(
-        "Grant this profile workspace and inference access to this specific agent before running it.",
+        `${entry.name} needs workspace and model access for this profile. Review permissions to continue.`,
         409,
+        "runner_grants",
       );
     if (!this.installations.credential(entry.id))
       throw new RuntimeError(
@@ -146,7 +247,7 @@ export class ExternalRunners {
     return state.data;
   }
   async execute(input: HarnessExecution): Promise<void> {
-    if (this.running.size >= 4)
+    if (this.running.size + this.modelRequests.size >= 4)
       throw new RuntimeError("The external runner concurrency limit is reached.", 409);
     if (this.running.has(input.run.id))
       throw new RuntimeError("This run already owns a runner session.", 409);
@@ -165,6 +266,11 @@ export class ExternalRunners {
     }
   }
   async stop(id?: string): Promise<void> {
+    if (!id) {
+      const requests = [...this.modelRequests.values()];
+      for (const request of requests) request.controller.abort();
+      await Promise.allSettled(requests.map((request) => request.done));
+    }
     const runs = [...this.running.entries()].filter(([runId]) => !id || id === runId);
     for (const [, run] of runs) run.controller.abort();
     await Promise.allSettled(runs.map(([, run]) => run.done));
@@ -177,6 +283,12 @@ export class ExternalRunners {
     );
   }
   async revokeRunner(identity: string): Promise<void> {
+    this.modelCache.delete(identity);
+    const requests = [...this.modelRequests.values()].filter(
+      (request) => request.runner === identity,
+    );
+    for (const request of requests) request.controller.abort();
+    await Promise.allSettled(requests.map((request) => request.done));
     await Promise.all(
       [...this.running.keys()]
         .filter((id) => getRun(this.db, id)?.runner === identity)
@@ -286,12 +398,22 @@ export class ExternalRunners {
     const event = (event: HarnessEvent) => {
       if (input.signal.aborted) return;
       const reported = event.type === "usage" ? harnessUsage(event.detail) : null;
+      const context =
+        entry.interface === "codex-app-server" && event.type === "usage"
+          ? codexContext(event.detail)
+          : undefined;
+      if (context) {
+        const model = getRun(this.db, input.run.id)?.model ?? input.run.model;
+        rememberContextWindow(this.db, entry.id, model, entry.executableHash, context);
+        input.event({ type: "context", context });
+      }
       state = {
         ...state,
         cursor: state.cursor + 1,
         state: "running",
         ...(event.type === "lifecycle" ? { sessionId: event.sessionId, turnId: event.turnId } : {}),
         ...(reported ? { metricsAvailable: true, reportedUsage: reported } : {}),
+        ...(context ? { context } : {}),
       };
       updateRun(this.db, input.run.id, { harness: state });
       if (event.type === "usage") {
@@ -395,10 +517,17 @@ export class ExternalRunners {
         if (!version.includes(entry.version))
           throw new RuntimeError("Codex version drift detected.", 409);
         await codex.verifyControls();
+        const model =
+          input.run.model === "agent-default"
+            ? ((input.resumeFromRunId
+                ? getRun(this.db, input.resumeFromRunId)?.model
+                : undefined) ?? (await codex.models()).defaultModel)
+            : input.run.model;
+        if (model !== input.run.model) updateRun(this.db, input.run.id, { model });
         if (previous) await codex.resume(previous.sessionId!);
         else
           await codex.create({
-            model: input.run.model,
+            model,
             cwd: "/workspace",
             approvalPolicy: "untrusted",
             sandbox: "read-only",
@@ -413,7 +542,7 @@ export class ExternalRunners {
             ],
           });
         check();
-        await codex.prompt(contextText(input.messages, !!previous), input.run.model);
+        await codex.prompt(contextText(input.messages, !!previous), model);
       } else {
         const acp = new AcpSession({
           ...options,

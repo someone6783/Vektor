@@ -29,7 +29,7 @@ interface ChatViewProps {
   onReasoningChange?: (value: ReasoningEffort) => void;
   models?: ModelInfo[];
   onModelChange?: (model: string) => void;
-  onExecutionSettings?: (section: "terminal" | "browser") => void;
+  onExecutionSettings?: (section: "terminal" | "browser", runner?: RunnerId) => void;
   activeRunCount?: number;
   emergencyStopped?: boolean;
   client: ApiClient;
@@ -60,7 +60,17 @@ const statusLabel: Record<string, string> = {
   failed: "failed",
 };
 
-function MessageRow({ message, client }: { message: Message; client: ApiClient }) {
+function MessageRow({
+  message,
+  client,
+  onRetry,
+  retryDisabled,
+}: {
+  message: Message;
+  client: ApiClient;
+  onRetry: (runId: string) => void;
+  retryDisabled: boolean;
+}) {
   const isUser = message.role === "user";
 
   return (
@@ -92,6 +102,13 @@ function MessageRow({ message, client }: { message: Message; client: ApiClient }
         {message.attachments.length ? (
           <MessageAttachments files={message.attachments} client={client} />
         ) : null}
+        {message.role === "assistant" && message.runId ? (
+          <div className="mt-3 flex gap-2">
+            <button type="button" disabled={retryDisabled} onClick={() => onRetry(message.runId!)}>
+              <Icon name="refresh" /> Regenerate
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -122,13 +139,13 @@ export function ChatView({
   onLoadMore,
 }: ChatViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const runnerModels = useRef<Record<string, string>>({});
   const [runnerOverride, setRunnerOverride] = useState<RunnerId | undefined>();
   const [availableRunners, setAvailableRunners] = useState<RunnerInstallationView[]>([]);
-  const [resume, setResume] = useState(false);
   const [runnerError, setRunnerError] = useState("");
   useEffect(() => {
+    runnerModels.current = {};
     setRunnerOverride(undefined);
-    setResume(false);
     setRunnerError("");
   }, [channel?.id, profile?.id]);
   const effectiveRunner = runnerOverride ?? profile?.runner ?? "native";
@@ -196,8 +213,6 @@ export function ChatView({
 
   const busy = live !== null && live.status === "running";
 
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-
   return (
     <section className="chat-workspace">
       <header className="chat-header flex items-center gap-3 border-b px-6 py-3">
@@ -220,7 +235,7 @@ export function ChatView({
         <button
           type="button"
           className="header-control"
-          onClick={() => onExecutionSettings?.("terminal")}
+          onClick={() => onExecutionSettings?.("terminal", effectiveRunner)}
           aria-label="Terminal settings"
           title="Terminal settings"
         >
@@ -244,8 +259,15 @@ export function ChatView({
               })),
           ]}
           onChange={(value) => {
+            const nextRunner = value === "profile" ? (profile.runner ?? "native") : value;
+            if (nextRunner !== effectiveRunner) {
+              runnerModels.current[effectiveRunner] = profile.model;
+              const model =
+                runnerModels.current[nextRunner] ??
+                (nextRunner !== "native" ? "agent-default" : profile.model);
+              if (model !== profile.model) onModelChange?.(model);
+            }
             setRunnerOverride(value === "profile" ? undefined : (value as RunnerId));
-            setResume(false);
           }}
         />
         <div className="mcp-toolbar-target" ref={setMcpToolbarTarget} />
@@ -310,7 +332,13 @@ export function ChatView({
             ) : (
               <div className="chat-column flex flex-col gap-6">
                 {messages.map((message) => (
-                  <MessageRow key={message.id} message={message} client={client} />
+                  <MessageRow
+                    key={message.id}
+                    message={message}
+                    client={client}
+                    onRetry={onRetry}
+                    retryDisabled={busy || emergencyStopped}
+                  />
                 ))}
 
                 {live ? (
@@ -365,39 +393,16 @@ export function ChatView({
             <ContextComposer
               modelControls={
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  {effectiveRunner === "native" ? (
-                    <ModelPicker
-                      client={client}
-                      model={profile.model}
-                      models={models}
-                      onChange={onModelChange}
-                      reasoning={reasoning}
-                      onReasoningChange={onReasoningChange}
-                    />
-                  ) : (
-                    <label>
-                      Agent model
-                      <input
-                        aria-label="External runner model"
-                        value={profile.model}
-                        onChange={(event) => onModelChange?.(event.target.value)}
-                        className="ml-1 rounded border border-white/10 bg-slate-950 p-1"
-                      />
-                    </label>
-                  )}
-                  {lastRun?.harness?.sessionId &&
-                  lastRun.status === "completed" &&
-                  lastRun.runner === effectiveRunner &&
-                  lastRun.profileId === profile.id ? (
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={resume}
-                        onChange={(event) => setResume(event.target.checked)}
-                      />{" "}
-                      Resume saved agent session with this new message
-                    </label>
-                  ) : null}
+                  <ModelPicker
+                    key={`${channel.id}:${effectiveRunner}`}
+                    client={client}
+                    runner={effectiveRunner}
+                    model={profile.model}
+                    models={effectiveRunner === "native" ? models : []}
+                    onChange={onModelChange}
+                    reasoning={reasoning}
+                    onReasoningChange={onReasoningChange}
+                  />
                   {runnerError ? <span role="alert">{runnerError}</span> : null}
                 </div>
               }
@@ -412,22 +417,18 @@ export function ChatView({
               executionStopped={emergencyStopped}
               historyVersion={messages.length}
               lastRun={lastRun}
+              runtimeContext={live?.runId === lastRun?.id ? live?.context : undefined}
               onSend={async (content, attachments, allowTruncation, mcpContextIds) => {
                 await onSend(
                   content,
                   attachments,
                   allowTruncation,
                   runnerOverride,
-                  resume ? lastRun?.id : undefined,
+                  undefined,
                   mcpContextIds,
                 );
-                setResume(false);
               }}
               onStop={onStop}
-              canRetry={!!lastAssistant?.runId}
-              onRetry={() => {
-                if (lastAssistant?.runId) onRetry(lastAssistant.runId);
-              }}
             />
           </div>
         </div>

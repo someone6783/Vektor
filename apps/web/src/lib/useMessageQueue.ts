@@ -15,6 +15,7 @@ export interface QueuedMessage {
   resumeFromRunId?: string;
   mcpContextIds?: string[];
   error?: string;
+  errorCode?: string;
   retry: number;
   steer?: boolean;
 }
@@ -82,6 +83,7 @@ export function useMessageQueue(
                 ? {
                     ...item,
                     error: error instanceof Error ? error.message : "Unable to send message.",
+                    errorCode: error instanceof ApiError ? error.code : undefined,
                   }
                 : item,
             ),
@@ -107,7 +109,13 @@ export function useMessageQueue(
         const selected = value.find((item) => item.id === id);
         if (!selected) return value;
         return [
-          { ...selected, steer: true, error: undefined, retry: selected.retry + 1 },
+          {
+            ...selected,
+            steer: true,
+            error: undefined,
+            errorCode: undefined,
+            retry: selected.retry + 1,
+          },
           ...value.filter((item) => item.id !== id),
         ];
       });
@@ -123,7 +131,13 @@ export function useMessageQueue(
       setItems((value) =>
         value.map((item) =>
           item.id === id
-            ? { ...item, error: undefined, allowTruncation, retry: item.retry + 1 }
+            ? {
+                ...item,
+                error: undefined,
+                errorCode: undefined,
+                allowTruncation,
+                retry: item.retry + 1,
+              }
             : item,
         ),
       ),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { runnerIdSchema } from "./runners.js";
+import { runnerIdSchema, runnerContextSchema } from "./runners.js";
 
 const runEventBaseSchema = z.object({
   seq: z.number().int().nonnegative(),
@@ -48,6 +48,11 @@ export const approvalRequestedEventSchema = runEventBaseSchema.extend({
   command: z.string().min(1),
 });
 
+export const contextUpdatedEventSchema = runEventBaseSchema.extend({
+  type: z.literal("context.updated"),
+  context: runnerContextSchema,
+});
+
 export const usageEventSchema = runEventBaseSchema.extend({
   type: z.literal("usage"),
   promptTokens: z.number().int().nonnegative(),
@@ -81,6 +86,7 @@ export const runEventSchema = z.discriminatedUnion("type", [
   toolProgressEventSchema,
   approvalRequestedEventSchema,
   usageEventSchema,
+  contextUpdatedEventSchema,
   runCompletedEventSchema,
   runFailedEventSchema,
   runCancelledEventSchema,

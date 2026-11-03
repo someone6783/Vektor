@@ -13,7 +13,7 @@ export function ChoicePicker({
 }: {
   label: string;
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; disabled?: boolean }>;
   onChange: (value: string) => void;
   prefix?: ReactNode;
   className?: string;
@@ -31,7 +31,11 @@ export function ChoicePicker({
   };
   useEffect(() => {
     if (open)
-      ref.current?.querySelector<HTMLElement>('[aria-selected="true"], [role="option"]')?.focus();
+      (
+        ref.current?.querySelector<HTMLElement>(
+          '[role="option"][aria-selected="true"]:not(:disabled)',
+        ) ?? ref.current?.querySelector<HTMLElement>('[role="option"]:not(:disabled)')
+      )?.focus();
   }, [open]);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
@@ -60,8 +64,9 @@ export function ChoicePicker({
           return;
         }
         const items = Array.from(
-          ref.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
+          ref.current?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [],
         );
+        if (!items.length) return;
         const current = items.indexOf(document.activeElement as HTMLButtonElement);
         const index =
           event.key === "Home"
@@ -108,10 +113,13 @@ export function ChoicePicker({
               key={option.value}
               type="button"
               role="option"
+              disabled={option.disabled}
               aria-selected={option.value === value}
               onClick={() => {
-                onChange(option.value);
-                close();
+                if (!option.disabled) {
+                  onChange(option.value);
+                  close();
+                }
               }}
             >
               <span>{option.label}</span>

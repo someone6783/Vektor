@@ -87,3 +87,29 @@ it("keeps text and tool blocks in event order instead of concatenating separate 
     { type: "text", id: "text-4", text: "Found it." },
   ]);
 });
+
+it("keeps current context separate from cumulative usage, including after compaction", () => {
+  let live = startLiveRun("run");
+  live = applyRunEvent(live, {
+    type: "usage",
+    runId: "run",
+    seq: 1,
+    promptTokens: 20000,
+    completionTokens: 300,
+    totalTokens: 20300,
+  });
+  live = applyRunEvent(live, {
+    type: "context.updated",
+    runId: "run",
+    seq: 2,
+    context: { inputTokens: 10000, outputTokens: 100, totalTokens: 10100, contextWindow: 272000 },
+  });
+  live = applyRunEvent(live, {
+    type: "context.updated",
+    runId: "run",
+    seq: 3,
+    context: { inputTokens: 2000, outputTokens: 10, totalTokens: 2010, contextWindow: 272000 },
+  });
+  expect(live.context?.totalTokens).toBe(2010);
+  expect(live.usage?.totalTokens).toBe(20300);
+});

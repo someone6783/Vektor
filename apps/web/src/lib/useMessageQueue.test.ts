@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { MessagesResponse, SendMessageResponse } from "@vektor/shared";
-import { ApiClient } from "./api";
+import { ApiClient, ApiError } from "./api";
 import { useMessageQueue } from "./useMessageQueue";
 
 afterEach(() => {
@@ -161,4 +161,22 @@ it("preserves an explicit runner and saved-session choice in the queued request"
   act(() => result.current.enqueue({ ...item, runner: "codex", resumeFromRunId: "previous-run" }));
   await waitFor(() => expect(send).toHaveBeenCalledOnce());
   expect(send.mock.calls[0]?.slice(7)).toEqual(["codex", "previous-run"]);
+});
+
+it("retains permission error codes and retries the original draft only on request", async () => {
+  const client = new ApiClient("test");
+  vi.spyOn(client, "listMessages").mockResolvedValue(page(false));
+  const send = vi
+    .spyOn(client, "sendMessage")
+    .mockRejectedValueOnce(new ApiError(409, "runner_permissions", "Review permissions."))
+    .mockResolvedValue(response);
+  const { result } = renderHook(() => useMessageQueue(client, false, vi.fn()));
+  act(() => result.current.enqueue({ ...item, runner: "codex" }));
+  await waitFor(() => expect(result.current.items[0]?.errorCode).toBe("runner_permissions"));
+  expect(result.current.items[0]?.content).toBe(item.content);
+  expect(send).toHaveBeenCalledOnce();
+  act(() => result.current.retry(result.current.items[0]!.id, false));
+  await waitFor(() => expect(result.current.items).toHaveLength(0));
+  expect(send.mock.calls[1]?.[1]).toBe(item.content);
+  expect(send.mock.calls[1]?.[7]).toBe("codex");
 });

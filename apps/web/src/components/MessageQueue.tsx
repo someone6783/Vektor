@@ -3,12 +3,23 @@ import { Icon } from "./Icon";
 import type { Channel } from "@vektor/shared";
 import type { QueuedMessage, useMessageQueue } from "../lib/useMessageQueue";
 
+function permissionIssue(item: QueuedMessage) {
+  return (
+    item.errorCode === "runner_permissions" ||
+    item.errorCode === "runner_grants" ||
+    /External runners currently require Full access|Grant this profile workspace and inference access/.test(
+      item.error ?? "",
+    )
+  );
+}
 function QueueItem({
   item,
   queue,
   channel,
   paused,
+  onReviewPermissions,
 }: {
+  onReviewPermissions?: (item: QueuedMessage) => void;
   item: QueuedMessage;
   queue: ReturnType<typeof useMessageQueue>;
   channel: string;
@@ -24,6 +35,7 @@ function QueueItem({
         : paused
           ? "Paused"
           : "Queued";
+  const needsPermissions = permissionIssue(item);
   const preview = item.content || `${item.attachmentIds.length} attachments`;
   return (
     <li className="queue-item">
@@ -63,16 +75,25 @@ function QueueItem({
       {item.error ? (
         <div className="queue-error">
           <p role="alert" className="text-rose-300">
-            {item.error}
+            {needsPermissions
+              ? "This agent needs approved tool access. Review permissions to continue."
+              : item.error}
           </p>
-          <label className="my-2 flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={allowTruncation}
-              onChange={(event) => setAllowTruncation(event.target.checked)}
-            />
-            Allow omitting older history if needed
-          </label>
+          {needsPermissions && onReviewPermissions ? (
+            <button type="button" onClick={() => onReviewPermissions(item)}>
+              Review permissions
+            </button>
+          ) : null}
+          {!needsPermissions ? (
+            <label className="my-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={allowTruncation}
+                onChange={(event) => setAllowTruncation(event.target.checked)}
+              />
+              Allow omitting older history if needed
+            </label>
+          ) : null}
           <button type="button" onClick={() => queue.retry(item.id, allowTruncation)}>
             Retry
           </button>
@@ -85,7 +106,9 @@ export function MessageQueue({
   queue,
   channels,
   paused,
+  onReviewPermissions,
 }: {
+  onReviewPermissions?: (item: QueuedMessage) => void;
   queue: ReturnType<typeof useMessageQueue>;
   channels: Channel[];
   paused: boolean;
@@ -103,6 +126,7 @@ export function MessageQueue({
             item={item}
             queue={queue}
             paused={paused}
+            onReviewPermissions={onReviewPermissions}
             channel={
               channels.find((channel) => channel.id === item.channelId)?.name ?? "Conversation"
             }

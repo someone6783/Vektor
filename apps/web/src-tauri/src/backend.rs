@@ -197,53 +197,112 @@ fn start_service() -> Result<(), String> {
     #[cfg(not(any(target_os = "linux", windows)))]
     Err("Local services support Windows and Linux.".into())
 }
+// Content identity prevents a fresh UI from reconnecting to an older API with
+// the same package version (especially during desktop development).
+fn payload_directory_name(manifest: &[u8]) -> Result<String, String> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(manifest).map_err(|_| "Invalid bundled backend manifest.")?;
+    let version = manifest["version"]
+        .as_str()
+        .filter(|v| {
+            !v.is_empty()
+                && !v.contains("..")
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || ".-".contains(c))
+        })
+        .ok_or("Invalid backend version.")?;
+    match manifest.get("buildId") {
+        None => Ok(version.into()),
+        Some(value) => {
+            let id = value
+                .as_str()
+                .filter(|id| id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit()))
+                .ok_or("Invalid backend build identity.")?;
+            Ok(format!("{version}-{id}"))
+        }
+    }
+}
+fn stop_service_for_update(root: &Path, service: &Service) -> Result<(), String> {
+    let address = format!("127.0.0.1:{}", service.port)
+        .parse()
+        .map_err(|_| "Invalid service port.")?;
+    if std::net::TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_err() {
+        return Ok(());
+    }
+    write_private(&root.join("data/desktop-stop"), b"stop")?;
+    for _ in 0..35 {
+        if std::net::TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_err() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    Err("The local API is still stopping. Retry after its current work has stopped.".into())
+}
 fn prepare_local(app: &tauri::AppHandle, install: bool) -> Result<BackendConnection, String> {
     let dir = root(app)?;
-    if !dir.join("service.json").exists() {
-        if !install {
-            return Err("No local service is installed.".into());
-        }
-        let bundle = app
-            .path()
-            .resource_dir()
-            .map_err(|_| "Cannot locate bundled backend.")?
-            .join("backend");
-        let manifest: serde_json::Value =
-            serde_json::from_slice(&fs::read(bundle.join("manifest.json")).map_err(|_| {
-                "Backend payload missing. Run pnpm desktop:prepare or reinstall Vektor."
-            })?)
-            .map_err(|_| "Invalid bundled backend manifest.")?;
-        let version = manifest["version"]
-            .as_str()
-            .filter(|v| {
-                v.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || ".-".contains(c))
-            })
-            .ok_or("Invalid backend version.")?;
-        let payload = dir.join("backend").join(version);
+    let existing = if dir.join("service.json").exists() {
+        Some(service(&dir)?)
+    } else {
+        None
+    };
+    if existing.is_none() && !install {
+        return Err("No local service is installed.".into());
+    }
+    let bundle = app
+        .path()
+        .resource_dir()
+        .map_err(|_| "Cannot locate bundled backend.")?
+        .join("backend");
+    let manifest = fs::read(bundle.join("manifest.json"))
+        .map_err(|_| "Backend payload missing. Run pnpm desktop:prepare or reinstall Vektor.")?;
+    let payload = dir.join("backend").join(payload_directory_name(&manifest)?);
+    let changed = existing.as_ref().is_none_or(|previous| {
+        previous.payload != payload
+            || fs::read(previous.payload.join("manifest.json"))
+                .ok()
+                .as_deref()
+                != Some(manifest.as_slice())
+    });
+    if changed {
+        // Prepare a separate generation before stopping the working service.
         copy_tree(&bundle, &payload)?;
-        let port = TcpListener::bind(("127.0.0.1", 8787))
-            .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))
-            .map_err(|_| "No local API port is available.")?
-            .local_addr()
-            .map_err(|_| "Cannot choose a local API port.")?
-            .port();
-        let service = Service { port, payload };
-        register_service(app, &dir, &service)?;
-        write_private(
-            &dir.join("service.json"),
-            &serde_json::to_vec(&service).map_err(|_| "Cannot serialize service configuration.")?,
-        )?;
+        let port = match &existing {
+            Some(previous) => {
+                stop_service_for_update(&dir, previous)?;
+                previous.port
+            }
+            None => TcpListener::bind(("127.0.0.1", 8787))
+                .or_else(|_| TcpListener::bind(("127.0.0.1", 0)))
+                .map_err(|_| "No local API port is available.")?
+                .local_addr()
+                .map_err(|_| "Cannot choose a local API port.")?
+                .port(),
+        };
+        let updated = Service { port, payload };
+        let registration = register_service(app, &dir, &updated).and_then(|_| {
+            write_private(
+                &dir.join("service.json"),
+                &serde_json::to_vec(&updated)
+                    .map_err(|_| "Cannot serialize service configuration.")?,
+            )
+        });
+        if let Err(error) = registration {
+            if let Some(previous) = &existing {
+                let _ = register_service(app, &dir, previous);
+                let _ = start_service();
+            }
+            return Err(error);
+        }
     }
     let service = service(&dir)?;
     start_service()?;
-    // Startup may create the token a moment later; the async caller waits for readiness first.
     Ok(BackendConnection {
         base_url: format!("http://127.0.0.1:{}", service.port),
         token: String::new(),
         mode: "local".into(),
     })
 }
+
 fn client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(3))
@@ -490,6 +549,28 @@ pub async fn stop_local_service(app: tauri::AppHandle) -> Result<(), String> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn same_version_backend_changes_get_distinct_payloads() {
+        let first = format!(r#"{{"version":"0.1.0","buildId":"{}"}}"#, "a".repeat(64));
+        let second = format!(r#"{{"version":"0.1.0","buildId":"{}"}}"#, "b".repeat(64));
+        assert_ne!(
+            super::payload_directory_name(first.as_bytes()).unwrap(),
+            super::payload_directory_name(second.as_bytes()).unwrap()
+        );
+        assert_eq!(
+            super::payload_directory_name(br#"{"version":"0.1.0"}"#).unwrap(),
+            "0.1.0"
+        );
+    }
+    #[test]
+    fn backend_payload_names_reject_path_traversal() {
+        assert!(super::payload_directory_name(br#"{"version":"../outside"}"#).is_err());
+        assert!(
+            super::payload_directory_name(br#"{"version":"0.1.0","buildId":"../outside"}"#)
+                .is_err()
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn systemd_paths_cannot_expand_specifiers_or_environment() {

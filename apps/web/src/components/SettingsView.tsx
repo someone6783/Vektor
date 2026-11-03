@@ -1,3 +1,4 @@
+import { ModelPicker } from "./ModelPicker";
 import { RunnerSetup } from "./RunnerSetup";
 import { useState } from "react";
 import { setChunkedStreaming, useChunkedStreaming } from "../lib/streamingPreference";
@@ -227,7 +228,11 @@ function ProfileEditor({
         <select
           aria-label={`Runner for ${profile.name}`}
           value={runner}
-          onChange={(event) => setRunner(runnerIdSchema.parse(event.target.value))}
+          onChange={(event) => {
+            const next = runnerIdSchema.parse(event.target.value);
+            setRunner(next);
+            if (next !== runner && next !== "native") setModel("agent-default");
+          }}
           className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 p-2 text-slate-100"
         >
           <option value="native">Native · OpenRouter</option>
@@ -259,19 +264,38 @@ function ProfileEditor({
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <label className="text-[10px] uppercase tracking-wide text-slate-500">Model</label>
-          <input
-            list={`models-${profile.id}`}
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
-          />
-          <datalist id={`models-${profile.id}`}>
-            {(runner === "native" ? models : []).map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </datalist>
+          {runner !== "native" ? (
+            <ModelPicker
+              key={runner}
+              client={client}
+              runner={runner}
+              label={`Model for ${profile.name}`}
+              model={model}
+              models={[]}
+              onChange={setModel}
+            />
+          ) : (
+            <>
+              <input
+                list={`models-${profile.id}`}
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-2 py-1.5 font-mono text-xs text-slate-100 outline-none focus:border-accent-400/50"
+              />
+              <datalist id={`models-${profile.id}`}>
+                {runner.startsWith("acp:") ? (
+                  <option value="agent-default">
+                    Agent default · free models available in OpenCode without sign-in
+                  </option>
+                ) : null}
+                {(runner === "native" ? models : []).map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </datalist>
+            </>
+          )}
         </div>
         <div>
           <label className="text-[10px] uppercase tracking-wide text-slate-500">

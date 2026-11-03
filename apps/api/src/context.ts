@@ -1,3 +1,4 @@
+import { knownContextWindow } from "./runners/context.js";
 import { conversationProfile } from "./conversation-execution.js";
 import { getProfile, listAttachments, listContextHistory, type VektorDatabase } from "@vektor/db";
 import type { ContextEstimate, ContextRequest } from "@vektor/shared";
@@ -29,10 +30,17 @@ export class ContextService {
       throw new AttachmentError("The selected profile is not available.");
     const profile = conversationProfile(this.db, channelId, baseProfile);
     const model = input.model ?? profile.model;
-    const metadata = this.provider.getCachedModels().models.find((item) => item.id === model);
-    const contextWindow = metadata?.contextLength ?? 8192;
+    const runner = input.runner ?? profile.runner ?? "native";
+    const external = runner !== "native";
+    const metadata = external
+      ? undefined
+      : this.provider.getCachedModels().models.find((item) => item.id === model);
+    const contextWindow = external
+      ? knownContextWindow(this.db, runner, model)
+      : (metadata?.contextLength ?? 8192);
     const reservedOutputTokens = profile.maxTokens;
-    const availableInputTokens = Math.max(0, contextWindow - reservedOutputTokens);
+    const availableInputTokens =
+      contextWindow === null ? null : Math.max(0, contextWindow - reservedOutputTokens);
     const allAttachments = listAttachments(this.db, channelId);
     const ids = input.attachmentIds ? new Set(input.attachmentIds) : null;
     if (ids && [...ids].some((id) => !allAttachments.some((file) => file.id === id)))
@@ -72,7 +80,7 @@ export class ContextService {
       systemTokens + currentTokens + history.reduce((sum, item) => sum + messageTokens(item), 0);
     let inputTokens = originalInputTokens;
     let droppedMessages = previous.total - history.length;
-    while (history.length && inputTokens > availableInputTokens) {
+    while (history.length && availableInputTokens !== null && inputTokens > availableInputTokens) {
       inputTokens -= messageTokens(history.shift()!);
       droppedMessages++;
     }
@@ -81,11 +89,12 @@ export class ContextService {
       droppedMessages++;
     }
     const warnings: string[] = [];
-    if ((input.runner ?? profile.runner ?? "native") !== "native")
+    if (external && contextWindow === null)
       warnings.push(
-        "Vektor estimates the explicitly selected text only. The external agent owns compaction and its context limit; exact usage and billing may be unavailable.",
+        `${runner === "codex" ? "Codex" : "The agent"} has not reported its context limit yet.`,
       );
-    if (!metadata?.contextLength) warnings.push("Context limit unknown; using 8,192 tokens.");
+    if (!external && !metadata?.contextLength)
+      warnings.push("Context limit unknown; using 8,192 tokens.");
     if (images.length)
       warnings.push(
         "Images reserve 4,096 tokens each for planning. Actual image tokens depend on the model and resolution.",
@@ -114,7 +123,13 @@ export class ContextService {
       ...(input.reasoning ? { reasoning: input.reasoning } : {}),
       model,
       contextWindow,
-      windowSource: metadata?.contextLength ? "model" : "fallback",
+      windowSource: external
+        ? contextWindow === null
+          ? "unknown"
+          : "agent"
+        : metadata?.contextLength
+          ? "model"
+          : "fallback",
       originalInputTokens,
       inputTokens,
       reservedOutputTokens,
@@ -126,7 +141,10 @@ export class ContextService {
       mcpContextTokens: tokens(mcpContext),
       ...(this.mcp ? { mcpPolicyHash: this.mcp.store.policyHash(profile.id) } : {}),
       droppedMessages,
-      exceedsBudget: inputTokens > availableInputTokens || reservedOutputTokens >= contextWindow,
+      exceedsBudget:
+        contextWindow !== null &&
+        availableInputTokens !== null &&
+        (inputTokens > availableInputTokens || reservedOutputTokens >= contextWindow),
       requiresTruncation: droppedMessages > 0,
       warnings,
     };

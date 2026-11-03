@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Channel, Profile } from "@vektor/shared";
 import { ChatView } from "./ChatView";
@@ -12,6 +12,9 @@ vi.mock("./ContextComposer", () => ({
   ContextComposer: ({ modelControls }: { modelControls?: ReactNode }) => (
     <div data-testid="composer-controls">{modelControls}</div>
   ),
+}));
+vi.mock("./MessageActivity", () => ({
+  MessageActivity: ({ content }: { content: string }) => <p>{content}</p>,
 }));
 vi.mock("./RunTimeline", () => ({ RunTimeline: () => null }));
 afterEach(() => {
@@ -57,6 +60,10 @@ it("offers every available model and shortcuts to terminal and browser settings"
     grants: [],
     registry: null,
   });
+  vi.spyOn(client, "listRunnerModels").mockResolvedValue({
+    models: [{ id: "codex-model", name: "Codex model" }],
+    defaultModel: "codex-model",
+  });
   const change = vi.fn();
   const settings = vi.fn();
   render(
@@ -88,7 +95,7 @@ it("offers every available model and shortcuts to terminal and browser settings"
   expect(screen.getByTestId("composer-controls")).not.toContainElement(runner);
   fireEvent.click(runner);
   fireEvent.click(screen.getByRole("option", { name: "Codex · this message" }));
-  expect(screen.getByLabelText("External runner model")).toBeInTheDocument();
+  expect(screen.getByLabelText("Conversation model")).toBeInTheDocument();
   fireEvent.click(runner);
   fireEvent.click(screen.getByRole("option", { name: "Profile runner · native" }));
   const picker = screen.getByLabelText("Conversation model").closest("details")!;
@@ -107,7 +114,7 @@ it("offers every available model and shortcuts to terminal and browser settings"
   expect(change).toHaveBeenCalledWith("remote");
   fireEvent.click(screen.getByRole("button", { name: "Terminal settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Browser settings" }));
-  expect(settings.mock.calls).toEqual([["terminal"], ["browser"]]);
+  expect(settings.mock.calls).toEqual([["terminal", "native"], ["browser"]]);
 });
 
 it("creates a direct conversation immediately with an unused temporary name", async () => {
@@ -165,7 +172,12 @@ it.each(["basic", "full-unrestricted"])(
       />,
     );
     expect(screen.getByRole("dialog", { name: "Terminal · General" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Terminal access"), { target: { value: terminalMode } });
+    fireEvent.click(screen.getByLabelText("Terminal access"));
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: terminalMode === "basic" ? "Workspace commands" : "Full Unrestricted · no approvals",
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(save).toHaveBeenCalledWith({ terminalMode, sshConnectionId: null }));
     expect(profile.terminalMode).toBe("no-terminal");
@@ -187,7 +199,8 @@ it("saves browser permissions independently of terminal settings", async () => {
       onClose={close}
     />,
   );
-  fireEvent.change(screen.getByLabelText("Browser access"), { target: { value: "observe" } });
+  fireEvent.click(screen.getByLabelText("Browser access"));
+  fireEvent.click(screen.getByRole("option", { name: "Observe" }));
   fireEvent.change(screen.getByLabelText("Allowed website origins"), {
     target: { value: "https://example.com" },
   });
@@ -283,4 +296,156 @@ it("closes the context overlay when a wide workspace becomes narrow", () => {
   expect(context).toHaveAttribute("hidden");
   fireEvent.click(screen.getByRole("button", { name: "Show context" }));
   expect(context).not.toHaveAttribute("hidden");
+});
+
+it("uses the OpenCode default on runner switch and restores each runner's chosen model", async () => {
+  const client = new ApiClient("test");
+  vi.spyOn(client, "runnerSetup").mockResolvedValue({
+    installations: [
+      {
+        id: "acp:opencode",
+        name: "OpenCode",
+        enabled: true,
+        version: "2.2.5",
+        interface: "acp-v1",
+        command: "/fixture/opencode",
+        args: ["acp"],
+        executableHash: "a".repeat(64),
+        source: "fixture",
+        sourceHash: "a".repeat(64),
+        verifiedAt: "2026-11-03T00:00:00Z",
+        inferenceHosts: ["opencode.ai"],
+        credentialName: "OPENAI_API_KEY",
+        credentialConfigured: false,
+        authKind: "native-account",
+      },
+    ],
+    probes: [],
+    grants: [],
+    registry: null,
+  });
+  vi.spyOn(client, "listModels").mockResolvedValue([
+    { id: "openrouter/original-model", name: "Original" },
+  ]);
+  vi.spyOn(client, "listRunnerModels").mockResolvedValue({
+    models: [
+      { id: "opencode/free-default", name: "Free default" },
+      { id: "opencode/free-choice", name: "Free choice" },
+    ],
+    defaultModel: "opencode/free-default",
+  });
+  const change = vi.fn();
+  function Chat() {
+    const [model, setModel] = useState("openrouter/original-model");
+    return (
+      <ChatView
+        client={client}
+        channel={channel}
+        profile={{ ...profile, model }}
+        lastRun={null}
+        messages={[]}
+        live={null}
+        loading={false}
+        loadingMore={false}
+        hasMore={false}
+        error={null}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onRetry={vi.fn()}
+        onLoadMore={vi.fn()}
+        onModelChange={(value) => {
+          change(value);
+          setModel(value);
+        }}
+      />
+    );
+  }
+  render(<Chat />);
+  await waitFor(() => expect(client.runnerSetup).toHaveBeenCalled());
+  const picker = screen.getByLabelText("Runner for this message");
+  fireEvent.click(picker);
+  fireEvent.click(await screen.findByRole("option", { name: "OpenCode · enabled" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Conversation model")).toHaveTextContent("Free default"),
+  );
+  const modelMenu = screen.getByLabelText("Conversation model").closest("details")!;
+  modelMenu.open = true;
+  fireEvent(modelMenu, new Event("toggle"));
+  fireEvent.click(screen.getByRole("option", { name: /Free choice/ }));
+  fireEvent.click(picker);
+  fireEvent.click(screen.getByRole("option", { name: "Profile runner · native" }));
+  expect(change).toHaveBeenLastCalledWith("openrouter/original-model");
+  fireEvent.click(picker);
+  fireEvent.click(screen.getByRole("option", { name: "OpenCode · enabled" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Conversation model")).toHaveTextContent("Free choice"),
+  );
+});
+
+it("regenerates the selected assistant response from its message", () => {
+  const client = new ApiClient("test");
+  vi.spyOn(client, "runnerSetup").mockResolvedValue({
+    installations: [],
+    probes: [],
+    grants: [],
+    registry: null,
+  });
+  const retry = vi.fn();
+  const messages = ["first", "second"].map((id) => ({
+    id,
+    channelId: channel.id,
+    role: "assistant" as const,
+    content: `${id} response`,
+    status: "complete" as const,
+    runId: `${id}-run`,
+    createdAt: "now",
+    attachments: [],
+  }));
+  const { rerender } = render(
+    <ChatView
+      client={client}
+      channel={channel}
+      profile={profile}
+      lastRun={null}
+      messages={messages}
+      live={null}
+      loading={false}
+      loadingMore={false}
+      hasMore={false}
+      error={null}
+      onSend={vi.fn()}
+      onStop={vi.fn()}
+      onRetry={retry}
+      onLoadMore={vi.fn()}
+    />,
+  );
+  const buttons = screen.getAllByRole("button", { name: "Regenerate" });
+  expect(buttons[0]!.parentElement?.parentElement).toHaveTextContent("first response");
+  expect(buttons[1]!.parentElement?.parentElement).toHaveTextContent("second response");
+  fireEvent.click(buttons[0]!);
+  fireEvent.click(buttons[1]!);
+  expect(retry.mock.calls).toEqual([["first-run"], ["second-run"]]);
+  expect(screen.getByTestId("composer-controls")).not.toContainElement(buttons[0]!);
+  rerender(
+    <ChatView
+      client={client}
+      channel={channel}
+      profile={profile}
+      lastRun={null}
+      messages={messages}
+      live={null}
+      loading={false}
+      loadingMore={false}
+      hasMore={false}
+      error={null}
+      emergencyStopped
+      onSend={vi.fn()}
+      onStop={vi.fn()}
+      onRetry={retry}
+      onLoadMore={vi.fn()}
+    />,
+  );
+  screen
+    .getAllByRole("button", { name: "Regenerate" })
+    .forEach((button) => expect(button).toBeDisabled());
 });

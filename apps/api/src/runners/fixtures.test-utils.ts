@@ -5,6 +5,7 @@ def event(method,**params):send({'method':method,'params':{'threadId':'thread','
 for line in sys.stdin:
  m=json.loads(line);method=m.get('method')
  if method=='initialize':send({'id':m['id'],'result':{'userAgent':'codex/0.166.0'}})
+ elif method=='model/list':send({'id':m['id'],'result':{'data':[{'id':'fixture-default','model':'fixture-codex-default','displayName':'Codex default','isDefault':True,'supportedReasoningEfforts':[{'reasoningEffort':'high'}]},{'id':'fixture-other','model':'fixture-codex-other','displayName':'Codex other','isDefault':False}],'nextCursor':None}})
  elif method=='config/read':send({'id':m['id'],'result':{'config':{'features':{k:False for k in ['shell_tool','unified_exec','apps','plugins','browser_use','computer_use']},'mcp_servers':{}}}})
  elif method=='thread/start':
   open(os.path.join(os.environ['HOME'],'state'),'w').write('private history')
@@ -17,7 +18,11 @@ for line in sys.stdin:
   send({'id':m['id'],'result':{'turn':{'id':'turn'}}})
   text=m['params']['input'][0]['text'].rsplit('[user]',1)[-1]
   if 'CRASH' in text:sys.exit(7)
-  if 'NATIVE_AUTH' in text:
+  if 'CONTEXT_REPORT' in text:
+   event('thread/tokenUsage/updated',tokenUsage={'total':{'inputTokens':10000,'outputTokens':50,'totalTokens':10050},'last':{'inputTokens':2000,'outputTokens':10,'totalTokens':2010},'modelContextWindow':272000})
+   event('item/agentMessage/delta',delta='Context reported')
+   event('turn/completed',turn={'id':'turn','status':'completed'})
+  elif 'NATIVE_AUTH' in text:
    auth=json.load(open(os.path.join(os.environ['HOME'],'.codex/auth.json')))
    assert auth['tokens']['access_token']=='native-access-fixture'
    assert not os.environ.get('OPENAI_API_KEY')
@@ -51,7 +56,10 @@ for line in sys.stdin:
  elif method=='session/new':
   if os.environ.get('OPENCODE_DISABLE_AUTOUPDATE'):
    auth=json.load(open(os.path.join(os.environ['HOME'],'.local/share/opencode/auth.json')))
-   assert auth['anthropic']['key']=='native-anthropic-fixture'
+   if auth: assert auth['anthropic']['key']=='native-anthropic-fixture'
+   else:
+    config=json.load(open(os.path.join(os.environ['HOME'],'.config/opencode/opencode.json')))
+    assert config['enabled_providers']==['opencode']
    assert not os.environ.get('OPENROUTER_API_KEY') and not os.environ.get('OPENAI_API_KEY')
   open(os.path.join(os.environ['HOME'],'state'),'w').write('ACP private history')
   send({'id':m['id'],'result':{'sessionId':'acp-session'}})

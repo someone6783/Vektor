@@ -1842,3 +1842,55 @@ select option {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.runner-executable {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.runner-executable code {
+  overflow-wrap: anywhere;
+  color: var(--ui-text);
+}
+.runner-permission-grants {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.runner-permission-grants legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.runner-permission-grants p {
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.conversation-settings .runner-permission-grants label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Form dropdowns use the same themed popup as model, runner and theme pickers. */
+.conversation-settings .settings-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.form-choice {
+  width: 100%;
+  font-size: inherit;
+}
+.form-choice > .choice-trigger {
+  min-height: 36px;
+  padding: 8px 10px;
+  background: var(--ui-surface);
+}
+.choice-menu button[role="option"]:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.choice-menu button[role="option"]:disabled:hover {
+  background: transparent;
+}

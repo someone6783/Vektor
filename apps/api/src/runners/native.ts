@@ -1,6 +1,8 @@
 import { access, mkdir, open, realpath, readdir, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { delimiter, dirname, join, relative, isAbsolute } from "node:path";
 import { z } from "zod";
 import { RuntimeError } from "../runtime/terminal.js";
@@ -48,10 +50,9 @@ export async function readNativeAccount(
         : join(env.XDG_DATA_HOME ?? join(home, ".local/share"), "opencode/auth.json"),
     );
   } catch {
+    if (runner === "opencode") return { runner, auth: {}, hosts: ["opencode.ai"] };
     throw new RuntimeError(
-      runner === "codex"
-        ? "Sign in with `codex login` on the backend machine, then connect again. File-based sign-in is required."
-        : "Open OpenCode on the backend machine and use /connect, then connect again.",
+      "Sign in with `codex login` on the backend machine, then connect again. File-based sign-in is required.",
       409,
     );
   }
@@ -82,15 +83,13 @@ export async function readNativeAccount(
         .safeParse(value).success;
     }),
   );
-  if (!Object.keys(supported).length)
-    throw new RuntimeError(
-      "No supported OpenCode account found. Use /connect for OpenAI, Anthropic, Google, OpenCode or OpenRouter; custom providers use Advanced setup.",
-      409,
-    );
+
   return {
     runner,
     auth: supported,
-    hosts: [...new Set(Object.keys(supported).flatMap((id) => providerHosts[id]!))],
+    hosts: [
+      ...new Set(["opencode.ai", ...Object.keys(supported).flatMap((id) => providerHosts[id]!)]),
+    ],
   };
 }
 export const nativeAuthPath = (home: string, runner: NativeRunner) =>
@@ -103,9 +102,15 @@ export async function stageNativeAccount(home: string, account: NativeAccount): 
   if (account.runner === "opencode") {
     const configPath = join(home, ".config/opencode/opencode.json");
     await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
-    await writeFile(configPath, JSON.stringify({ enabled_providers: Object.keys(account.auth) }), {
-      mode: 0o600,
-    });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        enabled_providers: [...new Set(["opencode", ...Object.keys(account.auth)])],
+      }),
+      {
+        mode: 0o600,
+      },
+    );
   }
 }
 export function accountSecrets(value: string): string[] {
@@ -122,16 +127,75 @@ export function accountSecrets(value: string): string[] {
     return [];
   }
 }
+// Desktop services inherit a smaller PATH than interactive terminals. Like T3,
+// read the user's login-shell PATH without executing a provider or importing secrets.
+async function loginShellDirectories(home: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+  let shell = env.SHELL;
+  if (!shell && env === process.env) {
+    try {
+      shell = userInfo().shell ?? undefined;
+    } catch {
+      /* Use sh below. */
+    }
+  }
+  shell ??= "/bin/sh";
+  if (!isAbsolute(shell)) return [];
+  const marker = `vektor-path-${randomUUID()}`;
+  const script = /^(nu|nu.exe)$/.test(shell.split("/").pop() ?? "")
+    ? `print '${marker}'; print ($env.PATH | str join ':'); print '${marker}'`
+    : `printf '%s\\n' '${marker}'; /usr/bin/printenv PATH; printf '%s\\n' '${marker}'`;
+  return new Promise((resolve) => {
+    const child = spawn(shell, ["-ilc", script], {
+      cwd: home,
+      env: { ...env, HOME: home },
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+      detached: true,
+    });
+    let output = "";
+    let complete = false;
+    const finish = (success: boolean) => {
+      if (complete) return;
+      complete = true;
+      clearTimeout(timer);
+      if (!success && child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }
+      const path = success ? output.split(marker)[1]?.trim() : undefined;
+      resolve(path?.split(delimiter).filter((entry) => isAbsolute(entry)) ?? []);
+    };
+    const timer = setTimeout(() => finish(false), 5000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (Buffer.byteLength(output) > 128 * 1024) finish(false);
+    });
+    child.once("error", () => finish(false));
+    child.once("close", (code) => finish(code === 0));
+  });
+}
 export async function discoverNativeRunners(
   home = homedir(),
   env = process.env,
 ): Promise<Array<{ name: NativeRunner; command: string }>> {
   const directories = [
     ...(env.PATH ?? "/usr/bin:/bin").split(delimiter),
+    ...(await loginShellDirectories(home, env)),
     join(home, ".local/bin"),
     join(home, "bin"),
     join(home, ".opencode/bin"),
     join(home, ".npm-global/bin"),
+    join(home, ".bun/bin"),
+    join(home, ".local/share/pnpm"),
+    join(home, ".volta/bin"),
+    join(home, ".asdf/shims"),
+    join(home, ".local/share/mise/shims"),
+    join(home, ".codex/packages/standalone/current/bin"),
+    ...(env === process.env ? ["/usr/local/bin", "/usr/bin", "/bin"] : []),
   ];
   try {
     for (const version of await readdir(join(home, ".nvm/versions/node")))
@@ -147,9 +211,10 @@ export async function discoverNativeRunners(
         let command = await realpath(join(directory, name));
         await access(command, constants.X_OK);
         // npm entry points are JS launchers; probe the bundled native binary.
-        const file = await open(command, "r");
+        const file = await open(command, constants.O_RDONLY | constants.O_NONBLOCK);
         const header = Buffer.alloc(2);
         try {
+          if (!(await file.stat()).isFile()) continue;
           await file.read(header, 0, 2, 0);
         } finally {
           await file.close();

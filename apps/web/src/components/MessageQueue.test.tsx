@@ -32,3 +32,45 @@ it("offers Steer and Remove alongside the preview and disables steering while pa
   rerender(<MessageQueue queue={queue} channels={[]} paused />);
   expect(steer).toBeDisabled();
 });
+
+it.each([
+  { errorCode: "runner_permissions", error: "Codex needs approved tools." },
+  {
+    error:
+      "External runners currently require Full access with the terminal tool enabled. No-terminal, Basic and Full Unrestricted mappings are unsupported.",
+  },
+  { errorCode: "runner_grants", error: "Missing agent access." },
+])(
+  "offers an actionable review for permission errors without unrelated history controls",
+  (failure) => {
+    const item = {
+      id: "blocked",
+      channelId: "chat",
+      content: "Hello",
+      attachmentIds: [],
+      allowTruncation: false,
+      retry: 0,
+      runner: "codex" as const,
+      ...failure,
+    };
+    const queue: ReturnType<typeof useMessageQueue> = {
+      items: [item],
+      sendingId: null,
+      enqueue: vi.fn(),
+      remove: vi.fn(),
+      retry: vi.fn(),
+      steer: vi.fn(),
+    };
+    const review = vi.fn();
+    render(
+      <MessageQueue queue={queue} channels={[]} paused={false} onReviewPermissions={review} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Review permissions to continue.");
+    expect(screen.queryByText(/mappings are unsupported/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/omitting older history/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review permissions" }));
+    expect(review).toHaveBeenCalledWith(item);
+    expect(queue.retry).not.toHaveBeenCalled();
+    expect(screen.getByText("Hello")).toBeInTheDocument();
+  },
+);

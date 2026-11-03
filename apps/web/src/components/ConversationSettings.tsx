@@ -1,9 +1,11 @@
+import { ChoicePicker } from "./ChoicePicker";
 import { useEffect, useState } from "react";
 import {
   browserPermissionsSchema,
   type Channel,
   type ConversationExecution,
   type Profile,
+  type RunnerId,
   type SshConnection,
   type TerminalMode,
   type BrowserPermissions,
@@ -15,6 +17,8 @@ export function ConversationSettings({
   channel,
   profile,
   section,
+  runner,
+  retryOnSave = false,
   client,
   onSave,
   onClose,
@@ -22,10 +26,24 @@ export function ConversationSettings({
   channel: Channel;
   profile: Profile;
   section: "terminal" | "browser";
+  runner?: RunnerId;
+  retryOnSave?: boolean;
   client?: ApiClient;
   onSave: (execution: ConversationExecution) => Promise<void>;
   onClose: () => void;
 }) {
+  const selectedRunner = runner ?? profile.runner ?? "native";
+  const external =
+    selectedRunner !== "native" && selectedRunner !== "cli" && section === "terminal";
+  const agentName =
+    selectedRunner === "codex"
+      ? "Codex"
+      : selectedRunner === "acp:opencode"
+        ? "OpenCode"
+        : "This agent";
+  const [grant, setGrant] = useState({ workspace: false, inference: false });
+  const [grantLoaded, setGrantLoaded] = useState(false);
+  const [agentAvailable, setAgentAvailable] = useState(false);
   const [terminal, setTerminal] = useState(profile.terminalMode);
   const [sshConnections, setSshConnections] = useState<SshConnection[]>([]);
   const [sshTarget, setSshTarget] = useState<string>(channel.execution?.sshConnectionId ?? "");
@@ -41,6 +59,33 @@ export function ConversationSettings({
       .then(setSshConnections)
       .catch(() => setSshConnections([]));
   }, [client, section]);
+  useEffect(() => {
+    if (!external || !client) return;
+    let active = true;
+    setGrantLoaded(false);
+    void client
+      .runnerSetup()
+      .then((setup) => {
+        if (!active) return;
+        const existing = setup.grants.find(
+          (item) => item.profileId === profile.id && item.runner === selectedRunner,
+        );
+        setGrant({
+          workspace: existing?.workspace ?? false,
+          inference: existing?.inference ?? false,
+        });
+        setAgentAvailable(
+          setup.installations.some((entry) => entry.id === selectedRunner && entry.enabled),
+        );
+        setGrantLoaded(true);
+      })
+      .catch(() => {
+        if (active) setError("Could not load agent access. Reopen these settings to retry.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, external, profile.id, selectedRunner]);
   return (
     <Modal
       title={`${section === "terminal" ? "Terminal" : "Browser"} · ${channel.name}`}
@@ -69,6 +114,18 @@ export function ConversationSettings({
                         .filter(Boolean),
                     }),
                   };
+            if (external) {
+              if (
+                !client ||
+                !grantLoaded ||
+                !agentAvailable ||
+                terminal !== "full-access" ||
+                !grant.workspace ||
+                !grant.inference
+              )
+                throw new Error("Select Full access and allow workspace and model access first.");
+              await client.runnerGrant(profile.id, { runner: selectedRunner, ...grant });
+            }
             await onSave(execution);
             onClose();
           } catch (error) {
@@ -78,37 +135,79 @@ export function ConversationSettings({
           }
         }}
       >
-        <p>Only this conversation.</p>
+        <p>
+          {external
+            ? `Terminal access applies to this conversation. Agent access applies to profile “${profile.name}”.`
+            : "Only this conversation."}
+        </p>
         {section === "terminal" ? (
           <>
-            <label>
-              Terminal access
-              <select
-                aria-label="Terminal access"
+            <div className="settings-field">
+              <span>Terminal access</span>
+              <ChoicePicker
+                className="form-choice"
+                label="Terminal access"
                 value={terminal}
-                onChange={(event) => setTerminal(event.target.value as TerminalMode)}
-              >
-                <option value="no-terminal">Off</option>
-                <option value="basic">Workspace commands</option>
-                <option value="full-access">Full access · approve each command</option>
-                <option value="full-unrestricted">Full Unrestricted · no approvals</option>
-              </select>
-            </label>
+                disabled={busy}
+                onChange={(value) => setTerminal(value as TerminalMode)}
+                options={[
+                  { value: "no-terminal", label: "Off", disabled: external },
+                  { value: "basic", label: "Workspace commands", disabled: external },
+                  { value: "full-access", label: "Full access · approve each command" },
+                  {
+                    value: "full-unrestricted",
+                    label: "Full Unrestricted · no approvals",
+                    disabled: external,
+                  },
+                ]}
+              />
+            </div>
+            {external ? (
+              <fieldset className="runner-permission-grants">
+                <legend>{agentName} access</legend>
+                <p>Each command and file change requires approval.</p>
+                {!grantLoaded ? (
+                  <p role="status">Loading agent access…</p>
+                ) : !agentAvailable ? (
+                  <p role="alert">Connect {agentName} in Agent runner setup first.</p>
+                ) : null}
+                <label>
+                  <input
+                    type="checkbox"
+                    disabled={!grantLoaded || !agentAvailable || busy}
+                    checked={grant.workspace}
+                    onChange={(event) => setGrant({ ...grant, workspace: event.target.checked })}
+                  />
+                  Allow {agentName} workspace access
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    disabled={!grantLoaded || !agentAvailable || busy}
+                    checked={grant.inference}
+                    onChange={(event) => setGrant({ ...grant, inference: event.target.checked })}
+                  />
+                  Allow {agentName} model requests
+                </label>
+              </fieldset>
+            ) : null}
             {terminal !== "no-terminal" ? (
-              <label>
-                Run commands on
-                <select
-                  aria-label="SSH execution target"
+              <div className="settings-field">
+                <span>Run commands on</span>
+                <ChoicePicker
+                  className="form-choice"
+                  label="SSH execution target"
                   value={typeof sshTarget === "string" ? sshTarget : ""}
-                  onChange={(event) => setSshTarget(event.target.value)}
-                >
-                  <option value="">This computer</option>
-                  {sshConnections.map((connection) => (
-                    <option key={connection.id} value={connection.id}>
-                      {connection.name} · {connection.username}@{connection.host}
-                    </option>
-                  ))}
-                </select>
+                  disabled={busy}
+                  onChange={setSshTarget}
+                  options={[
+                    { value: "", label: "This computer" },
+                    ...sshConnections.map((connection) => ({
+                      value: connection.id,
+                      label: `${connection.name} · ${connection.username}@${connection.host}`,
+                    })),
+                  ]}
+                />
                 {sshTarget ? (
                   <span className="text-xs">
                     Commands run over SSH on the selected machine and require its approval mode
@@ -116,56 +215,62 @@ export function ConversationSettings({
                     Workspace commands mode.
                   </span>
                 ) : null}
-              </label>
+              </div>
             ) : null}
           </>
         ) : (
           <>
-            <label>
-              Browser access
-              <select
+            <div className="settings-field">
+              <span>Browser access</span>
+              <ChoicePicker
+                className="form-choice"
+                label="Browser access"
                 value={browser.mode}
-                onChange={(event) =>
-                  setBrowser({ ...browser, mode: event.target.value as BrowserPermissions["mode"] })
+                disabled={busy}
+                onChange={(value) =>
+                  setBrowser({ ...browser, mode: value as BrowserPermissions["mode"] })
                 }
-              >
-                <option value="off">Off</option>
-                <option value="observe">Observe</option>
-                <option value="interactive">Interactive</option>
-              </select>
-            </label>
+                options={[
+                  { value: "off", label: "Off" },
+                  { value: "observe", label: "Observe" },
+                  { value: "interactive", label: "Interactive" },
+                ]}
+              />
+            </div>
             {browser.mode !== "off" ? (
               <>
-                <label>
-                  Session
-                  <select
+                <div className="settings-field">
+                  <span>Session</span>
+                  <ChoicePicker
+                    className="form-choice"
+                    label="Session"
                     value={browser.session}
-                    onChange={(event) =>
-                      setBrowser({
-                        ...browser,
-                        session: event.target.value as BrowserPermissions["session"],
-                      })
+                    disabled={busy}
+                    onChange={(value) =>
+                      setBrowser({ ...browser, session: value as BrowserPermissions["session"] })
                     }
-                  >
-                    <option value="separate">Separate</option>
-                    <option value="default">Saved logins</option>
-                  </select>
-                </label>
-                <label>
-                  Display
-                  <select
+                    options={[
+                      { value: "separate", label: "Separate" },
+                      { value: "default", label: "Saved logins" },
+                    ]}
+                  />
+                </div>
+                <div className="settings-field">
+                  <span>Display</span>
+                  <ChoicePicker
+                    className="form-choice"
+                    label="Display"
                     value={browser.display}
-                    onChange={(event) =>
-                      setBrowser({
-                        ...browser,
-                        display: event.target.value as BrowserPermissions["display"],
-                      })
+                    disabled={busy}
+                    onChange={(value) =>
+                      setBrowser({ ...browser, display: value as BrowserPermissions["display"] })
                     }
-                  >
-                    <option value="headless">Background</option>
-                    <option value="window">Visible window</option>
-                  </select>
-                </label>
+                    options={[
+                      { value: "headless", label: "Background" },
+                      { value: "window", label: "Visible window" },
+                    ]}
+                  />
+                </div>
                 <label>
                   Allowed website origins
                   <textarea
@@ -187,8 +292,20 @@ export function ConversationSettings({
           </>
         )}
         {error ? <p role="alert">{error}</p> : null}
-        <button className="header-control" type="submit" disabled={busy}>
-          {busy ? "Saving…" : "Save"}
+        <button
+          className="header-control"
+          type="submit"
+          disabled={
+            busy ||
+            (external &&
+              (!grantLoaded ||
+                !agentAvailable ||
+                terminal !== "full-access" ||
+                !grant.workspace ||
+                !grant.inference))
+          }
+        >
+          {busy ? "Saving…" : retryOnSave ? "Save and retry" : "Save"}
         </button>
       </form>
     </Modal>

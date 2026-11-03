@@ -90,6 +90,14 @@ export const runnerSetupSchema = z.object({
 });
 export type RunnerSetupView = z.infer<typeof runnerSetupSchema>;
 
+export const runnerContextSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  contextWindow: z.number().int().positive().nullable(),
+});
+export type RunnerContext = z.infer<typeof runnerContextSchema>;
+
 export const harnessStateSchema = z.object({
   contractVersion: z.literal(RUNNER_CONTRACT_VERSION).default(RUNNER_CONTRACT_VERSION),
   interface: z.enum(["codex-app-server", "acp-v1"]),
@@ -102,6 +110,7 @@ export const harnessStateSchema = z.object({
   state: z.enum(["starting", "running", "completed", "failed", "cancelled", "interrupted"]),
   resumeFromRunId: z.string().optional(),
   metricsAvailable: z.boolean(),
+  context: runnerContextSchema.optional(),
   contextSelection: z
     .object({
       attachmentIds: z.array(z.string()),

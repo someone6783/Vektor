@@ -167,7 +167,8 @@ try {
     .waitFor();
   checks.push("reload preserves sign-in, channel and conversation");
   await page.getByRole("button", { name: "Terminal settings", exact: true }).click();
-  await page.getByLabel("Terminal access", { exact: true }).selectOption("basic");
+  await page.getByLabel("Terminal access", { exact: true }).click();
+  await page.getByRole("option", { name: "Workspace commands", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
   assert.equal(
@@ -176,7 +177,8 @@ try {
     "basic",
   );
   await page.getByRole("button", { name: "Browser settings", exact: true }).click();
-  await page.getByRole("combobox", { name: /Browser access/ }).selectOption("observe");
+  await page.getByLabel("Browser access", { exact: true }).click();
+  await page.getByRole("option", { name: "Observe", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
   assert.equal(

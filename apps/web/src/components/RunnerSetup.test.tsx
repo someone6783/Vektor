@@ -26,7 +26,22 @@ describe("runner setup", () => {
       },
     });
     const probeRunner = vi.fn();
-    render(<RunnerSetup client={{ runnerSetup, probeRunner } as unknown as ApiClient} />);
+    render(
+      <RunnerSetup
+        client={
+          {
+            runnerSetup,
+            probeRunner,
+            discoverRunners: vi.fn().mockResolvedValue({
+              executables: [
+                { name: "codex", command: "/detected/codex" },
+                { name: "opencode", command: "/detected/opencode" },
+              ],
+            }),
+          } as unknown as ApiClient
+        }
+      />,
+    );
     expect(runnerSetup).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Load setup" }));
     expect(await screen.findByText(/Test agent · 1.0.0/)).toBeInTheDocument();
@@ -43,6 +58,12 @@ describe("runner setup", () => {
             runnerSetup: vi
               .fn()
               .mockResolvedValue({ probes: [], installations: [], registry: null }),
+            discoverRunners: vi.fn().mockResolvedValue({
+              executables: [
+                { name: "codex", command: "/detected/codex" },
+                { name: "opencode", command: "/detected/opencode" },
+              ],
+            }),
           } as unknown as ApiClient
         }
       />,
@@ -96,7 +117,20 @@ it("keeps credential saving, agent enablement and profile grants as separate exp
   const profile = { id: "profile", name: "Coding" } as Profile;
   render(
     <RunnerSetup
-      client={{ runnerSetup, runnerCredential, enableRunner, runnerGrant } as unknown as ApiClient}
+      client={
+        {
+          runnerSetup,
+          runnerCredential,
+          enableRunner,
+          runnerGrant,
+          discoverRunners: vi.fn().mockResolvedValue({
+            executables: [
+              { name: "codex", command: "/detected/codex" },
+              { name: "opencode", command: "/detected/opencode" },
+            ],
+          }),
+        } as unknown as ApiClient
+      }
       profiles={[profile]}
     />,
   );
@@ -137,7 +171,22 @@ it("keeps manual OpenCode setup available without an OpenRouter default", async 
     .fn()
     .mockResolvedValue({ probes: [probe], installations: [], registry: null });
   const probeRunner = vi.fn().mockResolvedValue(probe);
-  render(<RunnerSetup client={{ runnerSetup, probeRunner } as unknown as ApiClient} />);
+  render(
+    <RunnerSetup
+      client={
+        {
+          runnerSetup,
+          probeRunner,
+          discoverRunners: vi.fn().mockResolvedValue({
+            executables: [
+              { name: "codex", command: "/detected/codex" },
+              { name: "opencode", command: "/detected/opencode" },
+            ],
+          }),
+        } as unknown as ApiClient
+      }
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Set up OpenCode" }));
   expect(probeRunner).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Runner probe interface")).toHaveValue("acp-v1");
@@ -168,11 +217,31 @@ it.each(["codex", "opencode"] as const)(
     const configureRunner = vi.fn();
     render(
       <RunnerSetup
-        client={{ connectRunner, runnerSetup, configureRunner } as unknown as ApiClient}
+        client={
+          {
+            connectRunner,
+            runnerSetup,
+            configureRunner,
+            discoverRunners: vi.fn().mockResolvedValue({
+              executables: [
+                { name: "codex", command: "/detected/codex" },
+                { name: "opencode", command: "/detected/opencode" },
+              ],
+            }),
+          } as unknown as ApiClient
+        }
       />,
     );
     const advanced = screen.getByText("Advanced setup").closest("details");
     expect(advanced).not.toHaveAttribute("open");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: `Connect ${runner === "codex" ? "Codex" : "OpenCode"}`,
+        }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByTitle(`/detected/${runner}`)).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: `Connect ${runner === "codex" ? "Codex" : "OpenCode"}` }),
     );
@@ -188,11 +257,45 @@ it("shows actionable native sign-in failures without claiming connection succeed
         {
           runnerSetup: vi.fn().mockResolvedValue({ probes: [], installations: [], registry: null }),
           connectRunner: vi.fn().mockRejectedValue(new Error("Run codex login, then reconnect.")),
+          discoverRunners: vi.fn().mockResolvedValue({
+            executables: [
+              { name: "codex", command: "/detected/codex" },
+              { name: "opencode", command: "/detected/opencode" },
+            ],
+          }),
         } as unknown as ApiClient
       }
     />,
   );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Connect Codex" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Connect Codex" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("codex login");
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
+});
+
+it("rescans a missing executable without reading credentials or connecting", async () => {
+  const discoverRunners = vi
+    .fn()
+    .mockResolvedValueOnce({ executables: [] })
+    .mockResolvedValue({ executables: [{ name: "codex", command: "/new/tools/codex" }] });
+  const connectRunner = vi.fn();
+  render(
+    <RunnerSetup
+      client={
+        {
+          discoverRunners,
+          connectRunner,
+          runnerSetup: vi.fn().mockResolvedValue({ probes: [], installations: [], registry: null }),
+        } as unknown as ApiClient
+      }
+    />,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Detect executables" })).toBeEnabled(),
+  );
+  expect(screen.getByRole("button", { name: "Connect Codex" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Detect executables" }));
+  expect(await screen.findByTitle("/new/tools/codex")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Connect Codex" })).toBeEnabled());
+  expect(connectRunner).not.toHaveBeenCalled();
 });

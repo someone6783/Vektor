@@ -1,3 +1,4 @@
+import { reasoningEffortSchema, type ModelInfo, type RunnerContext } from "@vektor/shared";
 import { z } from "zod";
 import { harnessError, StdioRpc, type RpcMessage, type RpcOptions } from "./rpc.js";
 
@@ -9,6 +10,7 @@ export type HarnessEvent =
   | { type: "lifecycle"; sessionId: string; turnId: string | null }
   | { type: "tool"; id: string; status: "started" | "completed"; detail: unknown }
   | { type: "usage"; detail: unknown }
+  | { type: "context"; context: RunnerContext }
   | { type: "diff"; detail: unknown };
 export interface SessionOptions extends Omit<RpcOptions, "notification" | "request"> {
   event: (event: HarnessEvent) => void;
@@ -103,6 +105,63 @@ export class CodexSession {
       instructionSources: z.array(z.unknown()).max(0),
     }).parse(raw);
   }
+  async models(): Promise<{ models: ModelInfo[]; defaultModel: string }> {
+    const models: Array<ModelInfo & { isDefault: boolean }> = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const result = z
+        .object({
+          data: z
+            .array(
+              z.object({
+                id: z.string(),
+                model: z.string(),
+                displayName: z.string(),
+                hidden: z.boolean().optional(),
+                isDefault: z.boolean(),
+                inputModalities: z.array(z.string()).optional(),
+                supportedReasoningEfforts: z
+                  .array(z.object({ reasoningEffort: z.string() }))
+                  .default([]),
+              }),
+            )
+            .max(200),
+          nextCursor: z.string().nullable().optional(),
+        })
+        .parse(
+          await this.rpc.call("model/list", {
+            limit: 100,
+            includeHidden: false,
+            ...(cursor ? { cursor } : {}),
+          }),
+        );
+      for (const item of result.data) {
+        if (item.hidden || seen.has(item.model)) continue;
+        seen.add(item.model);
+        models.push({
+          id: item.model,
+          name: item.displayName,
+          isDefault: item.isDefault,
+          supportsImages: !item.inputModalities || item.inputModalities.includes("image"),
+          reasoningEfforts: item.supportedReasoningEfforts.flatMap((entry) => {
+            const effort = reasoningEffortSchema.safeParse(entry.reasoningEffort);
+            return effort.success ? [effort.data] : [];
+          }),
+        });
+      }
+      if (!result.nextCursor) {
+        if (!models.length) throw new Error("Codex returned no available models.");
+        return {
+          models: models.map(({ isDefault: _default, ...model }) => model),
+          defaultModel: (models.find((model) => model.isDefault) ?? models[0])!.id,
+        };
+      }
+      if (result.nextCursor === cursor) throw new Error("Codex repeated its model catalog cursor.");
+      cursor = result.nextCursor;
+    }
+    throw new Error("Codex model catalog exceeded its page limit.");
+  }
   async account(): Promise<unknown> {
     return this.rpc.call("account/read", { refreshToken: false });
   }
@@ -130,9 +189,6 @@ export class CodexSession {
     if (result.thread.id !== threadId) throw new Error("Resume returned a different thread.");
     this.sessionId = threadId;
     this.options.event({ type: "lifecycle", sessionId: threadId, turnId: null });
-  }
-  async models(): Promise<unknown> {
-    return this.rpc.call("model/list", {});
   }
   async prompt(text: string, model?: string): Promise<void> {
     if (!this.sessionId || this.prompting || this.error)
@@ -243,7 +299,12 @@ export class CodexSession {
 
 export class AcpSession {
   private canLoad = false;
-  private modelOption?: { id: string; currentValue: string; values: string[] };
+  private modelOption?: {
+    id: string;
+    currentValue: string;
+    values: string[];
+    names: Record<string, string>;
+  };
   private readonly rpc: StdioRpc;
   private sessionId?: string;
   private prompting = false;
@@ -373,7 +434,7 @@ export class AcpSession {
       .object({
         id: z.string(),
         currentValue: z.string(),
-        options: z.array(z.object({ value: z.string() })),
+        options: z.array(z.object({ value: z.string(), name: z.string().optional() })),
       })
       .safeParse(option);
     if (parsed.success)
@@ -381,7 +442,24 @@ export class AcpSession {
         id: parsed.data.id,
         currentValue: parsed.data.currentValue,
         values: parsed.data.options.map((entry) => entry.value),
+        names: Object.fromEntries(
+          parsed.data.options.map((entry) => [entry.value, entry.name ?? entry.value]),
+        ),
       };
+  }
+  models(): { models: ModelInfo[]; defaultModel: string } {
+    if (!this.modelOption?.values.length)
+      return {
+        models: [{ id: "agent-default", name: "Agent default" }],
+        defaultModel: "agent-default",
+      };
+    return {
+      models: this.modelOption.values.map((value) => ({
+        id: value,
+        name: this.modelOption!.names[value] ?? value,
+      })),
+      defaultModel: this.modelOption.currentValue,
+    };
   }
   async selectModel(model: string): Promise<string> {
     if (model === "agent-default") return this.modelOption?.currentValue ?? "agent-default";

@@ -1,6 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Attachment, Channel, ContextEstimate, Profile } from "@vektor/shared";
+import type {
+  Attachment,
+  Channel,
+  ContextEstimate,
+  Profile,
+  Run,
+  RunnerContext,
+} from "@vektor/shared";
 import { ApiClient } from "../lib/api";
 import { ContextComposer } from "./ContextComposer";
 
@@ -110,8 +117,6 @@ function setup(activeRunCount = 0, busy = false, mcpToolbarTarget: HTMLElement |
       lastRun={null}
       onSend={onSend}
       onStop={() => {}}
-      onRetry={() => {}}
-      canRetry={false}
     />,
   );
 }
@@ -144,8 +149,6 @@ describe("context composer", () => {
           lastRun={null}
           onSend={onSend}
           onStop={() => {}}
-          onRetry={() => {}}
-          canRetry={false}
         />,
       );
       const meter = await within(inspector).findByRole("meter", {
@@ -196,8 +199,6 @@ describe("context composer", () => {
           lastRun={null}
           onSend={onSend}
           onStop={() => {}}
-          onRetry={() => {}}
-          canRetry={false}
         />,
       );
       const checkbox = await within(inspector).findByRole("checkbox", {
@@ -395,4 +396,101 @@ it("previews prepared MCP context and sends only explicitly selected items", asy
   fireEvent.keyDown(trigger, { key: "Escape" });
   expect(trigger.closest("details")).not.toHaveAttribute("open");
   toolbar.remove();
+});
+
+describe("Codex context reporting", () => {
+  const context: RunnerContext = {
+    inputTokens: 2000,
+    outputTokens: 10,
+    totalTokens: 2010,
+    contextWindow: 272000,
+  };
+  const run: Run = {
+    id: "codex-run",
+    channelId: channel.id,
+    profileId: profile.id,
+    userMessageId: "message",
+    model: profile.model,
+    runner: "codex",
+    status: "completed",
+    error: null,
+    usage: { promptTokens: 10000, completionTokens: 50, totalTokens: 10050 },
+    context: null,
+    terminalMode: "full-access",
+    startedAt: "now",
+    endedAt: "now",
+    harness: {
+      contractVersion: 1,
+      interface: "codex-app-server",
+      agentVersion: "0.166.0",
+      executableHash: "verified",
+      cursor: 1,
+      state: "completed",
+      metricsAvailable: true,
+      context,
+    },
+  };
+  function renderCodex(lastRun: Run | null = null, runtimeContext?: RunnerContext) {
+    const target = document.createElement("div");
+    document.body.append(target);
+    const props = {
+      client,
+      channel,
+      profile: { ...profile, runner: "codex" as const },
+      busy: false,
+      historyVersion: 0,
+      lastRun,
+      runtimeContext,
+      onSend,
+      onStop: vi.fn(),
+
+      contextTarget: target,
+    };
+    const view = render(<ContextComposer {...props} />);
+    return { target, props, ...view };
+  }
+  it("hides the misleading 8,192-token fallback and percentage for legacy Codex estimates", async () => {
+    vi.mocked(client.estimateContext).mockResolvedValue({
+      ...estimate,
+      windowSource: "fallback",
+      warnings: ["Context limit unknown; using 8,192 tokens."],
+    });
+    const { target } = renderCodex();
+    await waitFor(() =>
+      expect(within(target).getByText(/context limit unknown/)).toBeInTheDocument(),
+    );
+    expect(within(target).queryByRole("meter")).not.toBeInTheDocument();
+    expect(within(target).queryByText(/8,192/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Context usage")).toHaveTextContent("Context —");
+    target.remove();
+  });
+  it("shows Codex's reported window and latest request while keeping cumulative usage separate", () => {
+    const { target } = renderCodex(run);
+    expect(within(target).getByText("2,010 / 272,000 tokens")).toBeInTheDocument();
+    expect(within(target).getByRole("meter")).toHaveAttribute("value", "2010");
+    expect(within(target).getByText("2,000 input + 10 output")).toBeInTheDocument();
+    expect(within(target).getByText("10,000 input + 50 output tokens")).toBeInTheDocument();
+    expect(screen.getByLabelText("Context usage")).toHaveTextContent("Context 1%");
+    target.remove();
+  });
+  it("updates live context after compaction and ignores reports for a different model", async () => {
+    const { target, props, rerender } = renderCodex(run);
+    rerender(
+      <ContextComposer
+        {...props}
+        runtimeContext={{ ...context, inputTokens: 1000, totalTokens: 1010 }}
+      />,
+    );
+    expect(within(target).getByText("1,010 / 272,000 tokens")).toBeInTheDocument();
+    rerender(
+      <ContextComposer
+        {...props}
+        profile={{ ...props.profile, model: "different-codex-model" }}
+        runtimeContext={context}
+      />,
+    );
+    await waitFor(() => expect(within(target).queryByRole("meter")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Context usage")).toHaveTextContent("Context —");
+    target.remove();
+  });
 });

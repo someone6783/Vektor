@@ -86,3 +86,69 @@ it("stars models without selecting them, pins favourites first and restores them
   fireEvent.click(screen.getByRole("button", { name: "Unstar Beta" }));
   expect(screen.getAllByRole("option")[0]).toHaveTextContent("Alpha");
 });
+
+it("loads Codex models from its runner catalog and replaces an incompatible OpenRouter selection", async () => {
+  const client = new ApiClient("test");
+  const native = vi.spyOn(client, "listModels");
+  vi.spyOn(client, "listRunnerModels").mockResolvedValue({
+    models: [
+      { id: "codex-default", name: "Codex Default" },
+      { id: "codex-other", name: "Codex Other" },
+    ],
+    defaultModel: "codex-default",
+  });
+  const change = vi.fn();
+  render(
+    <ModelPicker
+      client={client}
+      runner="codex"
+      model="openrouter/old-model"
+      models={[]}
+      onChange={change}
+    />,
+  );
+  await waitFor(() => expect(change).toHaveBeenCalledWith("codex-default"));
+  expect(native).not.toHaveBeenCalled();
+  const menu = screen.getByLabelText("Conversation model").closest("details")!;
+  menu.open = true;
+  fireEvent(menu, new Event("toggle"));
+  expect(screen.queryByRole("option", { name: /openrouter/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("option", { name: /Codex Other/ }));
+  expect(change).toHaveBeenLastCalledWith("codex-other");
+});
+it("keeps an already valid Codex model selected", async () => {
+  const client = new ApiClient("test");
+  vi.spyOn(client, "listRunnerModels").mockResolvedValue({
+    models: [
+      { id: "chosen", name: "Chosen" },
+      { id: "default", name: "Default" },
+    ],
+    defaultModel: "default",
+  });
+  const change = vi.fn();
+  render(
+    <ModelPicker client={client} runner="codex" model="chosen" models={[]} onChange={change} />,
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Conversation model")).toHaveTextContent("Chosen"),
+  );
+  expect(change).not.toHaveBeenCalled();
+});
+it("shows actionable runner catalog errors and lets the user retry", async () => {
+  const client = new ApiClient("test");
+  const catalog = vi
+    .spyOn(client, "listRunnerModels")
+    .mockRejectedValueOnce(new Error("Connect Codex first."))
+    .mockResolvedValue({
+      models: [{ id: "codex-model", name: "Codex Model" }],
+      defaultModel: "codex-model",
+    });
+  render(<ModelPicker client={client} runner="codex" model="codex-model" models={[]} />);
+  const menu = screen.getByLabelText("Conversation model").closest("details")!;
+  menu.open = true;
+  fireEvent(menu, new Event("toggle"));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Connect Codex first.");
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(catalog).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole("option", { name: /Codex Model/ })).toBeInTheDocument();
+});

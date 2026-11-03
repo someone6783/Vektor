@@ -45,6 +45,8 @@ function describeEvent(event: RunEvent): string {
       return JSON.stringify(event.detail);
     case "approval.requested":
       return event.command;
+    case "context.updated":
+      return `${event.context.totalTokens} / ${event.context.contextWindow ?? "unknown"} context tokens`;
     case "usage":
       return `${event.totalTokens} tokens`;
     case "run.completed":

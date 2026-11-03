@@ -106,3 +106,47 @@ describe("ACP v1 lifecycle", () => {
     }
   });
 });
+
+describe("Codex model discovery", () => {
+  it("reads paginated provider model ids, names and defaults without starting a turn", async () => {
+    const session = new CodexSession(
+      options(
+        `
+      if(m.method==='initialize')send({id:m.id,result:{userAgent:'codex/0.166.0'}});
+      else if(m.method==='model/list') {
+        if(m.params.includeHidden!==false || m.params.limit!==100)process.exit(1);
+        const next=m.params.cursor==='second';
+        send({id:m.id,result:{data:next ? [{id:'catalog-b',model:'actual-b',displayName:'Model B',isDefault:true,supportedReasoningEfforts:[{reasoningEffort:'high'}]}] : [{id:'catalog-a',model:'actual-a',displayName:'Model A',isDefault:false},{id:'hidden',model:'hidden',displayName:'Hidden',hidden:true,isDefault:false}],nextCursor:next?null:'second'}});
+      } else if(m.method!=='initialized')process.exit(1);
+    `,
+        [],
+      ),
+    );
+    try {
+      await session.initialize();
+      const catalog = await session.models();
+      expect(catalog.defaultModel).toBe("actual-b");
+      expect(catalog.models.map((model) => model.id)).toEqual(["actual-a", "actual-b"]);
+      expect(catalog.models[1]).toMatchObject({ name: "Model B", reasoningEfforts: ["high"] });
+    } finally {
+      await session.close();
+    }
+  });
+  it("rejects a broken pagination cursor instead of looping", async () => {
+    const session = new CodexSession(
+      options(
+        `
+      if(m.method==='initialize')send({id:m.id,result:{userAgent:'codex/0.166.0'}});
+      if(m.method==='model/list')send({id:m.id,result:{data:[],nextCursor:'same'}});
+    `,
+        [],
+      ),
+    );
+    try {
+      await session.initialize();
+      await expect(session.models()).rejects.toThrow("repeated");
+    } finally {
+      await session.close();
+    }
+  });
+});

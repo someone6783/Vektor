@@ -361,10 +361,11 @@ async function acpFixture() {
   });
 }
 describe("ACP agents use the same Vektor execution gate", () => {
-  it.each(["verified-acp", "opencode", "opencode-native"])(
+  it.each(["verified-acp", "opencode", "opencode-native", "opencode-free"])(
     "verifies, enables and executes %s through the complete setup flow",
     async (registryId) => {
-      const nativeConnection = registryId === "opencode-native";
+      const freeModels = registryId === "opencode-free";
+      const nativeConnection = registryId === "opencode-native" || freeModels;
       if (nativeConnection) registryId = "opencode";
       const args = registryId === "opencode" ? ["acp"] : [];
       const credentialName = registryId === "opencode" ? "OPENROUTER_API_KEY" : "ANTHROPIC_API_KEY";
@@ -422,8 +423,8 @@ describe("ACP agents use the same Vektor execution gate", () => {
         ]);
         vi.spyOn(native, "readNativeAccount").mockResolvedValue({
           runner: "opencode",
-          auth: { anthropic: { type: "api", key: "native-anthropic-fixture" } },
-          hosts: ["api.anthropic.com"],
+          auth: freeModels ? {} : { anthropic: { type: "api", key: "native-anthropic-fixture" } },
+          hosts: freeModels ? ["opencode.ai"] : ["api.anthropic.com"],
         });
         vi.spyOn(AgentCatalog.prototype, "sync").mockImplementation(async function (
           this: AgentCatalog,
@@ -700,4 +701,143 @@ describe("native agent connection", () => {
     expect(response.statusCode).toBe(423);
     expect(discover).not.toHaveBeenCalled();
   });
+});
+
+it("loads Codex's own catalog without workspace grants, chat messages or an inference turn", async () => {
+  setSetting(storage.db, `runner.grant.${profileId}`, {
+    runner: "codex",
+    workspace: false,
+    inference: false,
+  });
+  const response = await app.inject({ method: "GET", url: "/api/runners/codex/models", headers });
+  expect(response.statusCode, response.payload).toBe(200);
+  expect(response.json()).toMatchObject({
+    defaultModel: "fixture-codex-default",
+    models: [
+      { id: "fixture-codex-default", name: "Codex default" },
+      { id: "fixture-codex-other", name: "Codex other" },
+    ],
+  });
+  expect(response.payload).not.toContain("external-dummy-secret");
+  expect(listMessages(storage.db, channelId).messages).toHaveLength(0);
+  expect(nativeRequests).toBe(0);
+  expect(existsSync(join(directory, "workspace/hello.txt"))).toBe(false);
+});
+it("resolves Codex's default model when a queued message uses agent-default", async () => {
+  const id = await send("ISOLATION", { model: "agent-default" });
+  await finish(id);
+  expect(getRun(storage.db, id)?.model).toBe("fixture-codex-default");
+});
+it("does not launch disabled runners when loading a model catalog", async () => {
+  const entries = getSetting(storage.db, "runner.installations") as Array<Record<string, unknown>>;
+  setSetting(
+    storage.db,
+    "runner.installations",
+    entries.map((entry) => ({ ...entry, enabled: false })),
+  );
+  const response = await app.inject({ method: "GET", url: "/api/runners/codex/models", headers });
+  expect(response.statusCode).toBe(409);
+  expect(response.payload).toContain("Connect and enable");
+});
+
+it("returns actionable permission codes and accepts an explicitly approved conversation setup", async () => {
+  await app.inject({
+    method: "PATCH",
+    url: `/api/profiles/${profileId}`,
+    headers,
+    payload: { terminalMode: "no-terminal", tools: [] },
+  });
+  setSetting(storage.db, `runner.grant.${profileId}`, {
+    runner: "codex",
+    workspace: false,
+    inference: false,
+  });
+  const blocked = await app.inject({
+    method: "POST",
+    url: `/api/channels/${channelId}/messages`,
+    headers,
+    payload: { content: "ISOLATION" },
+  });
+  expect(blocked.statusCode).toBe(409);
+  expect(blocked.json().error.code).toBe("runner_permissions");
+  expect(blocked.json().error.message).toContain("Review permissions");
+  expect(blocked.payload).not.toContain("mappings are unsupported");
+  const saved = await app.inject({
+    method: "PATCH",
+    url: `/api/channels/${channelId}`,
+    headers,
+    payload: { execution: { terminalMode: "full-access", sshConnectionId: null } },
+  });
+  expect(saved.statusCode, saved.payload).toBe(200);
+  const grantBlocked = await app.inject({
+    method: "POST",
+    url: `/api/channels/${channelId}/messages`,
+    headers,
+    payload: { content: "ISOLATION" },
+  });
+  expect(grantBlocked.json().error.code).toBe("runner_grants");
+  const granted = await app.inject({
+    method: "PUT",
+    url: `/api/profiles/${profileId}/runner-grant`,
+    headers,
+    payload: { runner: "codex", workspace: true, inference: true },
+  });
+  expect(granted.statusCode).toBe(200);
+  const runId = await send("ISOLATION");
+  await finish(runId);
+  const profiles = (await app.inject({ method: "GET", url: "/api/profiles", headers })).json()
+    .profiles;
+  expect(profiles.find((entry: { id: string }) => entry.id === profileId).terminalMode).toBe(
+    "no-terminal",
+  );
+});
+
+it("does not apply an OpenRouter fallback context limit to Codex", async () => {
+  setSetting(storage.db, "provider.openrouter.models", {
+    fetchedAt: Date.now(),
+    models: [{ id: "test-model", name: "Unrelated native model", contextLength: 8192 }],
+  });
+  const preview = await app.inject({
+    method: "POST",
+    url: `/api/channels/${channelId}/context`,
+    headers,
+    payload: { content: "word ".repeat(9000) },
+  });
+  expect(preview.statusCode, preview.payload).toBe(200);
+  expect(preview.json()).toMatchObject({
+    contextWindow: null,
+    availableInputTokens: null,
+    windowSource: "unknown",
+    exceedsBudget: false,
+    droppedMessages: 0,
+  });
+  expect(preview.json().inputTokens).toBeGreaterThan(8192);
+  expect(preview.json().warnings.join(" ")).not.toContain("8,192");
+});
+it("persists and streams Codex context separately from cumulative usage and learns its real window", async () => {
+  const runId = await send("CONTEXT_REPORT");
+  await finish(runId);
+  const run = getRun(storage.db, runId)!;
+  expect((run.harness as { context: unknown }).context).toEqual({
+    inputTokens: 2000,
+    outputTokens: 10,
+    totalTokens: 2010,
+    contextWindow: 272000,
+  });
+  expect(run.usage).toMatchObject({
+    promptTokens: 10000,
+    completionTokens: 50,
+    totalTokens: 10050,
+  });
+  const events = listRunEvents(storage.db, runId).map((event) => JSON.parse(event.payloadJson));
+  expect(
+    events.some((event) => event.type === "context.updated" && event.context.totalTokens === 2010),
+  ).toBe(true);
+  const preview = await app.inject({
+    method: "POST",
+    url: `/api/channels/${channelId}/context`,
+    headers,
+    payload: { content: "Next message" },
+  });
+  expect(preview.json()).toMatchObject({ contextWindow: 272000, windowSource: "agent" });
 });

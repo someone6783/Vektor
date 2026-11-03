@@ -154,7 +154,11 @@ export async function buildApp({
       .code(status)
       .send(
         makeApiError(
-          isServerError ? "internal_error" : "request_error",
+          isServerError
+            ? "internal_error"
+            : error instanceof RuntimeError && error.code
+              ? error.code
+              : "request_error",
           isServerError
             ? "Internal server error."
             : redact(normalized.message ?? "Request failed."),

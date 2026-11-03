@@ -98,6 +98,8 @@ export function RunnerSetup({
   const [kind, setKind] = useState<"codex-app-server" | "acp-v1">("codex-app-server");
   const [query, setQuery] = useState("");
   const [discovered, setDiscovered] = useState<Array<{ name: string; command: string }>>([]);
+  const [detecting, setDetecting] = useState(true);
+  const [detectionError, setDetectionError] = useState("");
   const [selectedProbe, setSelectedProbe] = useState("");
   const [entryId, setEntryId] = useState("codex");
   const [hosts, setHosts] = useState("api.openai.com");
@@ -120,6 +122,35 @@ export function RunnerSetup({
       active = false;
     };
   }, [client, onInstallations]);
+  async function detectExecutables() {
+    setDetecting(true);
+    setDetectionError("");
+    try {
+      setDiscovered((await client.discoverRunners()).executables);
+    } catch {
+      setDetectionError("Could not detect executables. Retry detection.");
+    } finally {
+      setDetecting(false);
+    }
+  }
+  useEffect(() => {
+    let active = true;
+    setDetecting(true);
+    setDetectionError("");
+    void (async () => client.discoverRunners())()
+      .then((result) => {
+        if (active) setDiscovered(result.executables);
+      })
+      .catch(() => {
+        if (active) setDetectionError("Could not detect executables. Retry detection.");
+      })
+      .finally(() => {
+        if (active) setDetecting(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [client]);
   async function connect(runner: "codex" | "opencode") {
     setConnecting(runner);
     setNotice("");
@@ -156,7 +187,7 @@ export function RunnerSetup({
     <section className="runner-setup rounded-2xl border border-white/10 bg-white/[0.02] p-5">
       <h2 className="text-sm font-semibold">Agent runner setup</h2>
       <p className="mt-2 text-xs text-slate-400">
-        Connect an installed agent using its existing sign-in.
+        Connect an installed agent. OpenCode free models need no sign-in.
       </p>
       <div className="native-runner-grid">
         {(["codex", "opencode"] as const).map((runner) => {
@@ -164,6 +195,7 @@ export function RunnerSetup({
           const entry = data?.installations?.find(
             (item) => item.id === (runner === "codex" ? "codex" : "acp:opencode"),
           );
+          const executable = discovered.find((item) => item.name === runner);
           const connected = entry?.authKind === "native-account" && entry.enabled;
           return (
             <article className="native-runner-card" key={runner}>
@@ -176,10 +208,26 @@ export function RunnerSetup({
               <p className="text-slate-400">
                 {runner === "codex"
                   ? "ChatGPT account or Codex API key"
-                  : "Your OpenCode provider accounts"}
+                  : "Free models · no sign-in required"}
               </p>
+              <div className="runner-executable">
+                <span className="text-slate-500">Executable</span>
+                {detecting ? (
+                  <span>Detecting…</span>
+                ) : executable ? (
+                  <code title={executable.command}>{executable.command}</code>
+                ) : (
+                  <span className="text-slate-400">
+                    {detectionError ? "Detection unavailable" : "Not found"}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" disabled={busy} onClick={() => void connect(runner)}>
+                <button
+                  type="button"
+                  disabled={busy || detecting || (!executable && !detectionError)}
+                  onClick={() => void connect(runner)}
+                >
                   {connecting === runner
                     ? "Connecting…"
                     : connected
@@ -201,9 +249,17 @@ export function RunnerSetup({
           );
         })}
       </div>
-      <p className="text-xs text-slate-500">
-        Finds and verifies the executable on the backend machine. Uses saved sign-in; no OpenRouter
-        setup required.
+      <button type="button" disabled={busy || detecting} onClick={() => void detectExecutables()}>
+        {detecting ? "Detecting executables…" : "Detect executables"}
+      </button>
+      {detectionError ? (
+        <p role="status" className="text-xs text-slate-400">
+          {detectionError}
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs text-slate-500">
+        Finds and verifies the executable on the backend machine. OpenCode supports free models
+        without sign-in.
       </p>
       {notice ? (
         <p role="status" className="text-xs text-emerald-300">
@@ -219,7 +275,7 @@ export function RunnerSetup({
         <div className="mt-4 border-t border-white/10 pt-3 text-xs">
           <h3 className="font-semibold">Profile grants</h3>
           <p className="mt-1 text-slate-500">
-            Choose an agent and allow workspace and account access. Requires Full access with
+            Choose an agent and allow workspace and model access. Requires Full access with
             approvals.
           </p>
           {profiles.map((profile) => {
@@ -276,7 +332,7 @@ export function RunnerSetup({
                         )
                       }
                     />{" "}
-                    {capability === "workspace" ? "Workspace" : "Agent account"}
+                    {capability === "workspace" ? "Workspace" : "Model access"}
                   </label>
                 ))}
               </div>

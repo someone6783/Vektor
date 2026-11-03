@@ -265,7 +265,13 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
       /* Storage may be disabled. */
     }
   }, [reasoningOverrides]);
-  const [executionSection, setExecutionSection] = useState<"terminal" | "browser" | null>(null);
+  const [executionSection, setExecutionSection] = useState<{
+    section: "terminal" | "browser";
+    runner?: RunnerId;
+    profileId?: string;
+    channelId?: string;
+    retryId?: string;
+  } | null>(null);
   const baseProfile = useMemo(() => {
     if (activeChannel?.profileId) {
       const match = profiles.find((profile) => profile.id === activeChannel.profileId);
@@ -294,8 +300,8 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
     [baseProfile, activeChannel, activeChannelId, modelOverrides],
   );
 
-  const openExecutionSettings = (section: "terminal" | "browser") => {
-    setExecutionSection(section);
+  const openExecutionSettings = (section: "terminal" | "browser", runner?: RunnerId) => {
+    setExecutionSection({ section, runner });
   };
 
   const bootedRef = useRef<string | null>(null);
@@ -1077,7 +1083,23 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             hasMore={nextBefore !== null}
             error={error}
             queuedMessages={
-              <MessageQueue queue={messageQueue} channels={channels} paused={emergencyStopped} />
+              <MessageQueue
+                queue={messageQueue}
+                channels={channels}
+                paused={emergencyStopped}
+                onReviewPermissions={(item) => {
+                  if (item.channelId !== activeChannelId) selectChannel(item.channelId);
+                  setExecutionSection({
+                    section: "terminal",
+                    runner:
+                      item.runner ??
+                      profiles.find((profile) => profile.id === item.profileId)?.runner,
+                    profileId: item.profileId,
+                    channelId: item.channelId,
+                    retryId: item.id,
+                  });
+                }}
+              />
             }
             onSend={sendMessage}
             onStop={stopRun}
@@ -1117,12 +1139,22 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
           )}
         </Modal>
       ) : null}
-      {executionSection && activeChannel && activeProfile ? (
+      {executionSection &&
+      activeChannel &&
+      activeProfile &&
+      (!executionSection.channelId || executionSection.channelId === activeChannel.id) ? (
         <ConversationSettings
-          key={`${activeChannel.id}-${executionSection}`}
+          key={`${activeChannel.id}-${executionSection.section}-${executionSection.runner ?? "profile"}`}
           channel={activeChannel}
-          profile={activeProfile}
-          section={executionSection}
+          profile={
+            executionSection.profileId && executionSection.profileId !== activeProfile.id
+              ? (profiles.find((profile) => profile.id === executionSection.profileId) ??
+                activeProfile)
+              : activeProfile
+          }
+          runner={executionSection.runner}
+          retryOnSave={!!executionSection.retryId}
+          section={executionSection.section}
           client={client}
           onClose={() => setExecutionSection(null)}
           onSave={async (execution) => {
@@ -1130,6 +1162,8 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             setChannels((value) =>
               value.map((channel) => (channel.id === updated.id ? updated : channel)),
             );
+            const pending = messageQueue.items.find((item) => item.id === executionSection.retryId);
+            if (pending) messageQueue.retry(pending.id, pending.allowTruncation);
           }}
         />
       ) : null}

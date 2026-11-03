@@ -68,6 +68,21 @@ try {
   assert.equal((await fetch(`${base}/api/settings`)).status, 401);
   const auth = { Authorization: `Bearer ${token}` };
   assert.equal((await fetch(`${base}/api/settings`, { headers: auth })).status, 200);
+  const discovery = await fetch(`${base}/api/runners/discover`, { headers: auth });
+  assert.equal(discovery.status, 200);
+  assert.ok(Array.isArray((await discovery.json()).executables));
+  // Invalid input checks route availability without probing or importing an account.
+  assert.equal(
+    (
+      await fetch(`${base}/api/runners/connect`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: "{}",
+      })
+    ).status,
+    400,
+    "Bundled API must expose native agent connection",
+  );
   const { code } = await (
     await fetch(`${base}/api/session-link`, { method: "POST", headers: auth })
   ).json();

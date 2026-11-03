@@ -42,7 +42,9 @@ Data lives under the Tauri application local-data directory:
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/app.vektor.desktop/data`
 - Windows: `%LOCALAPPDATA%\app.vektor.desktop\data`
 
-Installed runtimes live beside `data` under `backend/<version>`. Credentials and
+Installed runtimes live beside `data` under `backend/<version>-<build-id>`. On launch,
+the desktop refreshes an outdated local API from its bundled payload, including
+same-version development builds. The service keeps its existing data and port. Credentials and
 configuration are private to your user (0700 directories/0600 files on Unix, inherited
 user-profile ACLs on Windows). API logs are in `data/logs`. Never delete this directory
 to repair the desktop; it contains your workspace, database and encryption key.

@@ -93,8 +93,10 @@ The composer estimates context using the same assembly policy as the runner:
 profile prompt, up to 100 recent completed messages, current message, and selected
 files. Text uses `cl100k_base` tokenization plus message overhead. Images reserve
 4,096 tokens each for planning; actual counts depend on the provider and resolution.
-The cached OpenRouter model list supplies the context window; when unknown, Vektor
-uses 8,192 tokens and labels the fallback. Refresh models in Settings to update it.
+For native chat, the cached OpenRouter model list supplies the context window; when
+unknown, Vektor uses 8,192 tokens and labels the fallback. Codex reports its own
+context window and latest-request usage during a run. The inspector shows those
+separately from cumulative usage; until reported, the Codex limit stays unknown. Refresh models in Settings to update it.
 The profile's max output tokens are reserved and sent to the provider.
 
 When context exceeds the budget, Vektor proposes omitting the oldest history and
@@ -292,17 +294,20 @@ shutdown. CI builds and checks both Windows and Linux payloads. See
 ### Codex and ACP runners
 
 Settings → Agent runner setup offers **Connect Codex** and **Connect OpenCode**.
-One action finds the installed executable, verifies it, imports its saved sign-in
-and enables it. Codex uses its ChatGPT account or API key; OpenCode uses its own
+The cards automatically show executable paths using the backend user’s login-shell
+PATH and common installation folders. **Detect executables** refreshes the search.
+One action verifies the detected executable, imports its saved sign-in
+and enables it. Codex uses its ChatGPT account or API key; OpenCode supports free models without an account and can also use its own
 provider accounts. Neither requires Vektor's OpenRouter settings.
 
-Sign in on the backend machine first: `codex login` (file credential storage) or
-OpenCode's `/connect`. Detection checks PATH and common user installation locations,
+Codex needs `codex login` (file credential storage). OpenCode can connect without
+sign-in for free models; `/connect` is optional for other providers. Detection checks PATH and common user installation locations,
 including native binaries behind npm launchers. Docker detects inside the container,
 not on the desktop host. Codex remains pinned to app-server 0.166.0; OpenCode must
 match its checksum-verified official ACP registry binary. Unsupported installations
 show an error. **Advanced setup** contains manual paths, other ACP agents, separate
-API keys and registry diagnostics.
+API keys and registry diagnostics. Model pickers load the selected runner’s catalog
+(Codex `model/list` or ACP session options), with a separate selection for each runner.
 
 Imported accounts are encrypted, staged only in each isolated runner home and
 removed before session checkpoints. Host plugins and executable configuration are

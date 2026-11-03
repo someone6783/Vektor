@@ -9,6 +9,7 @@ import type {
   ContextEstimate,
   Profile,
   Run,
+  RunnerContext,
   McpContext,
 } from "@vektor/shared";
 import type { ApiClient } from "../lib/api";
@@ -26,6 +27,7 @@ interface Props {
   busy: boolean;
   historyVersion: number;
   lastRun: Run | null;
+  runtimeContext?: RunnerContext;
   onSend: (
     content: string,
     attachmentIds: string[],
@@ -33,8 +35,6 @@ interface Props {
     mcpContextIds?: string[],
   ) => Promise<void>;
   onStop: () => void;
-  onRetry: () => void;
-  canRetry: boolean;
 }
 
 export function ContextComposer({
@@ -49,10 +49,9 @@ export function ContextComposer({
   busy,
   historyVersion,
   lastRun,
+  runtimeContext,
   onSend,
   onStop,
-  onRetry,
-  canRetry,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
@@ -82,11 +81,31 @@ export function ContextComposer({
   const mounted = useRef(true);
 
   const includedFiles = files.filter((file) => file.included).length;
-  const contextPercent = estimate
-    ? Math.ceil(
-        ((estimate.inputTokens + estimate.reservedOutputTokens) / estimate.contextWindow) * 100,
-      )
-    : null;
+  const external = (profile.runner ?? "native") !== "native";
+  const agentName = profile.runner === "codex" ? "Codex" : "Agent";
+  const matchingRun =
+    lastRun !== null &&
+    lastRun.runner === profile.runner &&
+    lastRun.profileId === profile.id &&
+    lastRun.channelId === channel.id &&
+    (lastRun.model === profile.model || lastRun.model === "agent-default");
+  const reportedContext =
+    profile.runner === "codex" && matchingRun
+      ? (runtimeContext ?? lastRun?.harness?.context)
+      : undefined;
+  const contextWindow = reportedContext
+    ? reportedContext.contextWindow
+    : estimate &&
+        (!external || (estimate.windowSource === "agent" && estimate.model === profile.model))
+      ? estimate.contextWindow
+      : null;
+  const contextTokens =
+    reportedContext?.totalTokens ??
+    (estimate ? estimate.inputTokens + estimate.reservedOutputTokens : null);
+  const contextPercent =
+    contextWindow !== null && contextTokens !== null
+      ? Math.ceil((contextTokens / contextWindow) * 100)
+      : null;
 
   useEffect(() => {
     mounted.current = true;
@@ -436,12 +455,6 @@ export function ContextComposer({
               >
                 Stop
               </button>
-            ) : canRetry ? (
-              <OverflowMenu label="Message actions">
-                <button type="button" disabled={executionStopped} onClick={onRetry}>
-                  <Icon name="refresh" /> Regenerate
-                </button>
-              </OverflowMenu>
             ) : null}
             {modelControls}
             <button
@@ -486,7 +499,7 @@ export function ContextComposer({
               strokeDasharray={`${Math.min(contextPercent ?? 0, 100)} 100`}
             />
           </svg>
-          Context {contextPercent === null ? "…" : `${contextPercent}%`}
+          Context {contextPercent === null ? (external ? "—" : "…") : `${contextPercent}%`}
         </span>
         <span
           title="Active runs across all channels"
@@ -519,30 +532,53 @@ export function ContextComposer({
                 )}
               </section>
               <section className="context-section">
-                <h3>Context budget</h3>
-                <p>Estimated next request</p>
-                {estimate ? (
+                <h3>{external ? `${agentName} context` : "Context budget"}</h3>
+                <p>{reportedContext ? "Latest model request" : "Estimated next request"}</p>
+                {estimate || reportedContext ? (
                   <>
-                    <meter
-                      aria-label="Inspector context budget"
-                      min={0}
-                      max={estimate.contextWindow}
-                      value={Math.min(
-                        estimate.contextWindow,
-                        estimate.inputTokens + estimate.reservedOutputTokens,
-                      )}
-                    />
+                    {contextWindow !== null && contextTokens !== null ? (
+                      <meter
+                        aria-label="Inspector context budget"
+                        min={0}
+                        max={contextWindow}
+                        value={Math.min(contextWindow, contextTokens)}
+                      />
+                    ) : null}
                     <p>
-                      {(estimate.inputTokens + estimate.reservedOutputTokens).toLocaleString()} /{" "}
-                      {estimate.contextWindow.toLocaleString()} tokens
+                      {contextTokens?.toLocaleString()}{" "}
+                      {contextWindow !== null
+                        ? `/ ${contextWindow.toLocaleString()} tokens`
+                        : "tokens · context limit unknown"}
                     </p>
-                    <p>
-                      {estimate.inputTokens.toLocaleString()} input +{" "}
-                      {estimate.reservedOutputTokens.toLocaleString()} reserved output
-                    </p>
-                    {estimate.warnings.map((warning) => (
-                      <p key={warning}>{warning}</p>
-                    ))}
+                    {reportedContext ? (
+                      <p>
+                        {reportedContext.inputTokens.toLocaleString()} input +{" "}
+                        {reportedContext.outputTokens.toLocaleString()} output
+                      </p>
+                    ) : estimate ? (
+                      <p>
+                        {estimate.inputTokens.toLocaleString()} input +{" "}
+                        {estimate.reservedOutputTokens.toLocaleString()} reserved output
+                      </p>
+                    ) : null}
+                    {external ? (
+                      <p>
+                        {contextWindow === null
+                          ? `Waiting for ${agentName} to report its context window.`
+                          : `${agentName} manages compaction.`}
+                      </p>
+                    ) : null}
+                    {estimate?.warnings
+                      .filter(
+                        (warning) =>
+                          !external ||
+                          !/8,192|explicitly selected text|has not reported its context limit/.test(
+                            warning,
+                          ),
+                      )
+                      .map((warning) => (
+                        <p key={warning}>{warning}</p>
+                      ))}
                   </>
                 ) : (
                   <p>Estimating context…</p>

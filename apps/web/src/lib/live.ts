@@ -1,4 +1,4 @@
-import type { RunEvent, RunStatus, RunUsage } from "@vektor/shared";
+import type { RunEvent, RunStatus, RunUsage, RunnerContext } from "@vektor/shared";
 
 export interface LiveToolCall {
   id: string;
@@ -14,6 +14,7 @@ export interface LiveRun {
   text: string;
   status: RunStatus;
   usage: RunUsage | null;
+  context?: RunnerContext;
   tools: LiveToolCall[];
   lastSeq: number;
   phase: "thinking" | "responding" | "tools";
@@ -101,6 +102,8 @@ export function applyRunEvent(live: LiveRun, event: RunEvent): LiveRun {
           : "thinking",
       };
     }
+    case "context.updated":
+      return { ...next, context: event.context };
     case "usage":
       return {
         ...next,

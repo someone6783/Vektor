@@ -41,6 +41,21 @@ export function registerRunnerRoutes(
       ...installations.grant(profile.id),
     })),
   }));
+  app.get("/api/runners/:id/models", async (request) => {
+    manager.assertCanStart();
+    const { id } = z
+      .object({ id: z.string().regex(/^(codex|acp:[a-z0-9][a-z0-9._-]{0,99})$/) })
+      .parse(request.params);
+    try {
+      return await external.models(id);
+    } catch (error) {
+      if (error instanceof RuntimeError) throw error;
+      throw new RuntimeError(
+        "Could not load this agent's models. Reconnect it in Settings and retry.",
+        409,
+      );
+    }
+  });
   app.get("/api/runners/discover", async () => {
     const names = new Set([
       "codex",
