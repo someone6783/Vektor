@@ -171,10 +171,7 @@ export function ChatView({
     };
   }, [client, profile?.id]);
   const [contextTarget, setContextTarget] = useState<HTMLDivElement | null>(null);
-  const [contextOpen, setContextOpen] = useState(
-    () =>
-      typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1101px)").matches,
-  );
+  const [contextOpen, setContextOpen] = useState(false);
   const [contextTab, setContextTab] = useState<string>("context");
   const toggleTab = (tab: "context" | "git") => {
     if (!contextOpen) {
@@ -188,7 +185,9 @@ export function ChatView({
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const desktop = window.matchMedia("(min-width: 1101px)");
-    const updateContext = () => setContextOpen(desktop.matches);
+    const updateContext = () => {
+      if (!desktop.matches) setContextOpen(false);
+    };
     desktop.addEventListener("change", updateContext);
     return () => desktop.removeEventListener("change", updateContext);
   }, []);
@@ -207,9 +206,9 @@ export function ChatView({
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-400">
             No conversation selected
           </p>
-          <h2 className="mt-3 text-2xl font-semibold">Create a channel to start.</h2>
+          <h2 className="mt-3 text-2xl font-semibold">What would you like to work on?</h2>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            Pick a profile, then create a channel or a direct conversation in the sidebar.
+            Choose New chat in the sidebar to start a conversation with your assistant.
           </p>
         </div>
       </div>
@@ -221,13 +220,13 @@ export function ChatView({
   return (
     <section className="chat-workspace">
       <header className="chat-header flex items-center gap-3 border-b px-6 py-3">
-        <div className="min-w-0">
+        <div className="chat-title min-w-0">
           <h1 className="truncate text-sm font-semibold text-slate-100">
-            <span className="mr-1 text-slate-500">{channel.kind === "dm" ? "@" : "#"}</span>
+            {channel.kind === "channel" ? <span className="mr-1 text-slate-500">#</span> : null}
             {channel.name}
           </h1>
           <p className="truncate text-[11px] text-slate-500">
-            {channel.topic || (channel.kind === "dm" ? "Direct conversation" : "Channel")}
+            {channel.topic || (channel.kind === "dm" ? "Conversation" : "Channel conversation")}
           </p>
         </div>
         <div className="chat-profile ml-auto flex min-w-0 items-center gap-2 rounded-lg px-3 py-1 text-xs text-slate-400">
@@ -331,8 +330,13 @@ export function ChatView({
                 <div className="ml-auto h-12 w-1/2 animate-pulse rounded-2xl bg-white/5" />
               </div>
             ) : messages.length === 0 && !live ? (
-              <div className="mx-auto mt-16 max-w-md text-center">
-                <p className="text-sm font-medium text-slate-300">Start the conversation.</p>
+              <div className="chat-welcome">
+                <span className="chat-welcome-icon">
+                  <Icon name="chat" />
+                </span>
+                <p className="chat-welcome-eyebrow">A little space to think</p>
+                <h2>What would you like to work on?</h2>
+                <p>Ask a question, explore an idea, or give {profile.name} a task.</p>
               </div>
             ) : (
               <div className="chat-column flex flex-col gap-6">

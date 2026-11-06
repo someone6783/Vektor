@@ -129,9 +129,9 @@ it("creates a direct conversation immediately with an unused temporary name", as
       onArchive={vi.fn()}
     />,
   );
-  fireEvent.click(screen.getByTitle("New direct conversation"));
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
   expect(create).toHaveBeenCalledWith("New conversation 3", "dm");
-  await waitFor(() => expect(screen.getByTitle("New direct conversation")).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "New chat" })).toBeEnabled());
 });
 
 it("places a menu above a trigger near the viewport bottom and clamps its width", async () => {
@@ -266,7 +266,7 @@ it("keeps settled conversations at the bottom, opens their history and offers Re
   );
 });
 
-it("closes the context overlay when a wide workspace becomes narrow", () => {
+it("keeps context closed by default and closes it when a wide workspace becomes narrow", () => {
   const media = Object.assign(new EventTarget(), { matches: true });
   vi.stubGlobal("matchMedia", () => media);
   render(
@@ -288,6 +288,8 @@ it("closes the context overlay when a wide workspace becomes narrow", () => {
     />,
   );
   const context = screen.getByLabelText("Workspace context");
+  expect(context).toHaveAttribute("hidden");
+  fireEvent.click(screen.getByRole("button", { name: "Show context" }));
   expect(context).not.toHaveAttribute("hidden");
   act(() => {
     media.matches = false;
@@ -448,4 +450,43 @@ it("regenerates the selected assistant response from its message", () => {
   screen
     .getAllByRole("button", { name: "Regenerate" })
     .forEach((button) => expect(button).toBeDisabled());
+});
+
+it("puts chats first, filters conversations, and creates chats independently of the search", async () => {
+  const create = vi.fn().mockResolvedValue(undefined);
+  const select = vi.fn();
+  render(
+    <Sidebar
+      channels={[
+        channel,
+        {
+          ...channel,
+          id: "older",
+          kind: "dm",
+          name: "New conversation 7",
+          updatedAt: "2026-11-01",
+        },
+        { ...channel, id: "newer", kind: "dm", name: "Trip planning", updatedAt: "2026-11-04" },
+      ]}
+      activeChannelId="newer"
+      onSelect={select}
+      onCreate={create}
+      onRename={vi.fn()}
+      onArchive={vi.fn()}
+    />,
+  );
+  const navigation = screen.getByRole("navigation", { name: "Conversations" });
+  const chats = within(navigation).getAllByRole("button", {
+    name: /Trip planning|New conversation/,
+  });
+  expect(chats[0]).toHaveTextContent("Trip planning");
+  expect(screen.getByText("Channels").closest("details")).not.toHaveAttribute("open");
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search conversations" }), {
+    target: { value: "general" },
+  });
+  expect(screen.queryByRole("button", { name: "Trip planning" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /General/ }));
+  expect(select).toHaveBeenCalledWith(channel.id);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith("New conversation 8", "dm"));
 });

@@ -164,7 +164,10 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [view, setView] = useState<"chat" | "settings" | "audit" | "schedules">("chat");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () =>
+      typeof window.matchMedia === "function" && window.matchMedia("(min-width: 701px)").matches,
+  );
   const [settings, setSettings] = useState<SettingsViewData | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -482,11 +485,11 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
 
         let nextChannels = loadedChannels;
         if (nextChannels.length === 0 && nextProfiles.length > 0) {
-          const general = await client.createChannel({
-            name: "General",
-            topic: "Your first Vektor channel",
+          const conversation = await client.createChannel({
+            name: "New conversation 1",
+            kind: "dm",
           });
-          nextChannels = [general];
+          nextChannels = [conversation];
         }
 
         if (bootedRef.current !== token) {
@@ -497,6 +500,7 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
         const stored = readStoredChannel();
         const nextActive =
           nextChannels.find((channel) => channel.id === stored)?.id ??
+          nextChannels.find((channel) => !channel.archivedAt && channel.kind === "dm")?.id ??
           nextChannels.find((channel) => !channel.archivedAt)?.id ??
           nextChannels[0]?.id ??
           null;
@@ -1048,11 +1052,11 @@ export default function App({ onConnection }: { onConnection?: () => void } = {}
             activeChannelId={activeChannelId}
             onSelect={(id) => {
               selectChannel(id);
-              setSidebarOpen(false);
+              if (window.matchMedia?.("(max-width: 700px)").matches) setSidebarOpen(false);
             }}
             onCreate={async (name, kind) => {
               await createChannel(name, kind);
-              setSidebarOpen(false);
+              if (window.matchMedia?.("(max-width: 700px)").matches) setSidebarOpen(false);
             }}
             onRename={renameChannel}
             onArchive={archiveChannel}
